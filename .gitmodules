@@ -1,0 +1,9 @@
+[submodule "jni/Il2CppVersions"]
+	path = jni/Il2CppVersions
+	url = https://github.com/nneonneo/Il2CppVersions
+[submodule "jni/imgui"]
+	path = jni/imgui
+	url = https://github.com/ocornut/imgui
+[submodule "jni/xDL"]
+	path = jni/xDL
+	url = https://github.com/hexhacking/xDL

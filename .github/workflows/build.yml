@@ -1,0 +1,36 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: 29.0.14206865
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "tools platform-tools ndk;${{ env.ANDROID_NDK_VERSION }}"
+
+      - name: Build with ndk-build
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          "$SDK_ROOT/ndk/$ANDROID_NDK_VERSION/ndk-build" -C jni -j"$(nproc)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs
+          path: libs/**/*.so
+          if-no-files-found: error
