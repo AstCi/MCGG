@@ -13,10 +13,10 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "Il2CppVersions/headers/2019.4.22f1.h"
-#include "unity/UnityStructures.hpp"
+#include "structures/Structures.hpp"
 #include "xdl.h"
 #include "dobby/dobby.h"
 
@@ -70,25 +70,32 @@ struct {
     void* liblogic = nullptr;
 } handle;
 
-struct PlayersData {
-    int PlayerID = 0;
-    std::string PlayerName = "";
-    int EnemyID = 0;
-    std::string EnemyName = "";
-};
-
 int GLWidth = 0;
 int GLHeight = 0;
 
 void* UnityLibraryHandle = nullptr;
 
 std::unordered_map<std::string, std::vector<MethodInfo*>> MultiMethodCache;
+std::unordered_map<std::string, FieldInfo*> FieldCache;
 
 namespace Originals {
     EGLBoolean (*EglSwapBuffers)(EGLDisplay dpy, EGLSurface surface);
     Touch (*Input_GetTouch)(int index);
+
+    Il2CppString* (*MCLogicBattleData_ILOGIC_GetSelfChessPlayerName)(
+        void* instance,
+        uint64_t accID
+    );
+    MonoStructures::Dictionary<uint64_t, void*>* (*MCLogicBattleData_ILOGIC_GetAllBattleMgr)(
+        void* instance
+    );
+    uint64_t (*MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID)(
+        void* instance,
+        uint64_t accID
+    );
 }
 
+// Checks whether the current process is the Unity target process.
 bool IsUnityProcess() {
     FILE* fp = fopen("/proc/self/cmdline", "r");
     if (!fp) {
@@ -107,6 +114,7 @@ bool IsUnityProcess() {
     return strstr(buffer, ":UnityKillsMe") != nullptr;
 }
 
+// Returns true when needle appears in haystack without case sensitivity.
 bool StringIncludesCaseInsensitive(
     const std::string& haystack,
     const std::string& needle
@@ -125,6 +133,7 @@ bool StringIncludesCaseInsensitive(
     return it != haystack.end();
 }
 
+// Builds a stable key for caching resolved IL2CPP methods.
 std::string GenerateCacheKey(
     const char* ns,
     const char* className,
@@ -151,6 +160,20 @@ std::string GenerateCacheKey(
     return key;
 }
 
+// Builds a stable key for caching resolved IL2CPP fields.
+std::string GenerateFieldCacheKey(
+    const char* ns,
+    const char* className,
+    const char* fieldName
+) {
+    return (ns ? std::string(ns) : "") +
+        "::" +
+        className +
+        "::" +
+        fieldName;
+}
+
+// Resolves a class name, including nested class paths.
 Il2CppClass* ResolveClassFromName(
     const Il2CppImage* image,
     const char* namespaze,
@@ -193,6 +216,270 @@ Il2CppClass* ResolveClassFromName(
     return current;
 }
 
+// Searches a class and its parents for a field.
+FieldInfo* FindFieldInClassHierarchy(Il2CppClass* klass, const char* fieldName) {
+    if (!klass || !fieldName) {
+        return nullptr;
+    }
+
+    Il2CppClass* currentKlass = klass;
+
+    while (currentKlass) {
+        FieldInfo* field = nullptr;
+
+        if (il2cpp_class_get_field_from_name) {
+            field = il2cpp_class_get_field_from_name(currentKlass, fieldName);
+            if (field) {
+                return field;
+            }
+        }
+
+        if (il2cpp_class_get_fields && il2cpp_field_get_name) {
+            void* iter = nullptr;
+
+            while ((field = il2cpp_class_get_fields(currentKlass, &iter))) {
+                const char* currentFieldName = il2cpp_field_get_name(field);
+
+                if (currentFieldName && strcmp(currentFieldName, fieldName) == 0) {
+                    return field;
+                }
+            }
+        }
+
+        if (!il2cpp_class_get_parent) {
+            break;
+        }
+
+        currentKlass = il2cpp_class_get_parent(currentKlass);
+    }
+
+    return nullptr;
+}
+
+// Resolves and caches IL2CPP field metadata by class and field name.
+FieldInfo* GetFieldInfoFromName(
+    const char* ns,
+    const char* className,
+    const char* fieldName
+) {
+    if (!className || !fieldName || !il2cpp_domain_get || !il2cpp_domain_get_assemblies) {
+        return nullptr;
+    }
+
+    std::string cacheKey = GenerateFieldCacheKey(ns, className, fieldName);
+
+    auto cached = FieldCache.find(cacheKey);
+    if (cached != FieldCache.end()) {
+        return cached->second;
+    }
+
+    size_t size = 0;
+    Il2CppDomain* domain = il2cpp_domain_get();
+
+    if (!domain) {
+        return nullptr;
+    }
+
+    const Il2CppAssembly** assemblies = il2cpp_domain_get_assemblies(domain, &size);
+    if (!assemblies || size == 0) {
+        return nullptr;
+    }
+
+    for (size_t i = 0; i < size; ++i) {
+        const Il2CppImage* image = il2cpp_assembly_get_image(assemblies[i]);
+        if (!image) {
+            continue;
+        }
+
+        Il2CppClass* klass = ResolveClassFromName(image, ns, className);
+        if (!klass) {
+            continue;
+        }
+
+        FieldInfo* field = FindFieldInClassHierarchy(klass, fieldName);
+        if (field) {
+            FieldCache[cacheKey] = field;
+            return field;
+        }
+    }
+
+    FieldCache[cacheKey] = nullptr;
+    return nullptr;
+}
+
+// Reads an instance field by metadata into a caller-provided buffer.
+bool GetFieldRaw(Il2CppObject* instance, FieldInfo* field, void* outValue) {
+    if (!instance || !field || !outValue || !il2cpp_field_get_value) {
+        return false;
+    }
+
+    il2cpp_field_get_value(instance, field, outValue);
+    return true;
+}
+
+// Reads an instance field by name into a caller-provided buffer.
+bool GetFieldRaw(
+    Il2CppObject* instance,
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    void* outValue
+) {
+    return GetFieldRaw(
+        instance,
+        GetFieldInfoFromName(ns, className, fieldName),
+        outValue
+    );
+}
+
+// Reads a static field by metadata into a caller-provided buffer.
+bool GetStaticFieldRaw(FieldInfo* field, void* outValue) {
+    if (!field || !outValue || !il2cpp_field_static_get_value) {
+        return false;
+    }
+
+    il2cpp_field_static_get_value(field, outValue);
+    return true;
+}
+
+// Reads a static field by name into a caller-provided buffer.
+bool GetStaticFieldRaw(
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    void* outValue
+) {
+    return GetStaticFieldRaw(
+        GetFieldInfoFromName(ns, className, fieldName),
+        outValue
+    );
+}
+
+// Writes an instance field by metadata from a caller-provided buffer.
+bool SetFieldRaw(Il2CppObject* instance, FieldInfo* field, const void* value) {
+    if (!instance || !field || !value || !il2cpp_field_set_value) {
+        return false;
+    }
+
+    il2cpp_field_set_value(instance, field, const_cast<void*>(value));
+    return true;
+}
+
+// Writes an instance field by name from a caller-provided buffer.
+bool SetFieldRaw(
+    Il2CppObject* instance,
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    const void* value
+) {
+    return SetFieldRaw(
+        instance,
+        GetFieldInfoFromName(ns, className, fieldName),
+        value
+    );
+}
+
+// Writes a static field by metadata from a caller-provided buffer.
+bool SetStaticFieldRaw(FieldInfo* field, const void* value) {
+    if (!field || !value || !il2cpp_field_static_set_value) {
+        return false;
+    }
+
+    il2cpp_field_static_set_value(field, const_cast<void*>(value));
+    return true;
+}
+
+// Writes a static field by name from a caller-provided buffer.
+bool SetStaticFieldRaw(
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    const void* value
+) {
+    return SetStaticFieldRaw(
+        GetFieldInfoFromName(ns, className, fieldName),
+        value
+    );
+}
+
+// Reads a typed instance field by metadata.
+template <typename T>
+T GetField(Il2CppObject* instance, FieldInfo* field) {
+    T value{};
+    GetFieldRaw(instance, field, &value);
+    return value;
+}
+
+// Reads a typed instance field by name.
+template <typename T>
+T GetField(
+    Il2CppObject* instance,
+    const char* ns,
+    const char* className,
+    const char* fieldName
+) {
+    T value{};
+    GetFieldRaw(instance, ns, className, fieldName, &value);
+    return value;
+}
+
+// Reads a typed static field by metadata.
+template <typename T>
+T GetStaticField(FieldInfo* field) {
+    T value{};
+    GetStaticFieldRaw(field, &value);
+    return value;
+}
+
+// Reads a typed static field by name.
+template <typename T>
+T GetStaticField(
+    const char* ns,
+    const char* className,
+    const char* fieldName
+) {
+    T value{};
+    GetStaticFieldRaw(ns, className, fieldName, &value);
+    return value;
+}
+
+// Writes a typed instance field by metadata.
+template <typename T>
+bool SetField(Il2CppObject* instance, FieldInfo* field, const T& value) {
+    return SetFieldRaw(instance, field, &value);
+}
+
+// Writes a typed instance field by name.
+template <typename T>
+bool SetField(
+    Il2CppObject* instance,
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    const T& value
+) {
+    return SetFieldRaw(instance, ns, className, fieldName, &value);
+}
+
+// Writes a typed static field by metadata.
+template <typename T>
+bool SetStaticField(FieldInfo* field, const T& value) {
+    return SetStaticFieldRaw(field, &value);
+}
+
+// Writes a typed static field by name.
+template <typename T>
+bool SetStaticField(
+    const char* ns,
+    const char* className,
+    const char* fieldName,
+    const T& value
+) {
+    return SetStaticFieldRaw(ns, className, fieldName, &value);
+}
+
+// Finds all matching IL2CPP method metadata entries by class, method, and params.
 std::vector<MethodInfo*> GetAllMethodInfosFromName(
     const char* ns,
     const char* className,
@@ -280,6 +567,7 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
     return foundMethods;
 }
 
+// Converts resolved IL2CPP method metadata entries into callable pointers.
 std::vector<void*> GetAllMethodsFromName(
     const char* ns,
     const char* className,
@@ -301,6 +589,7 @@ std::vector<void*> GetAllMethodsFromName(
 }
 
 namespace Hooks {
+    // Renders the ImGui overlay before the frame is swapped.
     EGLBoolean EglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
         static bool ImGui_Init = false;
 
@@ -342,6 +631,96 @@ namespace Hooks {
             if (ImGui::BeginTabBar("##MainTabBar")) {
                 if (ImGui::BeginTabItem("Info")) {
                     ImGui::SeparatorText("Players");
+
+                    if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr ||
+                        !Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID ||
+                        !Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName) {
+                        ImGui::TextUnformatted("Waiting for battle data");
+                    } else {
+                        MonoStructures::Dictionary<uint64_t, void*>* battleManagers =
+                            Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
+
+                        if (!battleManagers || battleManagers->empty()) {
+                            ImGui::TextUnformatted("No players found");
+                        } else if (ImGui::BeginTable(
+                            "##EnemyPredictorTable",
+                            4,
+                            ImGuiTableFlags_Borders |
+                                ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_SizingStretchProp |
+                                ImGuiTableFlags_ScrollY,
+                            ImVec2(0.0f, 300.0f)
+                        )) {
+                            ImGui::TableSetupColumn("Player");
+                            ImGui::TableSetupColumn("Account");
+                            ImGui::TableSetupColumn("Enemy");
+                            ImGui::TableSetupColumn("Enemy Account");
+                            ImGui::TableHeadersRow();
+
+                            auto entries = battleManagers->toVector();
+
+                            for (const auto& entry : entries) {
+                                uint64_t accountId = entry.first;
+
+                                if (accountId == 0) {
+                                    continue;
+                                }
+
+                                uint64_t enemyId = 0;
+                                enemyId = Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                                    nullptr,
+                                    accountId
+                                );
+
+                                std::string playerName;
+                                std::string enemyName;
+
+                                Il2CppString* managedPlayerName =
+                                    Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(
+                                        nullptr,
+                                        accountId
+                                    );
+
+                                if (managedPlayerName) {
+                                    playerName =
+                                        reinterpret_cast<MonoStructures::String*>(managedPlayerName)->str();
+                                }
+
+                                if (enemyId != 0) {
+                                    Il2CppString* managedEnemyName =
+                                        Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(
+                                            nullptr,
+                                            enemyId
+                                        );
+
+                                    if (managedEnemyName) {
+                                        enemyName =
+                                            reinterpret_cast<MonoStructures::String*>(managedEnemyName)->str();
+                                    }
+                                }
+
+                                ImGui::TableNextRow();
+
+                                ImGui::TableSetColumnIndex(0);
+                                ImGui::TextUnformatted(playerName.empty() ? "Unknown" : playerName.c_str());
+
+                                ImGui::TableSetColumnIndex(1);
+                                ImGui::Text("%llu", static_cast<unsigned long long>(accountId));
+
+                                ImGui::TableSetColumnIndex(2);
+                                ImGui::TextUnformatted(enemyName.empty() ? "Unknown" : enemyName.c_str());
+
+                                ImGui::TableSetColumnIndex(3);
+                                if (enemyId != 0) {
+                                    ImGui::Text("%llu", static_cast<unsigned long long>(enemyId));
+                                } else {
+                                    ImGui::TextUnformatted("-");
+                                }
+                            }
+
+                            ImGui::EndTable();
+                        }
+                    }
                     
                     ImGui::EndTabItem();
                 }
@@ -356,6 +735,7 @@ namespace Hooks {
         return Originals::EglSwapBuffers(dpy, surface);
     }
 
+    // Forwards Unity touch input into ImGui mouse input.
     Touch Input_GetTouch(int index) {
         Touch ret = Originals::Input_GetTouch(index);
 
@@ -391,10 +771,11 @@ namespace Hooks {
     }
 }
 
+// Waits for game libraries, resolves IL2CPP APIs, and installs hooks.
 void SetupThread() {
     while (!handle.libil2cpp) {
         sleep(2);
-        handle.liblogic = xdl_open("libil2cpp", XDL_DEFAULT);
+        handle.libil2cpp = xdl_open("libil2cpp.so", XDL_DEFAULT);
     }
 
     while (!handle.liblogic) {
@@ -438,8 +819,30 @@ void SetupThread() {
             (void**)&Originals::Input_GetTouch
         );
     }
+
+    auto ILOGIC_GetSelfChessPlayerName_Methods =
+        GetAllMethodsFromName("", "MCLogicBattleData", "ILOGIC_GetSelfChessPlayerName", {"UInt64"});
+
+    if (!ILOGIC_GetSelfChessPlayerName_Methods.empty()) {
+        Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName = reinterpret_cast<decltype(Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName)>(ILOGIC_GetSelfChessPlayerName_Methods[0]);
+    }
+
+    auto ILOGIC_GetAllBattleMgr_Methods =
+        GetAllMethodsFromName("", "MCLogicBattleData", "ILOGIC_GetAllBattleMgr", {});
+
+    if (!ILOGIC_GetAllBattleMgr_Methods.empty()) {
+        Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr = reinterpret_cast<decltype(Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr)>(ILOGIC_GetAllBattleMgr_Methods[0]);
+    }
+
+    auto ILOGIC_GetCurrentOpponentAccountID_Methods =
+        GetAllMethodsFromName("", "MCLogicBattleData", "ILOGIC_GetCurrentOpponentAccountID", {"UInt64"});
+
+    if (!ILOGIC_GetCurrentOpponentAccountID_Methods.empty()) {
+        Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID = reinterpret_cast<decltype(Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID)>(ILOGIC_GetCurrentOpponentAccountID_Methods[0]);
+    }
 }
 
+// Starts hook setup when this shared library is loaded in the target process.
 __attribute__((constructor))
 void InitLibrary() {
     if (!IsUnityProcess()) {
@@ -449,6 +852,7 @@ void InitLibrary() {
     std::thread(SetupThread).detach();
 }
 
+// Loads the original Unity library and forwards its JNI_OnLoad.
 jboolean LoadOriginalLibrary(JNIEnv* env, jobject, jstring path) {
     if (!env || !path) {
         return JNI_FALSE;
@@ -497,6 +901,7 @@ jboolean LoadOriginalLibrary(JNIEnv* env, jobject, jstring path) {
     return JNI_TRUE;
 }
 
+// Unloads the original Unity library handle if it is open.
 jboolean UnloadOriginalLibrary(JNIEnv*, jclass) {
     if (UnityLibraryHandle) {
         dlclose(UnityLibraryHandle);
@@ -506,6 +911,7 @@ jboolean UnloadOriginalLibrary(JNIEnv*, jclass) {
     return JNI_TRUE;
 }
 
+// Registers the native loader bridge used by the Unity Java side.
 extern "C" __attribute__((used, visibility("default")))
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* key) {
     if (!vm) {
@@ -515,10 +921,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* key) {
     JNIEnv* env = nullptr;
 
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK || !env) {
-        return JNI_VERSION_1_6;
-    }
-
-    if (key == (void*)1337) {
         return JNI_VERSION_1_6;
     }
 
