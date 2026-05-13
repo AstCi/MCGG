@@ -140,13 +140,24 @@ std::string GenerateCacheKey(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
-    std::string key =
-        (ns ? std::string(ns) : "") +
-        "::" +
-        className +
-        "::" +
-        methodName +
-        "(";
+    std::string key;
+    key.reserve(
+        (ns ? strlen(ns) : 0) +
+        strlen(className) +
+        strlen(methodName) +
+        (paramTypes.size() * 16) +
+        6
+    );
+
+    if (ns) {
+        key += ns;
+    }
+
+    key += "::";
+    key += className;
+    key += "::";
+    key += methodName;
+    key += "(";
 
     for (size_t i = 0; i < paramTypes.size(); ++i) {
         key += paramTypes[i];
@@ -166,11 +177,23 @@ std::string GenerateFieldCacheKey(
     const char* className,
     const char* fieldName
 ) {
-    return (ns ? std::string(ns) : "") +
-        "::" +
-        className +
-        "::" +
-        fieldName;
+    std::string key;
+    key.reserve(
+        (ns ? strlen(ns) : 0) +
+        strlen(className) +
+        strlen(fieldName) +
+        4
+    );
+
+    if (ns) {
+        key += ns;
+    }
+
+    key += "::";
+    key += className;
+    key += "::";
+    key += fieldName;
+    return key;
 }
 
 // Resolves a class name, including nested class paths.
@@ -640,27 +663,97 @@ namespace Hooks {
                         MonoStructures::Dictionary<uint64_t, void*>* battleManagers =
                             Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
 
-                        if (!battleManagers || battleManagers->empty()) {
+                        auto* battleManagerEntries = battleManagers ? battleManagers->entries : nullptr;
+
+                        if (!battleManagers || battleManagers->empty() || !battleManagerEntries) {
                             ImGui::TextUnformatted("No players found");
                         } else if (ImGui::BeginTable(
                             "##EnemyPredictorTable",
-                            4,
+                            2,
                             ImGuiTableFlags_Borders |
                                 ImGuiTableFlags_RowBg |
                                 ImGuiTableFlags_SizingStretchProp |
                                 ImGuiTableFlags_ScrollY,
                             ImVec2(0.0f, 300.0f)
                         )) {
-                            ImGui::TableSetupColumn("Player");
-                            ImGui::TableSetupColumn("Account");
-                            ImGui::TableSetupColumn("Enemy");
-                            ImGui::TableSetupColumn("Enemy Account");
+                            ImGui::TableSetupColumn("Player Name");
+                            ImGui::TableSetupColumn("Enemy Name");
                             ImGui::TableHeadersRow();
 
-                            auto entries = battleManagers->toVector();
+                            static FieldInfo* selfAccountIdField = nullptr;
 
-                            for (const auto& entry : entries) {
-                                uint64_t accountId = entry.first;
+                            if (!selfAccountIdField) {
+                                selfAccountIdField =
+                                    GetFieldInfoFromName("", "MCLogicBattleData", "m_SelfAccID");
+                            }
+
+                            uint64_t selfAccountId = GetStaticField<uint64_t>(selfAccountIdField);
+
+                            struct PlayerInfoRow {
+                                uint64_t accountId;
+                                bool isSelf;
+                                std::string playerName;
+                                std::string sortName;
+                                std::string enemyName;
+                            };
+
+                            auto normalizeName = [](const std::string& value) {
+                                std::string output = value;
+                                std::transform(
+                                    output.begin(),
+                                    output.end(),
+                                    output.begin(),
+                                    [](unsigned char ch) {
+                                        return static_cast<char>(std::tolower(ch));
+                                    }
+                                );
+                                return output;
+                            };
+
+                            std::unordered_map<uint64_t, std::string> playerNameCache;
+                            std::vector<PlayerInfoRow> playerRows;
+
+                            int entryLimit =
+                                std::min(battleManagers->count, battleManagerEntries->getCapacity());
+
+                            playerNameCache.reserve(static_cast<size_t>(battleManagers->GetSize() * 2));
+                            playerRows.reserve(static_cast<size_t>(battleManagers->GetSize()));
+
+                            auto getPlayerName = [&playerNameCache](uint64_t accountId) -> const std::string& {
+                                auto cached = playerNameCache.find(accountId);
+                                if (cached != playerNameCache.end()) {
+                                    return cached->second;
+                                }
+
+                                std::string playerName;
+
+                                if (accountId != 0) {
+                                    Il2CppString* managedPlayerName =
+                                        Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(
+                                            nullptr,
+                                            accountId
+                                        );
+
+                                    if (managedPlayerName) {
+                                        playerName =
+                                            reinterpret_cast<MonoStructures::String*>(managedPlayerName)->str();
+                                    }
+                                }
+
+                                auto inserted = playerNameCache.emplace(accountId, std::move(playerName));
+                                return inserted.first->second;
+                            };
+
+                            const auto* entries = battleManagerEntries->GetData();
+
+                            for (int i = 0; entries && i < entryLimit; ++i) {
+                                const auto& entry = entries[i];
+
+                                if (entry.hashCode < 0) {
+                                    continue;
+                                }
+
+                                uint64_t accountId = entry.key;
 
                                 if (accountId == 0) {
                                     continue;
@@ -672,50 +765,56 @@ namespace Hooks {
                                     accountId
                                 );
 
-                                std::string playerName;
+                                std::string playerName = getPlayerName(accountId);
                                 std::string enemyName;
 
-                                Il2CppString* managedPlayerName =
-                                    Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(
-                                        nullptr,
-                                        accountId
-                                    );
-
-                                if (managedPlayerName) {
-                                    playerName =
-                                        reinterpret_cast<MonoStructures::String*>(managedPlayerName)->str();
-                                }
-
                                 if (enemyId != 0) {
-                                    Il2CppString* managedEnemyName =
-                                        Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(
-                                            nullptr,
-                                            enemyId
-                                        );
-
-                                    if (managedEnemyName) {
-                                        enemyName =
-                                            reinterpret_cast<MonoStructures::String*>(managedEnemyName)->str();
-                                    }
+                                    enemyName = getPlayerName(enemyId);
                                 }
 
+                                playerRows.push_back({
+                                    accountId,
+                                    selfAccountId != 0 && accountId == selfAccountId,
+                                    playerName,
+                                    normalizeName(playerName),
+                                    enemyName
+                                });
+                            }
+
+                            std::sort(
+                                playerRows.begin(),
+                                playerRows.end(),
+                                [](const PlayerInfoRow& left, const PlayerInfoRow& right) {
+                                    if (left.isSelf != right.isSelf) {
+                                        return left.isSelf;
+                                    }
+
+                                    if (left.sortName != right.sortName) {
+                                        return left.sortName < right.sortName;
+                                    }
+
+                                    return left.accountId < right.accountId;
+                                }
+                            );
+
+                            for (const PlayerInfoRow& row : playerRows) {
                                 ImGui::TableNextRow();
 
                                 ImGui::TableSetColumnIndex(0);
-                                ImGui::TextUnformatted(playerName.empty() ? "Unknown" : playerName.c_str());
+                                if (row.isSelf) {
+                                    std::string playerDisplay =
+                                        row.playerName.empty() ? "-" : row.playerName;
+                                    playerDisplay += " (Self)";
+                                    ImGui::TextUnformatted(playerDisplay.c_str());
+                                } else {
+                                    ImGui::TextUnformatted(
+                                        row.playerName.empty() ? "-" : row.playerName.c_str()
+                                    );
+                                }
 
                                 ImGui::TableSetColumnIndex(1);
-                                ImGui::Text("%llu", static_cast<unsigned long long>(accountId));
+                                ImGui::TextUnformatted(row.enemyName.empty() ? "-" : row.enemyName.c_str());
 
-                                ImGui::TableSetColumnIndex(2);
-                                ImGui::TextUnformatted(enemyName.empty() ? "Unknown" : enemyName.c_str());
-
-                                ImGui::TableSetColumnIndex(3);
-                                if (enemyId != 0) {
-                                    ImGui::Text("%llu", static_cast<unsigned long long>(enemyId));
-                                } else {
-                                    ImGui::TextUnformatted("-");
-                                }
                             }
 
                             ImGui::EndTable();
