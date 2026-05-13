@@ -8,7 +8,7 @@ scoped, and easy to verify.
 
 Only contribute changes intended for learning, research, reverse engineering
 practice, and authorized local testing. Do not add game APKs, copyrighted game
-assets, paid content, bypasses, account services, server-side tooling, or
+assets, paid content, bypasses, or
 instructions for abusing online services.
 
 ## Project Setup
