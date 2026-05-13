@@ -209,6 +209,8 @@ namespace Originals {
     bool (*MCLogicBattleData_ILOGIC_IsFightSection)(void* instance);
     bool (*MCLogicBattleData_ILOGIC_IsFightResultSection)(void* instance);
     bool (*MCLogicBattleData_ILOGIC_IsSelfFightOver)(void* instance);
+    bool (*MCLogicBattleData_ILOGIC_GetIsMonsterRound)(void* instance);
+    bool (*MCLogicBattleData_ILOGIC_IsRealPlayerMode)(void* instance);
     int (*MCLogicBattleData_ILOGIC_GetPlayerCoin)(
         void* instance,
         uint64_t accountId
@@ -286,6 +288,12 @@ namespace Originals {
     void* (*MCBehaviorThreeApi_Get)(uint64_t accountId);
     int (*MCBehaviorThreeApi_GetCurrentBattleRoundResult)(void* instance);
     int (*MCBehaviorThreeApi_GetCurrentPhaseType)(void* instance);
+    MonoStructures::Dictionary<uint64_t, uint64_t>* (*LogicInvasionMgr_GetCurPairDict)(
+        void* instance
+    );
+    uint64_t (*LogicInvasionMgr_GetCurPair)(void* instance, uint64_t accountId);
+    bool (*LogicInvasionMgr_IsRealPlayerMode)(void* instance);
+    bool (*LogicInvasionMgr_IsMonsterRound)(void* instance, uint32_t roundIndex);
     void* (*MCEquipUtil_OnGetNewEquip)(
         uint64_t accountId,
         int equipId,
@@ -995,6 +1003,20 @@ void ResolveFeatureBindings() {
         {}
     );
     ResolveOriginal(
+        Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound,
+        "",
+        "MCLogicBattleData",
+        "ILOGIC_GetIsMonsterRound",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode,
+        "",
+        "MCLogicBattleData",
+        "ILOGIC_IsRealPlayerMode",
+        {}
+    );
+    ResolveOriginal(
         Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin,
         "",
         "MCLogicBattleData",
@@ -1179,6 +1201,34 @@ void ResolveFeatureBindings() {
         "MCBehaviorThreeApi",
         "GetCurrentPhaseType",
         {}
+    );
+    ResolveOriginal(
+        Originals::LogicInvasionMgr_GetCurPairDict,
+        "",
+        "LogicInvasionMgr",
+        "GetCurPairDict",
+        {}
+    );
+    ResolveOriginal(
+        Originals::LogicInvasionMgr_GetCurPair,
+        "",
+        "LogicInvasionMgr",
+        "GetCurPair",
+        {"UInt64"}
+    );
+    ResolveOriginal(
+        Originals::LogicInvasionMgr_IsRealPlayerMode,
+        "",
+        "LogicInvasionMgr",
+        "IsRealPlayerMode",
+        {}
+    );
+    ResolveOriginal(
+        Originals::LogicInvasionMgr_IsMonsterRound,
+        "",
+        "LogicInvasionMgr",
+        "IsMonsterRound",
+        {"UInt32"}
     );
     ResolveOriginal(
         Originals::MCEquipUtil_OnGetNewEquip,
@@ -1376,6 +1426,253 @@ uint64_t ParseAccountIdOrDefault(const std::string& value, uint64_t fallback) {
     }
 
     return static_cast<uint64_t>(parsed);
+}
+
+void* GetLogicManagerFromBattleManager(void* battleManager) {
+    static FieldInfo* logicManagerField = nullptr;
+
+    if (!logicManagerField) {
+        logicManagerField = GetFieldInfoFromName("", "MCLogicBattleManager", "m_LogicManager");
+    }
+
+    return battleManager && logicManagerField ?
+        GetField<void*>(reinterpret_cast<Il2CppObject*>(battleManager), logicManagerField) :
+        nullptr;
+}
+
+void* GetLogicInvasionManager() {
+    void* logicManager = GetLogicManagerFromBattleManager(GetSelfLogicBattleManager());
+
+    if (!logicManager) {
+        return nullptr;
+    }
+
+    static FieldInfo* invasionManagerField = nullptr;
+
+    if (!invasionManagerField) {
+        invasionManagerField =
+            GetFieldInfoFromName("", "LogicChessManager", "m_LogicInvasionMgr");
+    }
+
+    return invasionManagerField ?
+        GetField<void*>(reinterpret_cast<Il2CppObject*>(logicManager), invasionManagerField) :
+        nullptr;
+}
+
+uint64_t GetBattleManagerAccountId(void* battleManager) {
+    if (!battleManager) {
+        return 0;
+    }
+
+    if (Originals::MCLogicBattleManager_get_m_uAccountId) {
+        return Originals::MCLogicBattleManager_get_m_uAccountId(battleManager);
+    }
+
+    return 0;
+}
+
+uint64_t GetMirrorOriginAccountId(void* maybeMirrorManager) {
+    if (!maybeMirrorManager) {
+        return 0;
+    }
+
+    void* logicManager = GetLogicManagerFromBattleManager(GetSelfLogicBattleManager());
+
+    if (!logicManager) {
+        return 0;
+    }
+
+    static FieldInfo* mirrorManagerField = nullptr;
+    static FieldInfo* mirrorOriginAccountField = nullptr;
+
+    if (!mirrorManagerField) {
+        mirrorManagerField =
+            GetFieldInfoFromName("", "LogicChessManager", "m_MirrorBattleManager");
+    }
+
+    if (!mirrorOriginAccountField) {
+        mirrorOriginAccountField = GetFieldInfoFromName(
+            "",
+            "MCLogicMirrorBattleManager",
+            "<originBattleManagerAccID>k__BackingField"
+        );
+    }
+
+    void* mirrorManager = mirrorManagerField ?
+        GetField<void*>(reinterpret_cast<Il2CppObject*>(logicManager), mirrorManagerField) :
+        nullptr;
+
+    if (!mirrorManager || mirrorManager != maybeMirrorManager || !mirrorOriginAccountField) {
+        return 0;
+    }
+
+    return GetField<uint64_t>(
+        reinterpret_cast<Il2CppObject*>(mirrorManager),
+        mirrorOriginAccountField
+    );
+}
+
+uint64_t LookupPairInDictionary(
+    MonoStructures::Dictionary<uint64_t, uint64_t>* pairDict,
+    uint64_t accountId
+) {
+    auto* entries = pairDict && pairDict->entries ? pairDict->entries->GetData() : nullptr;
+    int entryLimit = pairDict && pairDict->entries ?
+        std::min(pairDict->count, pairDict->entries->getCapacity()) :
+        0;
+
+    for (int i = 0; entries && i < entryLimit; ++i) {
+        const auto& entry = entries[i];
+
+        if (entry.hashCode >= 0 && entry.key == accountId) {
+            return entry.value;
+        }
+    }
+
+    return 0;
+}
+
+uint64_t GetCurrentPairFromInvasion(void* invasionManager, uint64_t accountId) {
+    if (!invasionManager || accountId == 0) {
+        return 0;
+    }
+
+    if (Originals::LogicInvasionMgr_GetCurPair) {
+        uint64_t pairId = Originals::LogicInvasionMgr_GetCurPair(
+            invasionManager,
+            accountId
+        );
+
+        if (pairId != 0) {
+            return pairId;
+        }
+    }
+
+    MonoStructures::Dictionary<uint64_t, uint64_t>* pairDict = nullptr;
+
+    if (Originals::LogicInvasionMgr_GetCurPairDict) {
+        pairDict = Originals::LogicInvasionMgr_GetCurPairDict(invasionManager);
+    }
+
+    if (!pairDict) {
+        static FieldInfo* pairDictField = nullptr;
+
+        if (!pairDictField) {
+            pairDictField =
+                GetFieldInfoFromName("", "LogicInvasionMgr", "m_CurPairDict");
+        }
+
+        pairDict = pairDictField ?
+            GetField<MonoStructures::Dictionary<uint64_t, uint64_t>*>(
+                reinterpret_cast<Il2CppObject*>(invasionManager),
+                pairDictField
+            ) :
+            nullptr;
+    }
+
+    return LookupPairInDictionary(pairDict, accountId);
+}
+
+uint64_t GetCurrentOpponentFromManager(void* battleManager) {
+    void* currentOpponent = battleManager && Originals::MCLogicBattleManager_GetCurrentOpponent ?
+        Originals::MCLogicBattleManager_GetCurrentOpponent(battleManager) :
+        nullptr;
+
+    uint64_t accountId = GetBattleManagerAccountId(currentOpponent);
+    if (accountId != 0) {
+        return accountId;
+    }
+
+    return GetMirrorOriginAccountId(currentOpponent);
+}
+
+uint64_t GetManagerPointerAccountField(void* battleManager, FieldInfo* field) {
+    void* value = battleManager && field ?
+        GetField<void*>(reinterpret_cast<Il2CppObject*>(battleManager), field) :
+        nullptr;
+
+    uint64_t accountId = GetBattleManagerAccountId(value);
+    if (accountId != 0) {
+        return accountId;
+    }
+
+    return GetMirrorOriginAccountId(value);
+}
+
+bool IsCurrentMonsterRound(void* invasionManager) {
+    if (Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound &&
+        Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound(nullptr)) {
+        return true;
+    }
+
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+        Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
+        0;
+
+    return invasionManager &&
+        round > 0 &&
+        Originals::LogicInvasionMgr_IsMonsterRound &&
+        Originals::LogicInvasionMgr_IsMonsterRound(invasionManager, round);
+}
+
+bool IsRealPlayerPairingMode(void* invasionManager) {
+    if (Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode) {
+        return Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode(nullptr);
+    }
+
+    if (invasionManager && Originals::LogicInvasionMgr_IsRealPlayerMode) {
+        return Originals::LogicInvasionMgr_IsRealPlayerMode(invasionManager);
+    }
+
+    return true;
+}
+
+uint64_t PredictRoundRobinOpponent(
+    std::vector<uint64_t> aliveAccounts,
+    uint64_t selfAccountId,
+    uint32_t round
+) {
+    if (aliveAccounts.size() < 2 || selfAccountId == 0) {
+        return 0;
+    }
+
+    std::sort(aliveAccounts.begin(), aliveAccounts.end());
+
+    if (std::find(aliveAccounts.begin(), aliveAccounts.end(), selfAccountId) ==
+        aliveAccounts.end()) {
+        return 0;
+    }
+
+    if (aliveAccounts.size() % 2 == 1) {
+        aliveAccounts.push_back(0);
+    }
+
+    int playerCount = static_cast<int>(aliveAccounts.size());
+    int rounds = std::max(playerCount - 1, 1);
+    int rotation = round > 0 ? static_cast<int>((round - 1) % rounds) : 0;
+
+    for (int r = 0; r < rotation; ++r) {
+        uint64_t moved = aliveAccounts.back();
+        for (int i = playerCount - 1; i > 1; --i) {
+            aliveAccounts[i] = aliveAccounts[i - 1];
+        }
+        aliveAccounts[1] = moved;
+    }
+
+    for (int i = 0; i < playerCount / 2; ++i) {
+        uint64_t left = aliveAccounts[i];
+        uint64_t right = aliveAccounts[playerCount - 1 - i];
+
+        if (left == selfAccountId) {
+            return right;
+        }
+
+        if (right == selfAccountId) {
+            return left;
+        }
+    }
+
+    return 0;
 }
 
 void RefreshManagedReferences(bool force = false) {
@@ -2756,6 +3053,367 @@ void DrawTestBehaviorRows(uint64_t targetAccountId) {
     ImGui::EndTable();
 }
 
+struct PredictionPlayer {
+    uint64_t accountId = 0;
+    void* manager = nullptr;
+    std::string name;
+    int hp = 0;
+    bool alive = false;
+};
+
+struct OpponentPredictionRow {
+    uint64_t accountId = 0;
+    std::string name;
+    int percent = 0;
+    double weight = 0.0;
+    bool alive = false;
+};
+
+std::vector<PredictionPlayer> CollectPredictionPlayers(uint64_t selfAccountId) {
+    std::vector<PredictionPlayer> players;
+
+    if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        return players;
+    }
+
+    auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
+    auto* entries = battleManagers && battleManagers->entries ?
+        battleManagers->entries->GetData() :
+        nullptr;
+    int entryLimit = battleManagers && battleManagers->entries ?
+        std::min(battleManagers->count, battleManagers->entries->getCapacity()) :
+        0;
+
+    players.reserve(static_cast<size_t>(std::max(entryLimit, 0)));
+
+    for (int i = 0; entries && i < entryLimit; ++i) {
+        const auto& entry = entries[i];
+
+        if (entry.hashCode < 0 || entry.key == 0 || entry.key == selfAccountId) {
+            continue;
+        }
+
+        int hp = Originals::MCLogicBattleData_ILOGIC_GetPlayerHP ?
+            Originals::MCLogicBattleData_ILOGIC_GetPlayerHP(nullptr, entry.key) :
+            1;
+
+        players.push_back({
+            entry.key,
+            entry.value,
+            GetBattlePlayerName(entry.key),
+            hp,
+            hp > 0
+        });
+    }
+
+    return players;
+}
+
+uint64_t FindExactPredictedOpponent(
+    uint64_t selfAccountId,
+    void* selfManager,
+    void* invasionManager,
+    const std::vector<PredictionPlayer>& players
+) {
+    if (selfAccountId == 0) {
+        return 0;
+    }
+
+    uint64_t exactOpponent = 0;
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID) {
+        exactOpponent = Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+            nullptr,
+            selfAccountId
+        );
+    }
+
+    if (exactOpponent == 0) {
+        exactOpponent = GetCurrentPairFromInvasion(invasionManager, selfAccountId);
+    }
+
+    if (exactOpponent == 0) {
+        exactOpponent = GetCurrentOpponentFromManager(selfManager);
+    }
+
+    if (exactOpponent != 0 && exactOpponent != selfAccountId) {
+        return exactOpponent;
+    }
+
+    for (const PredictionPlayer& player : players) {
+        if (!player.alive) {
+            continue;
+        }
+
+        uint64_t playerPair =
+            GetCurrentPairFromInvasion(invasionManager, player.accountId);
+
+        if (playerPair == selfAccountId) {
+            return player.accountId;
+        }
+
+        if (Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID) {
+            uint64_t playerOpponent =
+                Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                    nullptr,
+                    player.accountId
+                );
+
+            if (playerOpponent == selfAccountId) {
+                return player.accountId;
+            }
+        }
+    }
+
+    return 0;
+}
+
+std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccountId) {
+    std::vector<OpponentPredictionRow> rows;
+    std::vector<PredictionPlayer> players = CollectPredictionPlayers(selfAccountId);
+
+    rows.reserve(players.size());
+
+    for (const PredictionPlayer& player : players) {
+        rows.push_back({
+            player.accountId,
+            player.name.empty() ? FormatUInt64(player.accountId) : player.name,
+            0,
+            0.0,
+            player.alive
+        });
+    }
+
+    if (selfAccountId == 0 || rows.empty()) {
+        return rows;
+    }
+
+    void* selfManager = GetBattleManagerByAccountId(selfAccountId);
+    void* invasionManager = GetLogicInvasionManager();
+    bool monsterRound = IsCurrentMonsterRound(invasionManager);
+    bool realPlayerMode = IsRealPlayerPairingMode(invasionManager);
+    uint64_t exactOpponent = FindExactPredictedOpponent(
+        selfAccountId,
+        selfManager,
+        invasionManager,
+        players
+    );
+
+    if (monsterRound) {
+        return rows;
+    }
+
+    if (exactOpponent != 0) {
+        for (OpponentPredictionRow& row : rows) {
+            if (row.accountId == exactOpponent && row.alive) {
+                row.percent = 100;
+                row.weight = 100.0;
+                break;
+            }
+        }
+
+        return rows;
+    }
+
+    if (!realPlayerMode) {
+        return rows;
+    }
+
+    std::vector<uint64_t> aliveAccounts;
+    aliveAccounts.push_back(selfAccountId);
+
+    for (const PredictionPlayer& player : players) {
+        if (player.alive) {
+            aliveAccounts.push_back(player.accountId);
+        }
+    }
+
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+        Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
+        0;
+    uint64_t roundRobinOpponent = PredictRoundRobinOpponent(
+        aliveAccounts,
+        selfAccountId,
+        round
+    );
+
+    if (roundRobinOpponent == 0 && aliveAccounts.size() % 2 == 1) {
+        return rows;
+    }
+
+    static FieldInfo* lastRoundEnemyField = nullptr;
+    static FieldInfo* prevRealPlayerEnemyField = nullptr;
+
+    if (!lastRoundEnemyField) {
+        lastRoundEnemyField =
+            GetFieldInfoFromName("", "MCLogicBattleManager", "lastRoundEnemy");
+    }
+
+    if (!prevRealPlayerEnemyField) {
+        prevRealPlayerEnemyField =
+            GetFieldInfoFromName("", "MCLogicBattleManager", "prevRealPlayerEnemy");
+    }
+
+    uint64_t lastRoundEnemyId =
+        GetManagerPointerAccountField(selfManager, lastRoundEnemyField);
+    uint64_t prevRealPlayerEnemyId =
+        GetManagerPointerAccountField(selfManager, prevRealPlayerEnemyField);
+
+    for (OpponentPredictionRow& row : rows) {
+        const auto playerIt = std::find_if(
+            players.begin(),
+            players.end(),
+            [&row](const PredictionPlayer& player) {
+                return player.accountId == row.accountId;
+            }
+        );
+
+        if (playerIt == players.end() || !playerIt->alive) {
+            row.weight = 0.0;
+            continue;
+        }
+
+        double weight = 100.0;
+        uint64_t candidatePair = GetCurrentPairFromInvasion(
+            invasionManager,
+            playerIt->accountId
+        );
+
+        if (candidatePair == selfAccountId) {
+            weight *= 5.0;
+        } else if (candidatePair != 0) {
+            weight *= 0.03;
+        }
+
+        uint64_t candidateCurrentOpponent =
+            Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID ?
+                Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                    nullptr,
+                    playerIt->accountId
+                ) :
+                0;
+
+        if (candidateCurrentOpponent == selfAccountId) {
+            weight *= 4.0;
+        } else if (candidateCurrentOpponent != 0) {
+            weight *= 0.08;
+        }
+
+        if (row.accountId == lastRoundEnemyId) {
+            weight *= 0.08;
+        }
+
+        if (row.accountId == prevRealPlayerEnemyId) {
+            weight *= 0.35;
+        }
+
+        uint64_t candidateLastEnemy =
+            GetManagerPointerAccountField(playerIt->manager, lastRoundEnemyField);
+        uint64_t candidatePrevEnemy =
+            GetManagerPointerAccountField(playerIt->manager, prevRealPlayerEnemyField);
+
+        if (candidateLastEnemy == selfAccountId) {
+            weight *= 0.20;
+        }
+
+        if (candidatePrevEnemy == selfAccountId) {
+            weight *= 0.55;
+        }
+
+        if (roundRobinOpponent != 0) {
+            weight *= row.accountId == roundRobinOpponent ? 4.5 : 0.55;
+        }
+
+        row.weight = std::max(weight, 0.0);
+    }
+
+    double totalWeight = 0.0;
+    int strongestIndex = -1;
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        totalWeight += rows[i].weight;
+
+        if (strongestIndex < 0 || rows[i].weight > rows[static_cast<size_t>(strongestIndex)].weight) {
+            strongestIndex = static_cast<int>(i);
+        }
+    }
+
+    if (totalWeight <= 0.0) {
+        return rows;
+    }
+
+    int totalPercent = 0;
+
+    for (OpponentPredictionRow& row : rows) {
+        row.percent = static_cast<int>((row.weight * 100.0 / totalWeight) + 0.5);
+        row.percent = std::clamp(row.percent, 0, 100);
+        totalPercent += row.percent;
+    }
+
+    if (strongestIndex >= 0 && totalPercent != 100) {
+        OpponentPredictionRow& strongest = rows[static_cast<size_t>(strongestIndex)];
+        strongest.percent = std::clamp(strongest.percent + (100 - totalPercent), 0, 100);
+    }
+
+    return rows;
+}
+
+void DrawOpponentPredictionTable(uint64_t selfAccountId) {
+    if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        DrawWaitingText("Waiting for battle manager list");
+        return;
+    }
+
+    std::vector<OpponentPredictionRow> rows = BuildOpponentPredictions(selfAccountId);
+
+    std::sort(
+        rows.begin(),
+        rows.end(),
+        [](const OpponentPredictionRow& left, const OpponentPredictionRow& right) {
+            if (left.percent != right.percent) {
+                return left.percent > right.percent;
+            }
+
+            if (left.name != right.name) {
+                return left.name < right.name;
+            }
+
+            return left.accountId < right.accountId;
+        }
+    );
+
+    if (rows.empty()) {
+        ImGui::TextUnformatted("No players found");
+        return;
+    }
+
+    if (!ImGui::BeginTable(
+        "##OpponentPredictionTable",
+        2,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_ScrollY,
+        ImVec2(0.0f, 230.0f)
+    )) {
+        return;
+    }
+
+    ImGui::TableSetupColumn("Player");
+    ImGui::TableSetupColumn("Will fight", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+    ImGui::TableHeadersRow();
+
+    for (const OpponentPredictionRow& row : rows) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(row.name.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%d%%", row.percent);
+    }
+
+    ImGui::EndTable();
+}
+
 void DrawTestAllManagersTable() {
     if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         DrawWaitingText("Waiting for battle manager list");
@@ -2907,6 +3565,9 @@ void DrawTestTab() {
             ) :
             0;
     void* targetManager = GetBattleManagerByAccountId(targetAccountId);
+
+    ImGui::SeparatorText("Fight Prediction");
+    DrawOpponentPredictionTable(selfAccountId);
 
     ImGui::SeparatorText("Bindings");
     DrawTestBindingRows();
