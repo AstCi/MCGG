@@ -178,7 +178,16 @@ namespace UiState {
     std::string ArenaItemFilter;
     std::string ArenaGogoCardFilter;
     std::string TestAccountId;
+    int ThemeIndex = 1;
+    int FontIndex = 1;
     bool ShopShowSelectedOnly = false;
+}
+
+namespace AppearanceState {
+    ImFont* DefaultFont = nullptr;
+    ImFont* RobotoFont = nullptr;
+    int AppliedThemeIndex = -1;
+    int AppliedFontIndex = -1;
 }
 
 // Original function pointers resolved from IL2CPP metadata or hook trampolines.
@@ -2525,6 +2534,171 @@ std::string FormatInt(int value) {
     return std::to_string(value);
 }
 
+ImVec4 HexColor(unsigned int rgb, float alpha = 1.0f) {
+    return ImVec4(
+        static_cast<float>((rgb >> 16) & 0xFF) / 255.0f,
+        static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
+        static_cast<float>(rgb & 0xFF) / 255.0f,
+        alpha
+    );
+}
+
+void ApplyCatppuccinMochaTheme() {
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4* colors = style.Colors;
+
+    const ImVec4 rosewater = HexColor(0xF5E0DC);
+    const ImVec4 flamingo = HexColor(0xF2CDCD);
+    const ImVec4 mauve = HexColor(0xCBA6F7);
+    const ImVec4 red = HexColor(0xF38BA8);
+    const ImVec4 peach = HexColor(0xFAB387);
+    const ImVec4 yellow = HexColor(0xF9E2AF);
+    const ImVec4 green = HexColor(0xA6E3A1);
+    const ImVec4 teal = HexColor(0x94E2D5);
+    const ImVec4 blue = HexColor(0x89B4FA);
+    const ImVec4 lavender = HexColor(0xB4BEFE);
+    const ImVec4 text = HexColor(0xCDD6F4);
+    const ImVec4 subtext = HexColor(0xBAC2DE);
+    const ImVec4 overlay = HexColor(0x6C7086);
+    const ImVec4 surface0 = HexColor(0x313244);
+    const ImVec4 surface1 = HexColor(0x45475A);
+    const ImVec4 surface2 = HexColor(0x585B70);
+    const ImVec4 base = HexColor(0x1E1E2E);
+    const ImVec4 mantle = HexColor(0x181825);
+    const ImVec4 crust = HexColor(0x11111B);
+
+    colors[ImGuiCol_Text] = text;
+    colors[ImGuiCol_TextDisabled] = overlay;
+    colors[ImGuiCol_WindowBg] = base;
+    colors[ImGuiCol_ChildBg] = HexColor(0x000000, 0.0f);
+    colors[ImGuiCol_PopupBg] = mantle;
+    colors[ImGuiCol_Border] = surface1;
+    colors[ImGuiCol_BorderShadow] = HexColor(0x000000, 0.0f);
+    colors[ImGuiCol_FrameBg] = surface0;
+    colors[ImGuiCol_FrameBgHovered] = surface1;
+    colors[ImGuiCol_FrameBgActive] = surface2;
+    colors[ImGuiCol_TitleBg] = crust;
+    colors[ImGuiCol_TitleBgActive] = mantle;
+    colors[ImGuiCol_TitleBgCollapsed] = crust;
+    colors[ImGuiCol_MenuBarBg] = mantle;
+    colors[ImGuiCol_ScrollbarBg] = mantle;
+    colors[ImGuiCol_ScrollbarGrab] = surface1;
+    colors[ImGuiCol_ScrollbarGrabHovered] = surface2;
+    colors[ImGuiCol_ScrollbarGrabActive] = overlay;
+    colors[ImGuiCol_CheckMark] = green;
+    colors[ImGuiCol_SliderGrab] = blue;
+    colors[ImGuiCol_SliderGrabActive] = lavender;
+    colors[ImGuiCol_Button] = surface0;
+    colors[ImGuiCol_ButtonHovered] = surface1;
+    colors[ImGuiCol_ButtonActive] = surface2;
+    colors[ImGuiCol_Header] = HexColor(0x89B4FA, 0.24f);
+    colors[ImGuiCol_HeaderHovered] = HexColor(0x89B4FA, 0.36f);
+    colors[ImGuiCol_HeaderActive] = HexColor(0x89B4FA, 0.48f);
+    colors[ImGuiCol_Separator] = surface1;
+    colors[ImGuiCol_SeparatorHovered] = blue;
+    colors[ImGuiCol_SeparatorActive] = lavender;
+    colors[ImGuiCol_ResizeGrip] = HexColor(0x89B4FA, 0.25f);
+    colors[ImGuiCol_ResizeGripHovered] = HexColor(0x89B4FA, 0.55f);
+    colors[ImGuiCol_ResizeGripActive] = lavender;
+    colors[ImGuiCol_Tab] = mantle;
+    colors[ImGuiCol_TabHovered] = surface1;
+    colors[ImGuiCol_TabActive] = surface0;
+    colors[ImGuiCol_TabUnfocused] = crust;
+    colors[ImGuiCol_TabUnfocusedActive] = mantle;
+    colors[ImGuiCol_PlotLines] = blue;
+    colors[ImGuiCol_PlotLinesHovered] = teal;
+    colors[ImGuiCol_PlotHistogram] = peach;
+    colors[ImGuiCol_PlotHistogramHovered] = yellow;
+    colors[ImGuiCol_TableHeaderBg] = mantle;
+    colors[ImGuiCol_TableBorderStrong] = surface2;
+    colors[ImGuiCol_TableBorderLight] = surface0;
+    colors[ImGuiCol_TableRowBg] = HexColor(0x000000, 0.0f);
+    colors[ImGuiCol_TableRowBgAlt] = HexColor(0x313244, 0.35f);
+    colors[ImGuiCol_TextSelectedBg] = HexColor(0x89B4FA, 0.35f);
+    colors[ImGuiCol_DragDropTarget] = yellow;
+    colors[ImGuiCol_NavHighlight] = blue;
+    colors[ImGuiCol_NavWindowingHighlight] = rosewater;
+    colors[ImGuiCol_NavWindowingDimBg] = HexColor(0x11111B, 0.65f);
+    colors[ImGuiCol_ModalWindowDimBg] = HexColor(0x11111B, 0.65f);
+
+    style.WindowRounding = 7.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 5.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.GrabRounding = 5.0f;
+    style.TabRounding = 5.0f;
+    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+
+    (void)flamingo;
+    (void)mauve;
+    (void)red;
+    (void)subtext;
+}
+
+void ApplySelectedTheme() {
+    if (AppearanceState::AppliedThemeIndex == UiState::ThemeIndex) {
+        return;
+    }
+
+    if (UiState::ThemeIndex == 1) {
+        ApplyCatppuccinMochaTheme();
+    } else {
+        ImGui::StyleColorsDark();
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+        style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+    }
+
+    AppearanceState::AppliedThemeIndex = UiState::ThemeIndex;
+}
+
+void ApplySelectedFont() {
+    ImGuiIO& io = ImGui::GetIO();
+    ImFont* selectedFont =
+        UiState::FontIndex == 1 && AppearanceState::RobotoFont ?
+            AppearanceState::RobotoFont :
+            AppearanceState::DefaultFont;
+
+    if (!selectedFont) {
+        return;
+    }
+
+    io.FontDefault = selectedFont;
+    AppearanceState::AppliedFontIndex = UiState::FontIndex;
+}
+
+void LoadAppearanceFonts() {
+    ImGuiIO& io = ImGui::GetIO();
+    AppearanceState::DefaultFont = io.Fonts->AddFontDefault();
+
+    const char* robotoPaths[] = {
+        "jni/imgui/misc/fonts/Roboto-Medium.ttf",
+        "./jni/imgui/misc/fonts/Roboto-Medium.ttf"
+    };
+
+    for (const char* path : robotoPaths) {
+        if (access(path, R_OK) != 0) {
+            continue;
+        }
+
+        AppearanceState::RobotoFont = io.Fonts->AddFontFromFileTTF(path, 18.0f);
+        if (AppearanceState::RobotoFont) {
+            break;
+        }
+    }
+
+    if (!AppearanceState::RobotoFont) {
+        UiState::FontIndex = 0;
+    }
+}
+
+void ApplyAppearance() {
+    ApplySelectedTheme();
+    ApplySelectedFont();
+}
+
 std::string FormatFieldBool(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -2727,6 +2901,42 @@ void DrawCombatTab() {
         "Invisible Scout - hide spectate switching",
         &FeatureState::CombatInvisibleScout
     );
+}
+
+void DrawAppearanceTab() {
+    ImGui::SeparatorText("Theme");
+
+    const char* themes[] = {
+        "ImGui Dark",
+        "Catppuccin Mocha"
+    };
+
+    ImGui::SetNextItemWidth(220.0f);
+    if (ImGui::Combo("Theme", &UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
+        UiState::ThemeIndex = std::clamp(UiState::ThemeIndex, 0, IM_ARRAYSIZE(themes) - 1);
+        ApplyAppearance();
+    }
+
+    ImGui::SeparatorText("Font");
+
+    const char* fonts[] = {
+        "Default",
+        "Roboto"
+    };
+
+    ImGui::SetNextItemWidth(220.0f);
+    if (ImGui::Combo("Font", &UiState::FontIndex, fonts, IM_ARRAYSIZE(fonts))) {
+        if (UiState::FontIndex == 1 && !AppearanceState::RobotoFont) {
+            UiState::FontIndex = 0;
+        }
+
+        UiState::FontIndex = std::clamp(UiState::FontIndex, 0, IM_ARRAYSIZE(fonts) - 1);
+        ApplyAppearance();
+    }
+
+    if (!AppearanceState::RobotoFont) {
+        DrawWaitingText("Waiting for Roboto font");
+    }
 }
 
 std::string GetBattlePlayerName(uint64_t accountId) {
@@ -4061,6 +4271,7 @@ namespace Hooks {
     // Renders the ImGui overlay before the frame is swapped.
     EGLBoolean EglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
         static bool ImGui_Init = false;
+        static bool Il2Cpp_Init = false;
 
         eglQuerySurface(dpy, surface, EGL_WIDTH, &GLWidth);
         eglQuerySurface(dpy, surface, EGL_HEIGHT, &GLHeight);
@@ -4075,22 +4286,29 @@ namespace Hooks {
             io.ConfigWindowsMoveFromTitleBarOnly = true;
             io.ConfigWindowsResizeFromEdges = false;
 
+            LoadAppearanceFonts();
             ImGui_ImplOpenGL3_Init("#version 300 es");
-            ImGui::StyleColorsDark();
+            ApplyAppearance();
 
             ImGuiStyle& style = ImGui::GetStyle();
             style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
             style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
             style.ScaleAllSizes(1.0f);
 
-            il2cpp_thread_attach(il2cpp_domain_get());
-
             ImGui_Init = true;
+        }
+
+        if (!Il2Cpp_Init) {
+            if (il2cpp_domain_get && il2cpp_thread_attach) {
+                il2cpp_thread_attach(il2cpp_domain_get());
+                Il2Cpp_Init = true;
+            }
         }
 
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2((float)GLWidth, (float)GLHeight);
 
+        ApplyAppearance();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui::NewFrame();
 
@@ -4278,6 +4496,11 @@ namespace Hooks {
 
                 if (ImGui::BeginTabItem("Combat")) {
                     DrawCombatTab();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("Appearance")) {
+                    DrawAppearanceTab();
                     ImGui::EndTabItem();
                 }
 
