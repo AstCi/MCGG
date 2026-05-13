@@ -133,6 +133,7 @@ namespace RuntimeConfig {
     constexpr int ShopRepeatBuyCooldownMs = 1500;
     constexpr int ShopRefreshCooldownMs = 650;
     constexpr int ShopWorthCheckMs = 500;
+    constexpr int RecommendLineupCheckMs = 500;
     constexpr int MaxShopTargetChecks = 256;
     constexpr int MaxManagedDictionaryEntries = 8192;
     constexpr int MaxManagedListItems = 2048;
@@ -150,11 +151,14 @@ namespace FeatureState {
 
     bool ShopBuyFreeHero = false;
     bool ShopBuySelectedHero = false;
+    bool ShopBuyRecommendLineup = false;
     bool ShopRefresh = false;
     bool ShopStopRefreshAtFreeHero = false;
     bool ShopStopRefreshAtSelectedHero = false;
+    bool ShopStopRefreshAtRecommendLineup = false;
     bool ShopKeepGold = false;
     int ShopKeepGoldAt = 20;
+    int ShopRecommendTargetCount = 9;
     std::unordered_map<int, HeroAutomationState> ShopSelectedHeroes;
 
     int ArenaHeroStar = 1;
@@ -189,7 +193,9 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastShopBuyAttempt{};
     std::chrono::steady_clock::time_point LastShopRefreshAttempt{};
     std::chrono::steady_clock::time_point LastShopWorthCheck{};
+    std::chrono::steady_clock::time_point LastRecommendLineupCheck{};
     bool CachedShopHasWorthwhileTarget = false;
+    int CachedRecommendLineupHeroId = 0;
     uint64_t LastShopBuyAccountId = 0;
     int LastShopBuySlot = -1;
     int LastShopBuyHeroId = 0;
@@ -318,6 +324,7 @@ namespace Originals {
         void* instance,
         int heroId
     );
+    int (*MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup)(void* instance);
 
     void* (*MCComp_GetGamer)(uint64_t accountId);
     void* (*MCComp_GetGoGoCardComp)(uint64_t accountId);
@@ -366,6 +373,7 @@ namespace Originals {
     void (*UIPanelBattleHeroShop_KeyBoardShopSelect)(void* instance, int slot);
     void (*UIPanelBattleHeroShop_BuyHero)(void* instance, uint8_t slot, bool refreshSameHero);
     void (*UIPanelBattleHeroShop_HeroItemList_OnSelectHero)(void* instance, uint8_t slot);
+    bool (*MCBattleBridge_IsHeroInRecommendLineup)(void* instance, int heroId);
     void (*MCChessPlayerData_UpdateCoin)(void* instance, int addValue, int changeType);
 
     void (*MCShowSpectatorComp_SetSpectate)(void* instance, uint64_t accountId);
@@ -1358,6 +1366,13 @@ void ResolveFeatureBindings() {
         "ILogic_HeroCountInPool",
         {"Int32"}
     );
+    ResolveOriginal(
+        Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup,
+        "",
+        "MCLogicBattleData",
+        "ILOGIC_GetHeroByRecommendLineup",
+        {}
+    );
     ResolveOriginal(Originals::MCComp_GetGamer, "", "MCComp", "GetGamer", {"UInt64"});
     ResolveOriginal(
         Originals::MCComp_GetGoGoCardComp,
@@ -1536,6 +1551,13 @@ void ResolveFeatureBindings() {
         "UIPanelBattleHeroShop_HeroItemList",
         "OnSelectHero",
         {"Byte"}
+    );
+    ResolveOriginal(
+        Originals::MCBattleBridge_IsHeroInRecommendLineup,
+        "",
+        "MCBattleBridge",
+        "IsHeroInRecommendLineup",
+        {"Int32"}
     );
     ResolveOriginal(
         Originals::MCChessPlayerData_UpdateCoin,
@@ -2101,7 +2123,9 @@ void ClearTableDataCache() {
     FeatureState::LastShopBuyAttempt = {};
     FeatureState::LastShopRefreshAttempt = {};
     FeatureState::LastShopWorthCheck = {};
+    FeatureState::LastRecommendLineupCheck = {};
     FeatureState::CachedShopHasWorthwhileTarget = false;
+    FeatureState::CachedRecommendLineupHeroId = 0;
     FeatureState::LastShopBuyAccountId = 0;
     FeatureState::LastShopBuySlot = -1;
     FeatureState::LastShopBuyHeroId = 0;
@@ -2335,6 +2359,76 @@ void EnsureTableDataLoaded() {
         !FeatureState::Cards.empty();
 }
 
+bool IsPlausibleHeroId(int heroId) {
+    return heroId > 0 && heroId <= 10000000;
+}
+
+bool IsKnownHeroIdOrTablePending(int heroId) {
+    if (!IsPlausibleHeroId(heroId)) {
+        return false;
+    }
+
+    if (!FeatureState::TableDataLoaded || FeatureState::Heroes.empty()) {
+        return true;
+    }
+
+    return FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
+}
+
+int GetRecommendLineupTargetCount() {
+    return std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
+}
+
+int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
+    if (!Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup) {
+        FeatureState::CachedRecommendLineupHeroId = 0;
+        return 0;
+    }
+
+    if (!IntervalElapsed(
+            FeatureState::LastRecommendLineupCheck,
+            RuntimeConfig::RecommendLineupCheckMs,
+            now
+        )) {
+        return FeatureState::CachedRecommendLineupHeroId;
+    }
+
+    int heroId = Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup(nullptr);
+    FeatureState::CachedRecommendLineupHeroId =
+        IsKnownHeroIdOrTablePending(heroId) ? heroId : 0;
+    return FeatureState::CachedRecommendLineupHeroId;
+}
+
+bool IsRecommendLineupHero(int heroId, int recommendHeroId) {
+    if (!IsPlausibleHeroId(heroId)) {
+        return false;
+    }
+
+    if (recommendHeroId > 0 && heroId == recommendHeroId) {
+        return true;
+    }
+
+    return FeatureState::BattleBridge &&
+        Originals::MCBattleBridge_IsHeroInRecommendLineup &&
+        Originals::MCBattleBridge_IsHeroInRecommendLineup(
+            FeatureState::BattleBridge,
+            heroId
+        );
+}
+
+std::string FormatHeroLabel(int heroId) {
+    if (!IsPlausibleHeroId(heroId)) {
+        return "Waiting";
+    }
+
+    auto it = FeatureState::Heroes.find(heroId);
+    if (it != FeatureState::Heroes.end() && !it->second.name.empty()) {
+        return it->second.name + " (#" + std::to_string(heroId) + ")";
+    }
+
+    return "Hero #" + std::to_string(heroId);
+}
+
 bool SelectShopSlot(int slot) {
     if (slot < 0 || slot >= 5) {
         return false;
@@ -2371,8 +2465,7 @@ bool IsValidShopItemData(const MCLogicHeroShopItemData& shopData, int slot) {
         return false;
     }
 
-    if (shopData.m_iHeroId <= 0 ||
-        shopData.m_iHeroId > 10000000 ||
+    if (!IsPlausibleHeroId(shopData.m_iHeroId) ||
         shopData.m_iPrice < 0 ||
         shopData.m_iPrice > 999999 ||
         shopData.m_iStarLv < 0 ||
@@ -2484,16 +2577,13 @@ bool HasWorthwhileShopTarget(
     FeatureState::CachedShopHasWorthwhileTarget = false;
 
     int checkedTargets = 0;
-    for (const auto& item : FeatureState::ShopSelectedHeroes) {
-        int heroId = item.first;
-        const HeroAutomationState& state = item.second;
-
-        if (!state.selected || heroId <= 0) {
-            continue;
+    auto targetStillNeedsCopies = [&](int heroId, int targetCount) {
+        if (!IsKnownHeroIdOrTablePending(heroId) || targetCount <= 0) {
+            return false;
         }
 
         if (++checkedTargets > RuntimeConfig::MaxShopTargetChecks) {
-            break;
+            return false;
         }
 
         int ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
@@ -2505,9 +2595,31 @@ bool HasWorthwhileShopTarget(
             Originals::MCLogicBattleData_ILogic_HeroCountInPool(nullptr, heroId) :
             1;
 
-        if (ownCount < std::clamp(state.targetCount, 1, 99) && poolCount > 0) {
+        return ownCount >= 0 &&
+            ownCount < std::clamp(targetCount, 1, 99) &&
+            poolCount > 0;
+    };
+
+    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+        int heroId = item.first;
+        const HeroAutomationState& state = item.second;
+
+        if (!state.selected) {
+            continue;
+        }
+
+        if (targetStillNeedsCopies(heroId, state.targetCount)) {
             FeatureState::CachedShopHasWorthwhileTarget = true;
             break;
+        }
+    }
+
+    if (!FeatureState::CachedShopHasWorthwhileTarget &&
+        FeatureState::ShopBuyRecommendLineup) {
+        int recommendHeroId = GetRecommendLineupHeroId(now);
+
+        if (targetStillNeedsCopies(recommendHeroId, GetRecommendLineupTargetCount())) {
+            FeatureState::CachedShopHasWorthwhileTarget = true;
         }
     }
 
@@ -2711,9 +2823,11 @@ void RunShopAutomation(uint64_t selfAccountId) {
     bool anyShopAutomation =
         FeatureState::ShopBuyFreeHero ||
         FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopBuyRecommendLineup ||
         FeatureState::ShopRefresh ||
         FeatureState::ShopStopRefreshAtFreeHero ||
-        FeatureState::ShopStopRefreshAtSelectedHero;
+        FeatureState::ShopStopRefreshAtSelectedHero ||
+        FeatureState::ShopStopRefreshAtRecommendLineup;
 
     if (!anyShopAutomation || selfAccountId == 0) {
         return;
@@ -2736,6 +2850,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     bool needRefreshShop = true;
     int cachedCoin = -1;
+    bool useRecommendLineup =
+        FeatureState::ShopBuyRecommendLineup ||
+        FeatureState::ShopStopRefreshAtRecommendLineup;
+    int recommendHeroId = useRecommendLineup ? GetRecommendLineupHeroId(now) : 0;
 
     auto getCoin = [&]() {
         if (cachedCoin < 0) {
@@ -2776,15 +2894,22 @@ void RunShopAutomation(uint64_t selfAccountId) {
         bool isSelected =
             selectedIt != FeatureState::ShopSelectedHeroes.end() &&
             selectedIt->second.selected;
-        int targetCount =
-            selectedIt != FeatureState::ShopSelectedHeroes.end() ?
+        bool isRecommend =
+            useRecommendLineup &&
+            IsRecommendLineupHero(heroId, recommendHeroId);
+        int selectedTargetCount =
+            isSelected ?
                 std::clamp(selectedIt->second.targetCount, 1, 99) :
                 0;
+        int recommendTargetCount = isRecommend ? GetRecommendLineupTargetCount() : 0;
         int ownCount = -1;
         bool needsOwnCount =
-            isSelected &&
-            (FeatureState::ShopStopRefreshAtSelectedHero ||
-             FeatureState::ShopBuySelectedHero);
+            (isSelected &&
+             (FeatureState::ShopStopRefreshAtSelectedHero ||
+              FeatureState::ShopBuySelectedHero)) ||
+            (isRecommend &&
+             (FeatureState::ShopStopRefreshAtRecommendLineup ||
+              FeatureState::ShopBuyRecommendLineup));
 
         if (needsOwnCount && Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
             ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
@@ -2797,7 +2922,14 @@ void RunShopAutomation(uint64_t selfAccountId) {
         if (FeatureState::ShopStopRefreshAtSelectedHero &&
             isSelected &&
             ownCount >= 0 &&
-            ownCount < targetCount) {
+            ownCount < selectedTargetCount) {
+            needRefreshShop = false;
+        }
+
+        if (FeatureState::ShopStopRefreshAtRecommendLineup &&
+            isRecommend &&
+            ownCount >= 0 &&
+            ownCount < recommendTargetCount) {
             needRefreshShop = false;
         }
 
@@ -2816,7 +2948,19 @@ void RunShopAutomation(uint64_t selfAccountId) {
             }
         }
 
-        if (!FeatureState::ShopBuySelectedHero || !isSelected) {
+        bool canBuySelected = FeatureState::ShopBuySelectedHero && isSelected;
+        bool canBuyRecommend = FeatureState::ShopBuyRecommendLineup && isRecommend;
+
+        if (!canBuySelected && !canBuyRecommend) {
+            continue;
+        }
+
+        int targetCount = std::max(
+            canBuySelected ? selectedTargetCount : 0,
+            canBuyRecommend ? recommendTargetCount : 0
+        );
+
+        if (targetCount <= 0 || ownCount < 0) {
             continue;
         }
 
@@ -3139,6 +3283,8 @@ void ClampConfigurableState() {
     UiState::ItemSpacingY = std::clamp(UiState::ItemSpacingY, 0.0f, 32.0f);
     UiState::IndentSpacing = std::clamp(UiState::IndentSpacing, 0.0f, 48.0f);
     FeatureState::ShopKeepGoldAt = std::clamp(FeatureState::ShopKeepGoldAt, 0, 999999);
+    FeatureState::ShopRecommendTargetCount =
+        std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
     FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar, 1, 3);
     FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice, 0, 99);
 
@@ -3181,11 +3327,14 @@ void ResetFeatureSettings() {
     FeatureState::CombatInvisibleScout = false;
     FeatureState::ShopBuyFreeHero = false;
     FeatureState::ShopBuySelectedHero = false;
+    FeatureState::ShopBuyRecommendLineup = false;
     FeatureState::ShopRefresh = false;
     FeatureState::ShopStopRefreshAtFreeHero = false;
     FeatureState::ShopStopRefreshAtSelectedHero = false;
+    FeatureState::ShopStopRefreshAtRecommendLineup = false;
     FeatureState::ShopKeepGold = false;
     FeatureState::ShopKeepGoldAt = 20;
+    FeatureState::ShopRecommendTargetCount = 9;
     FeatureState::ShopSelectedHeroes.clear();
     FeatureState::ArenaHeroStar = 1;
     FeatureState::ArenaItemEnhanced = false;
@@ -3328,7 +3477,7 @@ void LoadShopSelectedHeroes(const std::string& value) {
             9
         );
 
-        if (heroId > 0) {
+        if (IsPlausibleHeroId(heroId)) {
             FeatureState::ShopSelectedHeroes[heroId] = {
                 true,
                 std::max(targetCount, 1)
@@ -3390,11 +3539,14 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     else if (key == "combatInvisibleScout") FeatureState::CombatInvisibleScout = ParseConfigBool(value, FeatureState::CombatInvisibleScout);
     else if (key == "shopBuyFreeHero") FeatureState::ShopBuyFreeHero = ParseConfigBool(value, FeatureState::ShopBuyFreeHero);
     else if (key == "shopBuySelectedHero") FeatureState::ShopBuySelectedHero = ParseConfigBool(value, FeatureState::ShopBuySelectedHero);
+    else if (key == "shopBuyRecommendLineup") FeatureState::ShopBuyRecommendLineup = ParseConfigBool(value, FeatureState::ShopBuyRecommendLineup);
     else if (key == "shopRefresh") FeatureState::ShopRefresh = ParseConfigBool(value, FeatureState::ShopRefresh);
     else if (key == "shopStopRefreshAtFreeHero") FeatureState::ShopStopRefreshAtFreeHero = ParseConfigBool(value, FeatureState::ShopStopRefreshAtFreeHero);
     else if (key == "shopStopRefreshAtSelectedHero") FeatureState::ShopStopRefreshAtSelectedHero = ParseConfigBool(value, FeatureState::ShopStopRefreshAtSelectedHero);
+    else if (key == "shopStopRefreshAtRecommendLineup") FeatureState::ShopStopRefreshAtRecommendLineup = ParseConfigBool(value, FeatureState::ShopStopRefreshAtRecommendLineup);
     else if (key == "shopKeepGold") FeatureState::ShopKeepGold = ParseConfigBool(value, FeatureState::ShopKeepGold);
     else if (key == "shopKeepGoldAt") FeatureState::ShopKeepGoldAt = ParseConfigInt(value, FeatureState::ShopKeepGoldAt);
+    else if (key == "shopRecommendTargetCount") FeatureState::ShopRecommendTargetCount = ParseConfigInt(value, FeatureState::ShopRecommendTargetCount);
     else if (key == "shopSelectedHeroes") LoadShopSelectedHeroes(value);
     else if (key == "arenaHeroStar") FeatureState::ArenaHeroStar = ParseConfigInt(value, FeatureState::ArenaHeroStar);
     else if (key == "arenaItemEnhanced") FeatureState::ArenaItemEnhanced = ParseConfigBool(value, FeatureState::ArenaItemEnhanced);
@@ -3457,11 +3609,18 @@ bool SaveConfigToFile(const std::string& path) {
     WriteConfigBool(file, "combatInvisibleScout", FeatureState::CombatInvisibleScout);
     WriteConfigBool(file, "shopBuyFreeHero", FeatureState::ShopBuyFreeHero);
     WriteConfigBool(file, "shopBuySelectedHero", FeatureState::ShopBuySelectedHero);
+    WriteConfigBool(file, "shopBuyRecommendLineup", FeatureState::ShopBuyRecommendLineup);
     WriteConfigBool(file, "shopRefresh", FeatureState::ShopRefresh);
     WriteConfigBool(file, "shopStopRefreshAtFreeHero", FeatureState::ShopStopRefreshAtFreeHero);
     WriteConfigBool(file, "shopStopRefreshAtSelectedHero", FeatureState::ShopStopRefreshAtSelectedHero);
+    WriteConfigBool(
+        file,
+        "shopStopRefreshAtRecommendLineup",
+        FeatureState::ShopStopRefreshAtRecommendLineup
+    );
     WriteConfigBool(file, "shopKeepGold", FeatureState::ShopKeepGold);
     WriteConfigInt(file, "shopKeepGoldAt", FeatureState::ShopKeepGoldAt);
+    WriteConfigInt(file, "shopRecommendTargetCount", GetRecommendLineupTargetCount());
     WriteConfigString(file, "shopSelectedHeroes", FormatShopSelectedHeroes());
     WriteConfigInt(file, "arenaHeroStar", FeatureState::ArenaHeroStar);
     WriteConfigBool(file, "arenaItemEnhanced", FeatureState::ArenaItemEnhanced);
@@ -3738,6 +3897,7 @@ std::string FormatFieldUInt64(void* instance, FieldInfo* field) {
 bool HasShopSelectBinding();
 bool HasShopAutomationBindings();
 bool HasShopRefreshBindings();
+bool HasShopRecommendLineupBindings();
 bool HasArenaHeroBindings();
 bool HasArenaItemBindings();
 bool HasArenaGogoCardBindings();
@@ -3911,6 +4071,7 @@ void DrawRuntimeStatus() {
         DrawStatusRow("GGC", Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound);
         DrawStatusRow("Shop select", HasShopSelectBinding());
         DrawStatusRow("Shop automation", HasShopAutomationBindings());
+        DrawStatusRow("Recommend lineup", HasShopRecommendLineupBindings());
         DrawStatusRow("Shop refresh panel", HasShopRefreshBindings());
         DrawStatusRow("Arena heroes", HasArenaHeroBindings());
         DrawStatusRow("Arena items", HasArenaItemBindings());
@@ -3950,16 +4111,35 @@ bool HasShopSelectBinding() {
 }
 
 bool HasShopAutomationBindings() {
+    bool needsHeroCount =
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopStopRefreshAtSelectedHero ||
+        FeatureState::ShopBuyRecommendLineup ||
+        FeatureState::ShopStopRefreshAtRecommendLineup ||
+        FeatureState::ShopRefresh;
+    bool needsRecommendLineup =
+        FeatureState::ShopBuyRecommendLineup ||
+        FeatureState::ShopStopRefreshAtRecommendLineup;
+
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetShopItemData &&
         Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin &&
-        HasShopSelectBinding();
+        HasShopSelectBinding() &&
+        (!needsHeroCount || Originals::MCLogicBattleData_ILogic_HeroOwnCount) &&
+        (!needsRecommendLineup || HasShopRecommendLineupBindings());
 }
 
 bool HasShopRefreshBindings() {
     return IsIl2CppRuntimeReady() &&
         FeatureState::HeroShopPanel &&
         Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop;
+}
+
+bool HasShopRecommendLineupBindings() {
+    return IsIl2CppRuntimeReady() &&
+        (Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup ||
+         (FeatureState::BattleBridge &&
+          Originals::MCBattleBridge_IsHeroInRecommendLineup));
 }
 
 bool HasArenaHeroBindings() {
@@ -4370,6 +4550,11 @@ void DrawTestBindingRows() {
     DrawStatusRow("Self fight over", Originals::MCLogicBattleData_ILOGIC_IsSelfFightOver);
     DrawStatusRow("Player HP", Originals::MCLogicBattleData_ILOGIC_GetPlayerHP);
     DrawStatusRow("Result history", Originals::MCLogicBattleData_ILOGIC_GetBattleResultHistory);
+    DrawStatusRow(
+        "Recommend hero",
+        Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup
+    );
+    DrawStatusRow("Recommend membership", Originals::MCBattleBridge_IsHeroInRecommendLineup);
     DrawStatusRow("Battle manager flags", Originals::MCLogicBattleManager_get_m_bDefendFaild);
     DrawStatusRow("Alive fighter counts", Originals::MCLogicBattleManager_GetAliveFighter);
     DrawStatusRow("Behavior API", Originals::MCBehaviorThreeApi_Get);
@@ -5183,8 +5368,38 @@ void DrawShopTab() {
                 DrawWaitingText("Waiting for shop refresh panel");
             }
 
+            if ((FeatureState::ShopBuyRecommendLineup ||
+                 FeatureState::ShopStopRefreshAtRecommendLineup) &&
+                !HasShopRecommendLineupBindings()) {
+                DrawWaitingText("Waiting for recommendation lineup bindings");
+            }
+
             ImGui::Checkbox("Auto-buy free heroes", &FeatureState::ShopBuyFreeHero);
             ImGui::Checkbox("Auto-buy selected targets", &FeatureState::ShopBuySelectedHero);
+            ImGui::Separator();
+            ImGui::SeparatorText("Recommendation Lineup");
+            ImGui::Checkbox(
+                "Auto-buy recommendation heroes",
+                &FeatureState::ShopBuyRecommendLineup
+            );
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::InputInt(
+                "Recommendation target count",
+                &FeatureState::ShopRecommendTargetCount
+            );
+            FeatureState::ShopRecommendTargetCount = GetRecommendLineupTargetCount();
+
+            if (HasShopRecommendLineupBindings()) {
+                int recommendHeroId =
+                    GetRecommendLineupHeroId(std::chrono::steady_clock::now());
+                ImGui::Text(
+                    "Current recommendation: %s",
+                    FormatHeroLabel(recommendHeroId).c_str()
+                );
+            } else {
+                ImGui::TextUnformatted("Current recommendation: Waiting");
+            }
+
             ImGui::Separator();
             ImGui::Checkbox("Auto-refresh shop", &FeatureState::ShopRefresh);
             ImGui::Checkbox(
@@ -5194,6 +5409,10 @@ void DrawShopTab() {
             ImGui::Checkbox(
                 "Pause refresh when selected target appears",
                 &FeatureState::ShopStopRefreshAtSelectedHero
+            );
+            ImGui::Checkbox(
+                "Pause refresh when recommendation hero appears",
+                &FeatureState::ShopStopRefreshAtRecommendLineup
             );
             ImGui::Separator();
             ImGui::Checkbox("Keep gold reserve", &FeatureState::ShopKeepGold);
