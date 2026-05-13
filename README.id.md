@@ -192,7 +192,6 @@ ndk-build --version
 
 ```text
 .github/workflows/            Workflow build GitHub Actions
-references/                   Local reference artifacts untuk validasi signature
 jni/Android.mk                Konfigurasi build native module
 jni/Application.mk            Pengaturan ABI, platform, STL, dan NDK
 jni/Main.cpp                  Hook setup, helper IL2CPP, runtime state, dan overlay ImGui
