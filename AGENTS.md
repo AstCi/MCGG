@@ -62,6 +62,12 @@ resolution can happen before the target metadata is ready, so missing entries
 must be allowed to resolve later. Preserve the separate 100 ms shop and arena
 feature ticks unless the task explicitly changes timing.
 
+Shop automation is intentionally single-threaded and throttled on the frame
+tick. Preserve the existing buy, repeat-buy, refresh, target-worth, and
+Recommendation Lineup cooldowns. Do not add mutexes, atomics, unbounded scans,
+or immediate retry loops to the shop hot path unless the task explicitly changes
+that design.
+
 ## Testing Guidelines
 
 There is no dedicated unit test framework in this repository. For native changes,
@@ -74,6 +80,10 @@ ndk-build -C jni
 When changing IL2CPP calls, verify signatures against `dump/dump.cs` and confirm
 the target remains `arm64-v8a`, Unity `2019.4.22f1`, and native C++ mode
 `c++26`.
+
+When changing Recommendation Lineup automation, verify the related
+`MCLogicBattleData` and `MCBattleBridge` signatures against `dump/dump.cs` and
+keep the overlay in a `Waiting for ...` state while runtime data is unavailable.
 
 For documentation-only changes, at minimum inspect the rendered Markdown diff.
 For native or mixed changes, also run:
@@ -100,8 +110,11 @@ Do not revert unrelated local changes in the working tree.
 
 Current user-facing feature areas are Info, Combat, Appearance, Settings, Shop,
 Arena, and Test. If a feature binding is missing at runtime, the overlay should
-show a `Waiting for ...` state rather than failing silently. Use the Runtime
-Status and Test tabs when checking binding readiness, managed references, round
-state, battle manager fields, behavior API state, or opponent prediction logic.
+show a `Waiting for ...` state rather than failing silently. Shop currently
+includes free-hero buying, selected target buying, Recommendation Lineup buying,
+auto-refresh pause conditions, keep-gold reserve, and target counts. Use the
+Runtime Status and Test tabs when checking binding readiness, managed
+references, round state, battle manager fields, behavior API state,
+Recommendation Lineup state, or opponent prediction logic.
 Settings config should default to the running game package directory as
 `/data/data/<game-package>/files/mcgg_config.ini`.

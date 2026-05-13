@@ -63,7 +63,7 @@ The default supported target is:
 
 ### Info
 
-- Runtime status table for battle data, GGC, shop, arena, test, spectator, synergy, and placement bindings.
+- Runtime status table for battle data, GGC, shop, Recommendation Lineup, arena, test, spectator, synergy, and placement bindings.
 - Player and next-enemy table sorted with the local player first.
 - GGC quality readout for round 7 and round 13.
 - Overlay status indicators for delayed or unavailable bindings.
@@ -89,9 +89,12 @@ The default supported target is:
 
 - Auto-buy free heroes.
 - Auto-buy selected hero targets.
-- Auto-refresh shop with stop conditions for free heroes or selected target heroes.
+- Auto-buy heroes from the active Recommendation Lineup.
+- Auto-refresh shop with stop conditions for free heroes, selected targets, or Recommendation Lineup heroes.
 - Gold reserve threshold for safer automation.
 - Hero target table with configurable target counts.
+- Recommendation Lineup target count for advanced shop automation.
+- Buy and refresh throttles that reduce repeated actions during continuous automation.
 
 ### Arena
 
@@ -287,7 +290,7 @@ At load time and during frame presentation, `jni/Main.cpp` performs the followin
 14. Retries missing method and field bindings periodically.
 15. Refreshes managed references such as battle bridge and shop panel state.
 16. Reloads hero, equipment, and GogoCard table caches when entering a match.
-17. Runs shop automation and arena effects on separate 100 ms ticks.
+17. Runs throttled shop automation and arena effects on separate 100 ms ticks.
 
 This order is intentional. Rendering and input are initialized separately from feature binding so the overlay can report partial runtime readiness while delayed IL2CPP objects continue to resolve.
 
@@ -301,6 +304,7 @@ This order is intentional. Rendering and input are initialized separately from f
 - Keep Settings persistence scoped to project-owned config files rather than enabling ImGui `.ini` persistence.
 - Preserve retryable binding behavior. Do not permanently cache unresolved methods or fields as missing.
 - Preserve separate 100 ms ticks for shop automation and arena effects unless timing changes are part of the task.
+- Preserve shop automation throttles for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
 - Keep the default ABI as `arm64-v8a`.
 - Keep Unity compatibility aligned with `2019.4.22f1`.
 - Keep the native language mode aligned with `c++26` unless the build configuration changes intentionally.
@@ -370,6 +374,19 @@ When adding or updating a binding, verify:
 - Static versus instance access.
 - Whether the object exists only inside a match or specific UI state.
 
+### Shop automation does not buy or refresh
+
+Shop automation intentionally waits when required bindings, managed references, coin data, target counts, or Recommendation Lineup data are not ready. Check the Runtime Status and Shop tabs for `Waiting for ...` messages.
+
+When investigating continuous-use issues, verify:
+
+- Shop select and shop automation bindings are ready.
+- Shop refresh panel is ready when auto-refresh is enabled.
+- Recommendation Lineup bindings are ready when recommendation buying or pause-refresh is enabled.
+- Keep-gold reserve is not blocking the action.
+- Target counts have not already been reached.
+- Buy and refresh cooldowns are not still active.
+
 ### Roboto font is unavailable
 
 The Appearance tab falls back to the default ImGui font when `jni/imgui/misc/fonts/Roboto-Medium.ttf` cannot be read. This does not block the overlay or native build.
@@ -394,6 +411,7 @@ Check the GitHub Actions log for:
 - Unity compatibility is pinned to `2019.4.22f1`.
 - Runtime bindings may change when the target application updates.
 - Feature availability depends on current runtime state and loaded managed objects.
+- Recommendation Lineup automation depends on the active match lineup data exposed by the runtime.
 - The optional Roboto font depends on the checked-out ImGui submodule contents.
 - Termux is not maintained as an official build target.
 - Documentation intentionally excludes runtime deployment and abuse-oriented instructions.

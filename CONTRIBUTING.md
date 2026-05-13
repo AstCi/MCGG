@@ -45,6 +45,12 @@ git lfs pull
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, battle manager fields, behavior API state, and
   opponent prediction behavior after feature changes.
+- For Shop changes, preserve the existing throttled automation model: buy,
+  repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
+  bounded and retryable.
+- Recommendation Lineup automation depends on both `MCLogicBattleData` and
+  `MCBattleBridge` bindings. Verify signatures against `dump/dump.cs` before
+  changing related method pointers.
 - Keep Settings save/load behavior scoped to the project config file under the
   running game package directory, normally
   `/data/data/<game-package>/files/mcgg_config.ini`.
@@ -53,7 +59,9 @@ git lfs pull
   or `jni/xDL/` unless the change explicitly requires it.
 
 Current user-facing overlay areas are Info, Combat, Appearance, Settings, Shop,
-Arena, and Test. New user-facing controls should report delayed runtime
+Arena, and Test. Shop currently includes free-hero buying, manual target buying,
+Recommendation Lineup buying, auto-refresh pause conditions, keep-gold reserve,
+and target counts. New user-facing controls should report delayed runtime
 dependencies with a clear `Waiting for ...` state where practical.
 
 ## Coding Style

@@ -63,7 +63,7 @@ Target default yang didukung:
 
 ### Info
 
-- Tabel runtime status untuk binding battle data, GGC, shop, arena, test, spectator, synergy, dan placement.
+- Tabel runtime status untuk binding battle data, GGC, shop, Recommendation Lineup, arena, test, spectator, synergy, dan placement.
 - Tabel player dan next-enemy yang diurutkan dengan player lokal di posisi pertama.
 - Readout kualitas GGC untuk round 7 dan round 13.
 - Indikator status overlay untuk binding yang terlambat atau belum tersedia.
@@ -89,9 +89,12 @@ Target default yang didukung:
 
 - Auto-buy hero gratis.
 - Auto-buy target hero yang dipilih.
-- Auto-refresh shop dengan stop condition untuk hero gratis atau target hero yang dipilih.
+- Auto-buy hero dari Recommendation Lineup yang aktif.
+- Auto-refresh shop dengan stop condition untuk hero gratis, target yang dipilih, atau hero Recommendation Lineup.
 - Gold reserve threshold untuk automasi yang lebih aman.
 - Tabel target hero dengan jumlah target yang dapat dikonfigurasi.
+- Jumlah target Recommendation Lineup untuk automation shop tingkat lanjut.
+- Throttle buy dan refresh untuk mengurangi aksi berulang saat automation berjalan terus-menerus.
 
 ### Arena
 
@@ -287,7 +290,7 @@ Pada saat load dan selama frame presentation, `jni/Main.cpp` menjalankan urutan 
 14. Mencoba ulang binding method dan field yang belum tersedia secara periodik.
 15. Me-refresh managed reference seperti battle bridge dan shop panel state.
 16. Me-reload cache tabel hero, equipment, dan GogoCard saat masuk match.
-17. Menjalankan shop automation dan arena effects pada tick terpisah 100 ms.
+17. Menjalankan shop automation yang di-throttle dan arena effects pada tick terpisah 100 ms.
 
 Urutan ini disengaja. Rendering dan input diinisialisasi terpisah dari feature binding agar overlay dapat melaporkan readiness runtime secara parsial sementara object IL2CPP yang terlambat tetap dicoba resolve.
 
@@ -301,6 +304,7 @@ Urutan ini disengaja. Rendering dan input diinisialisasi terpisah dari feature b
 - Pertahankan persistence Settings tetap memakai file config milik proyek, bukan mengaktifkan persistence `.ini` ImGui.
 - Pertahankan retryable binding behavior. Jangan menyimpan method atau field unresolved secara permanen sebagai missing.
 - Pertahankan tick terpisah 100 ms untuk shop automation dan arena effects, kecuali perubahan timing memang bagian dari task.
+- Pertahankan throttle shop automation untuk buy, repeat-buy, refresh, target-worth, dan pengecekan Recommendation Lineup.
 - Pertahankan default ABI sebagai `arm64-v8a`.
 - Jaga kompatibilitas Unity tetap selaras dengan `2019.4.22f1`.
 - Jaga mode bahasa native tetap selaras dengan `c++26` kecuali konfigurasi build memang diubah secara sengaja.
@@ -370,6 +374,19 @@ Saat menambahkan atau memperbarui binding, verifikasi:
 - Akses static atau instance.
 - Apakah object hanya tersedia di dalam match atau UI state tertentu.
 
+### Shop automation tidak membeli atau refresh
+
+Shop automation sengaja menunggu saat binding, managed reference, data coin, target count, atau data Recommendation Lineup yang dibutuhkan belum siap. Cek tab Runtime Status dan Shop untuk pesan `Waiting for ...`.
+
+Saat menelusuri masalah penggunaan terus-menerus, verifikasi:
+
+- Binding shop select dan shop automation sudah siap.
+- Panel shop refresh sudah siap saat auto-refresh aktif.
+- Binding Recommendation Lineup sudah siap saat recommendation buying atau pause-refresh aktif.
+- Keep-gold reserve tidak sedang memblokir aksi.
+- Target count belum tercapai.
+- Cooldown buy dan refresh sudah selesai.
+
 ### Font Roboto tidak tersedia
 
 Tab Appearance akan fallback ke font default ImGui saat `jni/imgui/misc/fonts/Roboto-Medium.ttf` tidak dapat dibaca. Ini tidak memblokir overlay atau native build.
@@ -394,6 +411,7 @@ Periksa log GitHub Actions untuk:
 - Kompatibilitas Unity dipatok ke `2019.4.22f1`.
 - Runtime binding dapat berubah ketika target application update.
 - Ketersediaan fitur bergantung pada runtime state dan managed object yang sedang loaded.
+- Automation Recommendation Lineup bergantung pada data lineup match aktif yang diekspos runtime.
 - Font Roboto opsional bergantung pada isi submodule ImGui yang ter-checkout.
 - Termux tidak dikelola sebagai target build resmi.
 - Dokumentasi sengaja tidak menyertakan instruksi deployment runtime dan instruksi yang berorientasi penyalahgunaan.
