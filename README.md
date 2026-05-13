@@ -1,5 +1,7 @@
 # MCGG
 
+[English](README.md) · [Bahasa Indonesia](README.id.md)
+
 [![CI Build](https://github.com/Yan-0001/MCGG/actions/workflows/build.yml/badge.svg)](https://github.com/Yan-0001/MCGG/actions/workflows/build.yml)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Android](https://img.shields.io/badge/Android-native-brightgreen)
