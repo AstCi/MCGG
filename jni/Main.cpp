@@ -129,6 +129,11 @@ namespace RuntimeConfig {
     constexpr int TableRetryMs = 2000;
     constexpr int ArenaTickMs = 100;
     constexpr int ShopTickMs = 100;
+    constexpr int ShopActionCooldownMs = 350;
+    constexpr int ShopRepeatBuyCooldownMs = 1500;
+    constexpr int ShopRefreshCooldownMs = 650;
+    constexpr int ShopWorthCheckMs = 500;
+    constexpr int MaxShopTargetChecks = 256;
     constexpr int MaxManagedDictionaryEntries = 8192;
     constexpr int MaxManagedListItems = 2048;
     constexpr int MaxManagedStringChars = 4096;
@@ -180,6 +185,17 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastArenaTick{};
     std::chrono::steady_clock::time_point LastShopTick{};
     std::chrono::steady_clock::time_point LastTableLoadAttempt{};
+    std::chrono::steady_clock::time_point LastShopAction{};
+    std::chrono::steady_clock::time_point LastShopBuyAttempt{};
+    std::chrono::steady_clock::time_point LastShopRefreshAttempt{};
+    std::chrono::steady_clock::time_point LastShopWorthCheck{};
+    bool CachedShopHasWorthwhileTarget = false;
+    uint64_t LastShopBuyAccountId = 0;
+    int LastShopBuySlot = -1;
+    int LastShopBuyHeroId = 0;
+    int LastShopBuyPrice = 0;
+    int LastShopBuyOwnCount = -1;
+    bool LastShopBuyWasFree = false;
 }
 
 namespace UiState {
@@ -975,6 +991,15 @@ bool IntervalElapsed(
     }
 
     return false;
+}
+
+bool CooldownElapsed(
+    const std::chrono::steady_clock::time_point& lastRun,
+    int intervalMs,
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()
+) {
+    return lastRun.time_since_epoch().count() == 0 ||
+        now - lastRun >= std::chrono::milliseconds(intervalMs);
 }
 
 bool HasIl2CppDomainApi() {
@@ -2072,6 +2097,17 @@ void ClearTableDataCache() {
     FeatureState::Equips.clear();
     FeatureState::Cards.clear();
     FeatureState::LastTableLoadAttempt = {};
+    FeatureState::LastShopAction = {};
+    FeatureState::LastShopBuyAttempt = {};
+    FeatureState::LastShopRefreshAttempt = {};
+    FeatureState::LastShopWorthCheck = {};
+    FeatureState::CachedShopHasWorthwhileTarget = false;
+    FeatureState::LastShopBuyAccountId = 0;
+    FeatureState::LastShopBuySlot = -1;
+    FeatureState::LastShopBuyHeroId = 0;
+    FeatureState::LastShopBuyPrice = 0;
+    FeatureState::LastShopBuyOwnCount = -1;
+    FeatureState::LastShopBuyWasFree = false;
 }
 
 bool IsBattleActive(uint64_t selfAccountId) {
@@ -2300,6 +2336,10 @@ void EnsureTableDataLoaded() {
 }
 
 bool SelectShopSlot(int slot) {
+    if (slot < 0 || slot >= 5) {
+        return false;
+    }
+
     if (FeatureState::HeroShopItemList &&
         Originals::UIPanelBattleHeroShop_HeroItemList_OnSelectHero) {
         Originals::UIPanelBattleHeroShop_HeroItemList_OnSelectHero(
@@ -2324,6 +2364,154 @@ bool SelectShopSlot(int slot) {
     }
 
     return false;
+}
+
+bool IsValidShopItemData(const MCLogicHeroShopItemData& shopData, int slot) {
+    if (slot < 0 || slot >= 5) {
+        return false;
+    }
+
+    if (shopData.m_iHeroId <= 0 ||
+        shopData.m_iHeroId > 10000000 ||
+        shopData.m_iPrice < 0 ||
+        shopData.m_iPrice > 999999 ||
+        shopData.m_iStarLv < 0 ||
+        shopData.m_iStarLv > 3) {
+        return false;
+    }
+
+    return true;
+}
+
+bool IsSameShopBuyAttempt(
+    uint64_t accountId,
+    int slot,
+    const MCLogicHeroShopItemData& shopData,
+    int ownCount,
+    bool isFreeBuy
+) {
+    return FeatureState::LastShopBuyAccountId == accountId &&
+        FeatureState::LastShopBuySlot == slot &&
+        FeatureState::LastShopBuyHeroId == shopData.m_iHeroId &&
+        FeatureState::LastShopBuyPrice == shopData.m_iPrice &&
+        FeatureState::LastShopBuyOwnCount == ownCount &&
+        FeatureState::LastShopBuyWasFree == isFreeBuy;
+}
+
+bool CanAttemptShopBuy(
+    uint64_t accountId,
+    int slot,
+    const MCLogicHeroShopItemData& shopData,
+    int ownCount,
+    bool isFreeBuy,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!CooldownElapsed(
+            FeatureState::LastShopAction,
+            RuntimeConfig::ShopActionCooldownMs,
+            now
+        )) {
+        return false;
+    }
+
+    if (IsSameShopBuyAttempt(accountId, slot, shopData, ownCount, isFreeBuy) &&
+        !CooldownElapsed(
+            FeatureState::LastShopBuyAttempt,
+            RuntimeConfig::ShopRepeatBuyCooldownMs,
+            now
+        )) {
+        return false;
+    }
+
+    return true;
+}
+
+void MarkShopBuyAttempt(
+    uint64_t accountId,
+    int slot,
+    const MCLogicHeroShopItemData& shopData,
+    int ownCount,
+    bool isFreeBuy,
+    std::chrono::steady_clock::time_point now
+) {
+    FeatureState::LastShopAction = now;
+    FeatureState::LastShopBuyAttempt = now;
+    FeatureState::LastShopBuyAccountId = accountId;
+    FeatureState::LastShopBuySlot = slot;
+    FeatureState::LastShopBuyHeroId = shopData.m_iHeroId;
+    FeatureState::LastShopBuyPrice = shopData.m_iPrice;
+    FeatureState::LastShopBuyOwnCount = ownCount;
+    FeatureState::LastShopBuyWasFree = isFreeBuy;
+    FeatureState::LastShopWorthCheck = {};
+}
+
+bool CanAttemptShopRefresh(std::chrono::steady_clock::time_point now) {
+    return CooldownElapsed(
+            FeatureState::LastShopAction,
+            RuntimeConfig::ShopActionCooldownMs,
+            now
+        ) &&
+        CooldownElapsed(
+            FeatureState::LastShopRefreshAttempt,
+            RuntimeConfig::ShopRefreshCooldownMs,
+            now
+        );
+}
+
+void MarkShopRefreshAttempt(std::chrono::steady_clock::time_point now) {
+    FeatureState::LastShopAction = now;
+    FeatureState::LastShopRefreshAttempt = now;
+}
+
+bool HasWorthwhileShopTarget(
+    uint64_t selfAccountId,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
+        FeatureState::CachedShopHasWorthwhileTarget = false;
+        FeatureState::LastShopWorthCheck = now;
+        return false;
+    }
+
+    if (!IntervalElapsed(
+            FeatureState::LastShopWorthCheck,
+            RuntimeConfig::ShopWorthCheckMs,
+            now
+        )) {
+        return FeatureState::CachedShopHasWorthwhileTarget;
+    }
+
+    FeatureState::CachedShopHasWorthwhileTarget = false;
+
+    int checkedTargets = 0;
+    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+        int heroId = item.first;
+        const HeroAutomationState& state = item.second;
+
+        if (!state.selected || heroId <= 0) {
+            continue;
+        }
+
+        if (++checkedTargets > RuntimeConfig::MaxShopTargetChecks) {
+            break;
+        }
+
+        int ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
+            nullptr,
+            selfAccountId,
+            heroId
+        );
+        int poolCount = Originals::MCLogicBattleData_ILogic_HeroCountInPool ?
+            Originals::MCLogicBattleData_ILogic_HeroCountInPool(nullptr, heroId) :
+            1;
+
+        if (ownCount < std::clamp(state.targetCount, 1, 99) && poolCount > 0) {
+            FeatureState::CachedShopHasWorthwhileTarget = true;
+            break;
+        }
+    }
+
+    return FeatureState::CachedShopHasWorthwhileTarget;
 }
 
 void GiveHero(int heroId, int star) {
@@ -2536,7 +2724,27 @@ void RunShopAutomation(uint64_t selfAccountId) {
         return;
     }
 
+    auto now = std::chrono::steady_clock::now();
+
+    if (!CooldownElapsed(
+            FeatureState::LastShopAction,
+            RuntimeConfig::ShopActionCooldownMs,
+            now
+        )) {
+        return;
+    }
+
     bool needRefreshShop = true;
+    int cachedCoin = -1;
+
+    auto getCoin = [&]() {
+        if (cachedCoin < 0) {
+            cachedCoin =
+                Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
+        }
+
+        return cachedCoin;
+    };
 
     for (int slot = 0; slot < 5; ++slot) {
         bool needFx = false;
@@ -2558,23 +2766,27 @@ void RunShopAutomation(uint64_t selfAccountId) {
                 selfAccountId,
                 slot
             );
-        int heroId = shopData.m_iHeroId;
 
-        if (heroId <= 0) {
+        if (!IsValidShopItemData(shopData, slot)) {
             continue;
         }
 
+        int heroId = shopData.m_iHeroId;
         auto selectedIt = FeatureState::ShopSelectedHeroes.find(heroId);
         bool isSelected =
             selectedIt != FeatureState::ShopSelectedHeroes.end() &&
             selectedIt->second.selected;
         int targetCount =
             selectedIt != FeatureState::ShopSelectedHeroes.end() ?
-                std::max(selectedIt->second.targetCount, 1) :
+                std::clamp(selectedIt->second.targetCount, 1, 99) :
                 0;
         int ownCount = -1;
+        bool needsOwnCount =
+            isSelected &&
+            (FeatureState::ShopStopRefreshAtSelectedHero ||
+             FeatureState::ShopBuySelectedHero);
 
-        if (Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
+        if (needsOwnCount && Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
             ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
                 nullptr,
                 selfAccountId,
@@ -2594,8 +2806,14 @@ void RunShopAutomation(uint64_t selfAccountId) {
         }
 
         if (FeatureState::ShopBuyFreeHero && isFreeBuy) {
-            SelectShopSlot(slot);
-            continue;
+            if (!CanAttemptShopBuy(selfAccountId, slot, shopData, ownCount, true, now)) {
+                continue;
+            }
+
+            if (SelectShopSlot(slot)) {
+                MarkShopBuyAttempt(selfAccountId, slot, shopData, ownCount, true, now);
+                return;
+            }
         }
 
         if (!FeatureState::ShopBuySelectedHero || !isSelected) {
@@ -2606,8 +2824,7 @@ void RunShopAutomation(uint64_t selfAccountId) {
             continue;
         }
 
-        int coin =
-            Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
+        int coin = getCoin();
 
         if (coin < shopData.m_iPrice) {
             continue;
@@ -2618,7 +2835,14 @@ void RunShopAutomation(uint64_t selfAccountId) {
             continue;
         }
 
-        SelectShopSlot(slot);
+        if (!CanAttemptShopBuy(selfAccountId, slot, shopData, ownCount, false, now)) {
+            continue;
+        }
+
+        if (SelectShopSlot(slot)) {
+            MarkShopBuyAttempt(selfAccountId, slot, shopData, ownCount, false, now);
+            return;
+        }
     }
 
     if (!FeatureState::ShopRefresh ||
@@ -2628,32 +2852,8 @@ void RunShopAutomation(uint64_t selfAccountId) {
         return;
     }
 
-    bool anyHeroWorth = false;
-
-    for (const auto& item : FeatureState::ShopSelectedHeroes) {
-        int heroId = item.first;
-        const HeroAutomationState& state = item.second;
-
-        if (!state.selected || !Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
-            continue;
-        }
-
-        int ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
-            nullptr,
-            selfAccountId,
-            heroId
-        );
-        int poolCount = Originals::MCLogicBattleData_ILogic_HeroCountInPool ?
-            Originals::MCLogicBattleData_ILogic_HeroCountInPool(nullptr, heroId) :
-            1;
-
-        if (ownCount < std::max(state.targetCount, 1) && poolCount > 0) {
-            anyHeroWorth = true;
-            break;
-        }
-    }
-
-    if (!anyHeroWorth) {
+    if (!HasWorthwhileShopTarget(selfAccountId, now) ||
+        !CanAttemptShopRefresh(now)) {
         return;
     }
 
@@ -2662,7 +2862,7 @@ void RunShopAutomation(uint64_t selfAccountId) {
         0;
     bool isFreeRefresh = Originals::MCLogicBattleData_ILOGIC_IsRefreshFree &&
         Originals::MCLogicBattleData_ILOGIC_IsRefreshFree(nullptr, selfAccountId);
-    int coin = Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
+    int coin = getCoin();
     bool canRefresh =
         isFreeRefresh ||
         (coin >= refreshCost &&
@@ -2671,6 +2871,7 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     if (canRefresh) {
         Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop(FeatureState::HeroShopPanel);
+        MarkShopRefreshAttempt(now);
     }
 }
 
