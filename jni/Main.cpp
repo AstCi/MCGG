@@ -2058,14 +2058,14 @@ void RefreshManagedReferences(bool force = false) {
 
     if (FeatureState::BattleBridge) {
         FeatureState::HeroShopPanel = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::BattleBridge),
+            reinterpret_cast<Il2CppObject*>(FeatureState::BattleBridge.load()),
             heroShopPanelField
         );
     }
 
     if (FeatureState::HeroShopPanel) {
         FeatureState::HeroShopItemList = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::HeroShopPanel),
+            reinterpret_cast<Il2CppObject*>(FeatureState::HeroShopPanel.load()),
             heroShopItemListField
         );
     }
@@ -2441,7 +2441,7 @@ bool IsKnownHeroIdOrTablePending(int heroId) {
 }
 
 int GetRecommendLineupTargetCount() {
-    return std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
+    return std::clamp(FeatureState::ShopRecommendTargetCount.load(), 1, 99);
 }
 
 int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
@@ -3323,35 +3323,35 @@ float ParseConfigFloat(const std::string& value, float fallback) {
 }
 
 void ClampConfigurableState() {
-    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex, 0, 6);
-    UiState::ThemeIndex = std::clamp(UiState::ThemeIndex, 0, 1);
-    UiState::FontIndex = std::clamp(UiState::FontIndex, 0, 1);
-    UiState::MenuWidth = std::clamp(UiState::MenuWidth, 360.0f, 1600.0f);
-    UiState::MenuHeight = std::clamp(UiState::MenuHeight, 280.0f, 1200.0f);
-    UiState::MenuPosX = std::clamp(UiState::MenuPosX, -2000.0f, 4000.0f);
-    UiState::MenuPosY = std::clamp(UiState::MenuPosY, -2000.0f, 4000.0f);
-    UiState::FontScale = std::clamp(UiState::FontScale, 0.65f, 2.0f);
-    UiState::WindowAlpha = std::clamp(UiState::WindowAlpha, 0.35f, 1.0f);
-    UiState::WindowRounding = std::clamp(UiState::WindowRounding, 0.0f, 20.0f);
-    UiState::ChildRounding = std::clamp(UiState::ChildRounding, 0.0f, 20.0f);
-    UiState::FrameRounding = std::clamp(UiState::FrameRounding, 0.0f, 20.0f);
-    UiState::PopupRounding = std::clamp(UiState::PopupRounding, 0.0f, 20.0f);
-    UiState::ScrollbarRounding = std::clamp(UiState::ScrollbarRounding, 0.0f, 20.0f);
-    UiState::GrabRounding = std::clamp(UiState::GrabRounding, 0.0f, 20.0f);
-    UiState::TabRounding = std::clamp(UiState::TabRounding, 0.0f, 20.0f);
-    UiState::ScrollbarSize = std::clamp(UiState::ScrollbarSize, 8.0f, 32.0f);
-    UiState::WindowBorderSize = std::clamp(UiState::WindowBorderSize, 0.0f, 4.0f);
-    UiState::FrameBorderSize = std::clamp(UiState::FrameBorderSize, 0.0f, 4.0f);
-    UiState::FramePaddingX = std::clamp(UiState::FramePaddingX, 0.0f, 24.0f);
-    UiState::FramePaddingY = std::clamp(UiState::FramePaddingY, 0.0f, 24.0f);
-    UiState::ItemSpacingX = std::clamp(UiState::ItemSpacingX, 0.0f, 32.0f);
-    UiState::ItemSpacingY = std::clamp(UiState::ItemSpacingY, 0.0f, 32.0f);
-    UiState::IndentSpacing = std::clamp(UiState::IndentSpacing, 0.0f, 48.0f);
-    FeatureState::ShopKeepGoldAt = std::clamp(FeatureState::ShopKeepGoldAt, 0, 999999);
+    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 6);
+    UiState::ThemeIndex = std::clamp(UiState::ThemeIndex.load(), 0, 1);
+    UiState::FontIndex = std::clamp(UiState::FontIndex.load(), 0, 1);
+    UiState::MenuWidth = std::clamp(UiState::MenuWidth.load(), 360.0f, 1600.0f);
+    UiState::MenuHeight = std::clamp(UiState::MenuHeight.load(), 280.0f, 1200.0f);
+    UiState::MenuPosX = std::clamp(UiState::MenuPosX.load(), -2000.0f, 4000.0f);
+    UiState::MenuPosY = std::clamp(UiState::MenuPosY.load(), -2000.0f, 4000.0f);
+    UiState::FontScale = std::clamp(UiState::FontScale.load(), 0.65f, 2.0f);
+    UiState::WindowAlpha = std::clamp(UiState::WindowAlpha.load(), 0.35f, 1.0f);
+    UiState::WindowRounding = std::clamp(UiState::WindowRounding.load(), 0.0f, 20.0f);
+    UiState::ChildRounding = std::clamp(UiState::ChildRounding.load(), 0.0f, 20.0f);
+    UiState::FrameRounding = std::clamp(UiState::FrameRounding.load(), 0.0f, 20.0f);
+    UiState::PopupRounding = std::clamp(UiState::PopupRounding.load(), 0.0f, 20.0f);
+    UiState::ScrollbarRounding = std::clamp(UiState::ScrollbarRounding.load(), 0.0f, 20.0f);
+    UiState::GrabRounding = std::clamp(UiState::GrabRounding.load(), 0.0f, 20.0f);
+    UiState::TabRounding = std::clamp(UiState::TabRounding.load(), 0.0f, 20.0f);
+    UiState::ScrollbarSize = std::clamp(UiState::ScrollbarSize.load(), 8.0f, 32.0f);
+    UiState::WindowBorderSize = std::clamp(UiState::WindowBorderSize.load(), 0.0f, 4.0f);
+    UiState::FrameBorderSize = std::clamp(UiState::FrameBorderSize.load(), 0.0f, 4.0f);
+    UiState::FramePaddingX = std::clamp(UiState::FramePaddingX.load(), 0.0f, 24.0f);
+    UiState::FramePaddingY = std::clamp(UiState::FramePaddingY.load(), 0.0f, 24.0f);
+    UiState::ItemSpacingX = std::clamp(UiState::ItemSpacingX.load(), 0.0f, 32.0f);
+    UiState::ItemSpacingY = std::clamp(UiState::ItemSpacingY.load(), 0.0f, 32.0f);
+    UiState::IndentSpacing = std::clamp(UiState::IndentSpacing.load(), 0.0f, 48.0f);
+    FeatureState::ShopKeepGoldAt = std::clamp(FeatureState::ShopKeepGoldAt.load(), 0, 999999);
     FeatureState::ShopRecommendTargetCount =
-        std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
-    FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar, 1, 3);
-    FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice, 0, 99);
+        std::clamp(FeatureState::ShopRecommendTargetCount.load(), 1, 99);
+    FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar.load(), 1, 3);
+    FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
     for (auto& item : FeatureState::ShopSelectedHeroes) {
         item.second.targetCount = std::clamp(item.second.targetCount, 1, 99);
@@ -4178,6 +4178,84 @@ void DrawWaitingText(const char* message) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "%s", message);
 }
 
+bool DrawAtomicCheckbox(const char* label, std::atomic<bool>& value) {
+    bool current = value.load();
+
+    if (!ImGui::Checkbox(label, &current)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicCombo(
+    const char* label,
+    std::atomic<int>& value,
+    const char* const items[],
+    int itemsCount
+) {
+    int current = value.load();
+
+    if (!ImGui::Combo(label, &current, items, itemsCount)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicInputInt(
+    const char* label,
+    std::atomic<int>& value,
+    int step = 1,
+    int stepFast = 100,
+    ImGuiInputTextFlags flags = 0
+) {
+    int current = value.load();
+
+    if (!ImGui::InputInt(label, &current, step, stepFast, flags)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicSliderFloat(
+    const char* label,
+    std::atomic<float>& value,
+    float minValue,
+    float maxValue,
+    const char* format
+) {
+    float current = value.load();
+
+    if (!ImGui::SliderFloat(label, &current, minValue, maxValue, format)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicInputFloat(
+    const char* label,
+    std::atomic<float>& value,
+    float step,
+    float stepFast,
+    const char* format
+) {
+    float current = value.load();
+
+    if (!ImGui::InputFloat(label, &current, step, stepFast, format)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
 bool HasShopSelectBinding() {
     return IsIl2CppRuntimeReady() &&
         ((FeatureState::HeroShopItemList &&
@@ -4382,9 +4460,9 @@ void DrawCombatTab() {
         DrawWaitingText("Waiting for spectator hook");
     }
 
-    ImGui::Checkbox(
+    DrawAtomicCheckbox(
         "Invisible Scout - hide spectate switching",
-        &FeatureState::CombatInvisibleScout
+        FeatureState::CombatInvisibleScout
     );
 }
 
@@ -4397,8 +4475,9 @@ void DrawAppearanceTab() {
     };
 
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::Combo("Theme", &UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
-        UiState::ThemeIndex = std::clamp(UiState::ThemeIndex, 0, IM_ARRAYSIZE(themes) - 1);
+    if (DrawAtomicCombo("Theme", UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
+        UiState::ThemeIndex =
+            std::clamp(UiState::ThemeIndex.load(), 0, IM_ARRAYSIZE(themes) - 1);
         ApplyAppearance();
     }
 
@@ -4410,12 +4489,13 @@ void DrawAppearanceTab() {
     };
 
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::Combo("Font", &UiState::FontIndex, fonts, IM_ARRAYSIZE(fonts))) {
-        if (UiState::FontIndex == 1 && !AppearanceState::NotoCjkFont) {
+    if (DrawAtomicCombo("Font", UiState::FontIndex, fonts, IM_ARRAYSIZE(fonts))) {
+        if (UiState::FontIndex.load() == 1 && !AppearanceState::NotoCjkFont) {
             UiState::FontIndex = 0;
         }
 
-        UiState::FontIndex = std::clamp(UiState::FontIndex, 0, IM_ARRAYSIZE(fonts) - 1);
+        UiState::FontIndex =
+            std::clamp(UiState::FontIndex.load(), 0, IM_ARRAYSIZE(fonts) - 1);
         ApplyAppearance();
     }
 
@@ -4468,13 +4548,13 @@ void DrawSettingsTab() {
         if (ImGui::BeginTabItem("Window")) {
             bool changed = false;
 
-            changed |= ImGui::SliderFloat("Menu width", &UiState::MenuWidth, 360.0f, 1600.0f, "%.0f");
-            changed |= ImGui::SliderFloat("Menu height", &UiState::MenuHeight, 280.0f, 1200.0f, "%.0f");
-            changed |= ImGui::Checkbox("Use fixed menu position", &UiState::UseFixedMenuPosition);
+            changed |= DrawAtomicSliderFloat("Menu width", UiState::MenuWidth, 360.0f, 1600.0f, "%.0f");
+            changed |= DrawAtomicSliderFloat("Menu height", UiState::MenuHeight, 280.0f, 1200.0f, "%.0f");
+            changed |= DrawAtomicCheckbox("Use fixed menu position", UiState::UseFixedMenuPosition);
 
-            ImGui::BeginDisabled(!UiState::UseFixedMenuPosition);
-            changed |= ImGui::InputFloat("Menu position X", &UiState::MenuPosX, 1.0f, 20.0f, "%.0f");
-            changed |= ImGui::InputFloat("Menu position Y", &UiState::MenuPosY, 1.0f, 20.0f, "%.0f");
+            ImGui::BeginDisabled(!UiState::UseFixedMenuPosition.load());
+            changed |= DrawAtomicInputFloat("Menu position X", UiState::MenuPosX, 1.0f, 20.0f, "%.0f");
+            changed |= DrawAtomicInputFloat("Menu position Y", UiState::MenuPosY, 1.0f, 20.0f, "%.0f");
             ImGui::EndDisabled();
 
             if (ImGui::Button("Capture current menu size")) {
@@ -4494,8 +4574,8 @@ void DrawSettingsTab() {
             }
 
             ImGui::SeparatorText("Behavior");
-            changed |= ImGui::Checkbox("Move from title bar only", &UiState::MoveFromTitleBarOnly);
-            changed |= ImGui::Checkbox("Resize from edges", &UiState::ResizeFromEdges);
+            changed |= DrawAtomicCheckbox("Move from title bar only", UiState::MoveFromTitleBarOnly);
+            changed |= DrawAtomicCheckbox("Resize from edges", UiState::ResizeFromEdges);
 
             if (changed) {
                 ApplyAppearance();
@@ -4508,29 +4588,29 @@ void DrawSettingsTab() {
             bool changed = false;
 
             ImGui::SeparatorText("Typography");
-            changed |= ImGui::SliderFloat("Font size scale", &UiState::FontScale, 0.65f, 2.0f, "%.2fx");
+            changed |= DrawAtomicSliderFloat("Font size scale", UiState::FontScale, 0.65f, 2.0f, "%.2fx");
 
             ImGui::SeparatorText("Window");
-            changed |= ImGui::SliderFloat("Window opacity", &UiState::WindowAlpha, 0.35f, 1.0f, "%.2f");
-            changed |= ImGui::SliderFloat("Window border", &UiState::WindowBorderSize, 0.0f, 4.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame border", &UiState::FrameBorderSize, 0.0f, 4.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Scrollbar size", &UiState::ScrollbarSize, 8.0f, 32.0f, "%.0f");
+            changed |= DrawAtomicSliderFloat("Window opacity", UiState::WindowAlpha, 0.35f, 1.0f, "%.2f");
+            changed |= DrawAtomicSliderFloat("Window border", UiState::WindowBorderSize, 0.0f, 4.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame border", UiState::FrameBorderSize, 0.0f, 4.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Scrollbar size", UiState::ScrollbarSize, 8.0f, 32.0f, "%.0f");
 
             ImGui::SeparatorText("Rounding");
-            changed |= ImGui::SliderFloat("Window rounding", &UiState::WindowRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Child rounding", &UiState::ChildRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame rounding", &UiState::FrameRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Popup rounding", &UiState::PopupRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Scrollbar rounding", &UiState::ScrollbarRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Grab rounding", &UiState::GrabRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Tab rounding", &UiState::TabRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Window rounding", UiState::WindowRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Child rounding", UiState::ChildRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame rounding", UiState::FrameRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Popup rounding", UiState::PopupRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Scrollbar rounding", UiState::ScrollbarRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Grab rounding", UiState::GrabRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Tab rounding", UiState::TabRounding, 0.0f, 20.0f, "%.1f");
 
             ImGui::SeparatorText("Spacing");
-            changed |= ImGui::SliderFloat("Frame padding X", &UiState::FramePaddingX, 0.0f, 24.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame padding Y", &UiState::FramePaddingY, 0.0f, 24.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Item spacing X", &UiState::ItemSpacingX, 0.0f, 32.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Item spacing Y", &UiState::ItemSpacingY, 0.0f, 32.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Indent spacing", &UiState::IndentSpacing, 0.0f, 48.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame padding X", UiState::FramePaddingX, 0.0f, 24.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame padding Y", UiState::FramePaddingY, 0.0f, 24.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Item spacing X", UiState::ItemSpacingX, 0.0f, 32.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Item spacing Y", UiState::ItemSpacingY, 0.0f, 32.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Indent spacing", UiState::IndentSpacing, 0.0f, 48.0f, "%.1f");
 
             if (changed) {
                 ApplyAppearance();
@@ -4558,8 +4638,8 @@ void DrawSettingsTab() {
             );
             ImGui::Text(
                 "Selected GogoCards: %d / %d",
-                FeatureState::ArenaGogoCardSelected1,
-                FeatureState::ArenaGogoCardSelected2
+                FeatureState::ArenaGogoCardSelected1.load(),
+                FeatureState::ArenaGogoCardSelected2.load()
             );
 
             ImGui::EndTabItem();
@@ -5459,28 +5539,28 @@ void DrawShopTab() {
                 DrawWaitingText("Waiting for shop automation bindings");
             }
 
-            if (FeatureState::ShopRefresh && !HasShopRefreshBindings()) {
+            if (FeatureState::ShopRefresh.load() && !HasShopRefreshBindings()) {
                 DrawWaitingText("Waiting for shop refresh panel");
             }
 
-            if ((FeatureState::ShopBuyRecommendLineup ||
-                 FeatureState::ShopStopRefreshAtRecommendLineup) &&
+            if ((FeatureState::ShopBuyRecommendLineup.load() ||
+                 FeatureState::ShopStopRefreshAtRecommendLineup.load()) &&
                 !HasShopRecommendLineupBindings()) {
                 DrawWaitingText("Waiting for recommendation lineup bindings");
             }
 
-            ImGui::Checkbox("Auto-buy free heroes", &FeatureState::ShopBuyFreeHero);
-            ImGui::Checkbox("Auto-buy selected targets", &FeatureState::ShopBuySelectedHero);
+            DrawAtomicCheckbox("Auto-buy free heroes", FeatureState::ShopBuyFreeHero);
+            DrawAtomicCheckbox("Auto-buy selected targets", FeatureState::ShopBuySelectedHero);
             ImGui::Separator();
             ImGui::SeparatorText("Recommendation Lineup");
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Auto-buy recommendation heroes",
-                &FeatureState::ShopBuyRecommendLineup
+                FeatureState::ShopBuyRecommendLineup
             );
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt(
+            DrawAtomicInputInt(
                 "Recommendation target count",
-                &FeatureState::ShopRecommendTargetCount
+                FeatureState::ShopRecommendTargetCount
             );
             FeatureState::ShopRecommendTargetCount = GetRecommendLineupTargetCount();
 
@@ -5496,25 +5576,25 @@ void DrawShopTab() {
             }
 
             ImGui::Separator();
-            ImGui::Checkbox("Auto-refresh shop", &FeatureState::ShopRefresh);
-            ImGui::Checkbox(
+            DrawAtomicCheckbox("Auto-refresh shop", FeatureState::ShopRefresh);
+            DrawAtomicCheckbox(
                 "Pause refresh when free hero appears",
-                &FeatureState::ShopStopRefreshAtFreeHero
+                FeatureState::ShopStopRefreshAtFreeHero
             );
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Pause refresh when selected target appears",
-                &FeatureState::ShopStopRefreshAtSelectedHero
+                FeatureState::ShopStopRefreshAtSelectedHero
             );
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Pause refresh when recommendation hero appears",
-                &FeatureState::ShopStopRefreshAtRecommendLineup
+                FeatureState::ShopStopRefreshAtRecommendLineup
             );
             ImGui::Separator();
-            ImGui::Checkbox("Keep gold reserve", &FeatureState::ShopKeepGold);
+            DrawAtomicCheckbox("Keep gold reserve", FeatureState::ShopKeepGold);
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Minimum reserve gold", &FeatureState::ShopKeepGoldAt);
+            DrawAtomicInputInt("Minimum reserve gold", FeatureState::ShopKeepGoldAt);
             FeatureState::ShopKeepGoldAt =
-                std::clamp(FeatureState::ShopKeepGoldAt, 0, 999999);
+                std::clamp(FeatureState::ShopKeepGoldAt.load(), 0, 999999);
             ImGui::EndTabItem();
         }
 
@@ -5524,7 +5604,7 @@ void DrawShopTab() {
                 "Search heroes by name, ID, or cost",
                 UiState::ShopHeroFilter
             );
-            ImGui::Checkbox("Show tracked heroes only", &UiState::ShopShowSelectedOnly);
+            DrawAtomicCheckbox("Show tracked heroes only", UiState::ShopShowSelectedOnly);
 
             if (ImGui::Button("Clear hero targets", ImVec2(-1.0f, 0.0f))) {
                 for (auto& item : FeatureState::ShopSelectedHeroes) {
@@ -5537,7 +5617,7 @@ void DrawShopTab() {
             int totalHeroCount = static_cast<int>(heroes.size());
             FilterHeroes(heroes, UiState::ShopHeroFilter);
 
-            if (UiState::ShopShowSelectedOnly) {
+            if (UiState::ShopShowSelectedOnly.load()) {
                 heroes.erase(
                     std::remove_if(
                         heroes.begin(),
@@ -5620,8 +5700,9 @@ void DrawArenaTab() {
             }
 
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Spawn star level", &FeatureState::ArenaHeroStar);
-            FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar, 1, 3);
+            DrawAtomicInputInt("Spawn star level", FeatureState::ArenaHeroStar);
+            FeatureState::ArenaHeroStar =
+                std::clamp(FeatureState::ArenaHeroStar.load(), 1, 3);
             ImGui::Separator();
             DrawSearchInput(
                 "ArenaHeroFilter",
@@ -5668,7 +5749,7 @@ void DrawArenaTab() {
                     ImGui::TableSetColumnIndex(2);
 
                     if (ImGui::Button("Spawn", ImVec2(-1.0f, 0.0f))) {
-                        GiveHero(hero.id, FeatureState::ArenaHeroStar);
+                        GiveHero(hero.id, FeatureState::ArenaHeroStar.load());
                     }
 
                     ImGui::PopID();
@@ -5685,7 +5766,7 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for arena item binding");
             }
 
-            ImGui::Checkbox("Grant enhanced item", &FeatureState::ArenaItemEnhanced);
+            DrawAtomicCheckbox("Grant enhanced item", FeatureState::ArenaItemEnhanced);
             ImGui::Separator();
             DrawSearchInput(
                 "ArenaItemFilter",
@@ -5746,11 +5827,11 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for GogoCard binding");
             }
 
-            ImGui::Checkbox("Force selected GogoCards", &FeatureState::ArenaGogoCardEnabled);
+            DrawAtomicCheckbox("Force selected GogoCards", FeatureState::ArenaGogoCardEnabled);
             ImGui::Text(
                 "Card 1: %d  Card 2: %d",
-                FeatureState::ArenaGogoCardSelected1,
-                FeatureState::ArenaGogoCardSelected2
+                FeatureState::ArenaGogoCardSelected1.load(),
+                FeatureState::ArenaGogoCardSelected2.load()
             );
             if (ImGui::Button("Clear card 1")) {
                 FeatureState::ArenaGogoCardSelected1 = -1;
@@ -5796,11 +5877,13 @@ void DrawArenaTab() {
                 ImGui::TableHeadersRow();
 
                 for (const CardTableEntry& card : cards) {
+                    int selectedCard1 = FeatureState::ArenaGogoCardSelected1.load();
+                    int selectedCard2 = FeatureState::ArenaGogoCardSelected2.load();
+
                     ImGui::PushID(card.id);
                     ImGui::TableNextRow();
 
-                    if (card.id == FeatureState::ArenaGogoCardSelected1 ||
-                        card.id == FeatureState::ArenaGogoCardSelected2) {
+                    if (card.id == selectedCard1 || card.id == selectedCard2) {
                         ImGui::TableSetBgColor(
                             ImGuiTableBgTarget_RowBg0,
                             ImGui::GetColorU32(ImVec4(0.25f, 0.55f, 0.25f, 0.35f))
@@ -5840,19 +5923,22 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for player data bindings");
             }
 
-            ImGui::Checkbox("Force all synergies active", &FeatureState::ArenaForceActiveSynergy);
-            ImGui::Checkbox("Force player level 99", &FeatureState::ArenaForceLevel99);
-            ImGui::Checkbox("Allow outside-map placement", &FeatureState::ArenaOutsideMapPlacement);
-            ImGui::Checkbox("Set all enemy HP to 1", &FeatureState::ArenaAllEnemyHpOne);
+            DrawAtomicCheckbox("Force all synergies active", FeatureState::ArenaForceActiveSynergy);
+            DrawAtomicCheckbox("Force player level 99", FeatureState::ArenaForceLevel99);
+            DrawAtomicCheckbox("Allow outside-map placement", FeatureState::ArenaOutsideMapPlacement);
+            DrawAtomicCheckbox("Set all enemy HP to 1", FeatureState::ArenaAllEnemyHpOne);
             ImGui::Separator();
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Hero cost filter", &FeatureState::ArenaPrice);
-            FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice, 0, 99);
+            DrawAtomicInputInt("Hero cost filter", FeatureState::ArenaPrice);
+            FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
             if (ImGui::Button("Spawn all heroes with selected cost", ImVec2(-1.0f, 0.0f))) {
+                int arenaPrice = FeatureState::ArenaPrice.load();
+                int arenaHeroStar = FeatureState::ArenaHeroStar.load();
+
                 for (const HeroTableEntry& hero : GetSortedHeroes(true)) {
-                    if (hero.quality == FeatureState::ArenaPrice) {
-                        GiveHero(hero.id, FeatureState::ArenaHeroStar);
+                    if (hero.quality == arenaPrice) {
+                        GiveHero(hero.id, arenaHeroStar);
                     }
                 }
             }
@@ -5874,7 +5960,7 @@ struct MainMenuTab {
 };
 
 void DrawMenuTabButton(const char* label, int index) {
-    bool selected = UiState::MainTabIndex == index;
+    bool selected = UiState::MainTabIndex.load() == index;
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
 
@@ -5897,8 +5983,8 @@ ImVec2 GetValidatedMenuSize() {
         1200.0f;
 
     return ImVec2(
-        std::clamp(UiState::MenuWidth, 360.0f, maxWidth),
-        std::clamp(UiState::MenuHeight, 280.0f, maxHeight)
+        std::clamp(UiState::MenuWidth.load(), 360.0f, maxWidth),
+        std::clamp(UiState::MenuHeight.load(), 280.0f, maxHeight)
     );
 }
 
@@ -5910,8 +5996,8 @@ ImVec2 GetValidatedMenuPosition(const ImVec2& menuSize) {
     float minY = menuSize.y > 0.0f ? 48.0f - menuSize.y : -2000.0f;
 
     return ImVec2(
-        std::clamp(UiState::MenuPosX, minX, maxX),
-        std::clamp(UiState::MenuPosY, minY, maxY)
+        std::clamp(UiState::MenuPosX.load(), minX, maxX),
+        std::clamp(UiState::MenuPosY.load(), minY, maxY)
     );
 }
 
@@ -5929,11 +6015,11 @@ void DrawMainMenu() {
     constexpr int tabCount = static_cast<int>(IM_ARRAYSIZE(tabs));
     static_assert(tabCount > 0);
 
-    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex, 0, tabCount - 1);
+    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, tabCount - 1);
 
     const ImVec2 menuSize = GetValidatedMenuSize();
 
-    if (UiState::UseFixedMenuPosition) {
+    if (UiState::UseFixedMenuPosition.load()) {
         ImGui::SetNextWindowPos(GetValidatedMenuPosition(menuSize), ImGuiCond_Always);
     }
 
@@ -6002,8 +6088,8 @@ bool InitializeOverlay() {
     return true;
 }
 
-bool AttachRenderIl2CppThread(bool& attached) {
-    if (attached) {
+bool AttachRenderIl2CppThread(std::atomic<bool>& attached) {
+    if (attached.load()) {
         return true;
     }
 
