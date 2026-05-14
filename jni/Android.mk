@@ -18,9 +18,6 @@ LOCAL_CFLAGS := \
     -ffunction-sections \
     -fdata-sections \
     -fvisibility=hidden \
-    -fno-unwind-tables \
-    -fno-asynchronous-unwind-tables \
-    -fomit-frame-pointer \
     -w \
     -Wno-everything \
     -Wno-error \
@@ -31,6 +28,10 @@ LOCAL_CFLAGS := \
     -DUNITY_VERSION_MINOR=4 \
     -DUNITY_VERSION_PATCH=22 \
     -DUNITY_VER=194
+
+ifeq ($(NDK_DEBUG),1)
+LOCAL_CFLAGS += -O0
+endif
 
 LOCAL_CPPFLAGS := \
     $(LOCAL_CFLAGS) \

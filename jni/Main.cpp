@@ -18,6 +18,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <mutex>
+#include <atomic>
 
 #include "structures/Structures.hpp"
 #include "xdl.h"
@@ -106,6 +108,12 @@ struct CardTableEntry {
     std::string name;
 };
 
+struct TableCacheCounts {
+    int heroes = 0;
+    int equips = 0;
+    int cards = 0;
+};
+
 struct HeroAutomationState {
     bool selected = false;
     int targetCount = 9;
@@ -140,46 +148,52 @@ namespace RuntimeConfig {
     constexpr int MaxManagedStringChars = 4096;
 }
 
+namespace RuntimeMutex {
+    std::mutex CacheMutex;
+    std::mutex FeatureMutex;
+    std::recursive_mutex UiMutex;
+}
+
 namespace RuntimeState {
-    bool Il2CppReady = false;
-    bool BindingRetryRequested = false;
+    std::atomic<bool> Il2CppReady{false};
+    std::atomic<bool> BindingRetryRequested{false};
 }
 
 // Feature toggles, cached managed references, and throttled runtime state.
 namespace FeatureState {
-    bool CombatInvisibleScout = false;
+    std::atomic<bool> CombatInvisibleScout{false};
 
-    bool ShopBuyFreeHero = false;
-    bool ShopBuySelectedHero = false;
-    bool ShopBuyRecommendLineup = false;
-    bool ShopRefresh = false;
-    bool ShopStopRefreshAtFreeHero = false;
-    bool ShopStopRefreshAtSelectedHero = false;
-    bool ShopStopRefreshAtRecommendLineup = false;
-    bool ShopKeepGold = false;
-    int ShopKeepGoldAt = 20;
-    int ShopRecommendTargetCount = 9;
+    std::atomic<bool> ShopBuyFreeHero{false};
+    std::atomic<bool> ShopBuySelectedHero{false};
+    std::atomic<bool> ShopBuyRecommendLineup{false};
+    std::atomic<bool> ShopRefresh{false};
+    std::atomic<bool> ShopStopRefreshAtFreeHero{false};
+    std::atomic<bool> ShopStopRefreshAtSelectedHero{false};
+    std::atomic<bool> ShopStopRefreshAtRecommendLineup{false};
+    std::atomic<bool> ShopKeepGold{false};
+    std::atomic<int> ShopKeepGoldAt{20};
+    std::atomic<int> ShopRecommendTargetCount{9};
     std::unordered_map<int, HeroAutomationState> ShopSelectedHeroes;
 
-    int ArenaHeroStar = 1;
-    bool ArenaItemEnhanced = false;
-    bool ArenaGogoCardEnabled = false;
-    int ArenaGogoCardSelected1 = -1;
-    int ArenaGogoCardSelected2 = -1;
-    bool ArenaForceActiveSynergy = false;
-    bool ArenaForceLevel99 = false;
-    bool ArenaOutsideMapPlacement = false;
-    bool ArenaAllEnemyHpOne = false;
-    int ArenaPrice = 5;
+    std::atomic<int> ArenaHeroStar{1};
+    std::atomic<bool> ArenaItemEnhanced{false};
+    std::atomic<bool> ArenaGogoCardEnabled{false};
+    std::atomic<int> ArenaGogoCardSelected1{-1};
+    std::atomic<int> ArenaGogoCardSelected2{-1};
+    std::atomic<bool> ArenaForceActiveSynergy{false};
+    std::atomic<bool> ArenaForceLevel99{false};
+    std::atomic<bool> ArenaOutsideMapPlacement{false};
+    std::atomic<bool> ArenaAllEnemyHpOne{false};
+    std::atomic<int> ArenaPrice{5};
 
-    void* BattleBridge = nullptr;
-    void* HeroShopPanel = nullptr;
-    void* HeroShopItemList = nullptr;
-    void* LoadResInstance = nullptr;
+    std::atomic<void*> BattleBridge{nullptr};
+    std::atomic<void*> HeroShopPanel{nullptr};
+    std::atomic<void*> HeroShopItemList{nullptr};
+    std::atomic<void*> LoadResInstance{nullptr};
 
-    bool TableDataLoaded = false;
-    bool WasInMatch = false;
-    uint64_t LastSelfAccountId = 0;
+    std::atomic<bool> TableDataLoaded{false};
+    std::atomic<bool> WasInMatch{false};
+    std::atomic<uint64_t> LastSelfAccountId{0};
     std::unordered_map<int, HeroTableEntry> Heroes;
     std::unordered_map<int, EquipTableEntry> Equips;
     std::unordered_map<int, CardTableEntry> Cards;
@@ -194,14 +208,14 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastShopRefreshAttempt{};
     std::chrono::steady_clock::time_point LastShopWorthCheck{};
     std::chrono::steady_clock::time_point LastRecommendLineupCheck{};
-    bool CachedShopHasWorthwhileTarget = false;
-    int CachedRecommendLineupHeroId = 0;
-    uint64_t LastShopBuyAccountId = 0;
-    int LastShopBuySlot = -1;
-    int LastShopBuyHeroId = 0;
-    int LastShopBuyPrice = 0;
-    int LastShopBuyOwnCount = -1;
-    bool LastShopBuyWasFree = false;
+    std::atomic<bool> CachedShopHasWorthwhileTarget{false};
+    std::atomic<int> CachedRecommendLineupHeroId{0};
+    std::atomic<uint64_t> LastShopBuyAccountId{0};
+    std::atomic<int> LastShopBuySlot{-1};
+    std::atomic<int> LastShopBuyHeroId{0};
+    std::atomic<int> LastShopBuyPrice{0};
+    std::atomic<int> LastShopBuyOwnCount{-1};
+    std::atomic<bool> LastShopBuyWasFree{false};
 }
 
 namespace UiState {
@@ -212,34 +226,34 @@ namespace UiState {
     std::string TestAccountId;
     std::string ConfigPath;
     std::string ConfigStatus;
-    int MainTabIndex = 0;
-    int ThemeIndex = 1;
-    int FontIndex = 1;
-    bool ShopShowSelectedOnly = false;
-    bool MoveFromTitleBarOnly = true;
-    bool ResizeFromEdges = false;
-    bool UseFixedMenuPosition = false;
-    float MenuWidth = 760.0f;
-    float MenuHeight = 560.0f;
-    float MenuPosX = 20.0f;
-    float MenuPosY = 20.0f;
-    float FontScale = 1.0f;
-    float WindowAlpha = 1.0f;
-    float WindowRounding = 7.0f;
-    float ChildRounding = 6.0f;
-    float FrameRounding = 5.0f;
-    float PopupRounding = 6.0f;
-    float ScrollbarRounding = 6.0f;
-    float GrabRounding = 5.0f;
-    float TabRounding = 5.0f;
-    float ScrollbarSize = 14.0f;
-    float WindowBorderSize = 1.0f;
-    float FrameBorderSize = 0.0f;
-    float FramePaddingX = 4.0f;
-    float FramePaddingY = 3.0f;
-    float ItemSpacingX = 8.0f;
-    float ItemSpacingY = 4.0f;
-    float IndentSpacing = 21.0f;
+    std::atomic<int> MainTabIndex{0};
+    std::atomic<int> ThemeIndex{1};
+    std::atomic<int> FontIndex{1};
+    std::atomic<bool> ShopShowSelectedOnly{false};
+    std::atomic<bool> MoveFromTitleBarOnly{true};
+    std::atomic<bool> ResizeFromEdges{false};
+    std::atomic<bool> UseFixedMenuPosition{false};
+    std::atomic<float> MenuWidth{760.0f};
+    std::atomic<float> MenuHeight{560.0f};
+    std::atomic<float> MenuPosX{20.0f};
+    std::atomic<float> MenuPosY{20.0f};
+    std::atomic<float> FontScale{1.0f};
+    std::atomic<float> WindowAlpha{1.0f};
+    std::atomic<float> WindowRounding{7.0f};
+    std::atomic<float> ChildRounding{6.0f};
+    std::atomic<float> FrameRounding{5.0f};
+    std::atomic<float> PopupRounding{6.0f};
+    std::atomic<float> ScrollbarRounding{6.0f};
+    std::atomic<float> GrabRounding{5.0f};
+    std::atomic<float> TabRounding{5.0f};
+    std::atomic<float> ScrollbarSize{14.0f};
+    std::atomic<float> WindowBorderSize{1.0f};
+    std::atomic<float> FrameBorderSize{0.0f};
+    std::atomic<float> FramePaddingX{4.0f};
+    std::atomic<float> FramePaddingY{3.0f};
+    std::atomic<float> ItemSpacingX{8.0f};
+    std::atomic<float> ItemSpacingY{4.0f};
+    std::atomic<float> IndentSpacing{21.0f};
 }
 
 namespace AppearanceState {
@@ -603,9 +617,12 @@ FieldInfo* GetFieldInfoFromName(
 
     std::string cacheKey = GenerateFieldCacheKey(ns, className, fieldName);
 
-    auto cached = FieldCache.find(cacheKey);
-    if (cached != FieldCache.end() && cached->second) {
-        return cached->second;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        auto cached = FieldCache.find(cacheKey);
+        if (cached != FieldCache.end() && cached->second) {
+            return cached->second;
+        }
     }
 
     size_t size = 0;
@@ -633,12 +650,16 @@ FieldInfo* GetFieldInfoFromName(
 
         FieldInfo* field = FindFieldInClassHierarchy(klass, fieldName);
         if (field) {
+            std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
             FieldCache[cacheKey] = field;
             return field;
         }
     }
 
-    FieldCache[cacheKey] = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        FieldCache[cacheKey] = nullptr;
+    }
     return nullptr;
 }
 
@@ -829,9 +850,12 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
 
     std::string cacheKey = GenerateCacheKey(ns, className, methodName, paramTypes);
 
-    auto cached = MultiMethodCache.find(cacheKey);
-    if (cached != MultiMethodCache.end() && !cached->second.empty()) {
-        return cached->second;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        auto cached = MultiMethodCache.find(cacheKey);
+        if (cached != MultiMethodCache.end() && !cached->second.empty()) {
+            return cached->second;
+        }
     }
 
     size_t size = 0;
@@ -906,7 +930,10 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
         }
     }
 
-    MultiMethodCache[cacheKey] = foundMethods;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        MultiMethodCache[cacheKey] = foundMethods;
+    }
     return foundMethods;
 }
 
@@ -950,13 +977,17 @@ bool ResolveOriginal(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
-    if (target) {
-        return true;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        if (target) {
+            return true;
+        }
     }
 
     void* method = GetFirstMethodFromName(ns, className, methodName, paramTypes);
 
-    if (method) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+    if (method && !target) {
         target = reinterpret_cast<T>(method);
     }
 
@@ -972,15 +1003,30 @@ bool HookResolvedMethod(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
-    if (original) {
-        return true;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        if (original) {
+            return true;
+        }
     }
 
     void* method = GetFirstMethodFromName(ns, className, methodName, paramTypes);
 
-    if (method) {
-        if (DobbyHook(method, replacement, reinterpret_cast<void**>(&original)) != RT_SUCCESS) {
-            original = nullptr;
+    if (!method) {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        return original != nullptr;
+    }
+
+    T hookedOriginal = nullptr;
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+
+    if (!original) {
+        if (DobbyHook(
+            method,
+            replacement,
+            reinterpret_cast<void**>(&hookedOriginal)
+        ) == RT_SUCCESS) {
+            original = hookedOriginal;
         }
     }
 
@@ -2020,27 +2066,106 @@ void RefreshManagedReferences(bool force = false) {
         loadResInstanceField = GetFieldInfoFromName("", "LoadRes", "s_instance");
     }
 
-    FeatureState::BattleBridge = GetStaticField<void*>(battleBridgeField);
-    FeatureState::LoadResInstance = GetStaticField<void*>(loadResInstanceField);
-    FeatureState::HeroShopPanel = nullptr;
-    FeatureState::HeroShopItemList = nullptr;
+    void* battleBridge = GetStaticField<void*>(battleBridgeField);
+    void* loadResInstance = GetStaticField<void*>(loadResInstanceField);
+    void* heroShopPanel = nullptr;
+    void* heroShopItemList = nullptr;
 
-    if (FeatureState::BattleBridge) {
-        FeatureState::HeroShopPanel = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::BattleBridge),
+    if (battleBridge) {
+        heroShopPanel = GetField<void*>(
+            reinterpret_cast<Il2CppObject*>(battleBridge),
             heroShopPanelField
         );
     }
 
-    if (FeatureState::HeroShopPanel) {
-        FeatureState::HeroShopItemList = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::HeroShopPanel),
+    if (heroShopPanel) {
+        heroShopItemList = GetField<void*>(
+            reinterpret_cast<Il2CppObject*>(heroShopPanel),
             heroShopItemListField
         );
     }
+
+    FeatureState::BattleBridge = battleBridge;
+    FeatureState::LoadResInstance = loadResInstance;
+    FeatureState::HeroShopPanel = heroShopPanel;
+    FeatureState::HeroShopItemList = heroShopItemList;
+}
+
+TableCacheCounts GetTableCacheCounts() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return {
+        static_cast<int>(FeatureState::Heroes.size()),
+        static_cast<int>(FeatureState::Equips.size()),
+        static_cast<int>(FeatureState::Cards.size())
+    };
+}
+
+bool TryGetHeroTableEntry(int heroId, HeroTableEntry* entry) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    auto it = FeatureState::Heroes.find(heroId);
+
+    if (it == FeatureState::Heroes.end()) {
+        return false;
+    }
+
+    if (entry) {
+        *entry = it->second;
+    }
+
+    return true;
+}
+
+std::unordered_map<int, HeroAutomationState> GetShopHeroTargetsSnapshot() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return FeatureState::ShopSelectedHeroes;
+}
+
+std::vector<std::pair<int, HeroAutomationState>> GetSelectedShopHeroTargetsSnapshot() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    std::vector<std::pair<int, HeroAutomationState>> targets;
+    targets.reserve(FeatureState::ShopSelectedHeroes.size());
+
+    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+        if (item.second.selected) {
+            targets.push_back(item);
+        }
+    }
+
+    return targets;
+}
+
+void SetShopHeroTarget(int heroId, const HeroAutomationState& state) {
+    if (heroId <= 0 || heroId > 10000000) {
+        return;
+    }
+
+    HeroAutomationState clampedState = state;
+    clampedState.targetCount = std::clamp(clampedState.targetCount, 1, 99);
+
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    FeatureState::ShopSelectedHeroes[heroId] = clampedState;
+}
+
+void DeselectShopHeroTargets() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+
+    for (auto& item : FeatureState::ShopSelectedHeroes) {
+        item.second.selected = false;
+    }
+}
+
+void ClearShopHeroTargets() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    FeatureState::ShopSelectedHeroes.clear();
+}
+
+int GetTrackedShopHeroTargetCount() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return static_cast<int>(FeatureState::ShopSelectedHeroes.size());
 }
 
 std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<HeroTableEntry> heroes;
     heroes.reserve(FeatureState::Heroes.size());
 
@@ -2068,6 +2193,7 @@ std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
 }
 
 std::vector<EquipTableEntry> GetSortedEquips() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<EquipTableEntry> equips;
     equips.reserve(FeatureState::Equips.size());
 
@@ -2091,6 +2217,7 @@ std::vector<EquipTableEntry> GetSortedEquips() {
 }
 
 std::vector<CardTableEntry> GetSortedCards() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<CardTableEntry> cards;
     cards.reserve(FeatureState::Cards.size());
 
@@ -2113,7 +2240,7 @@ std::vector<CardTableEntry> GetSortedCards() {
     return cards;
 }
 
-void ClearTableDataCache() {
+void ClearTableDataCacheUnlocked() {
     FeatureState::TableDataLoaded = false;
     FeatureState::Heroes.clear();
     FeatureState::Equips.clear();
@@ -2132,6 +2259,11 @@ void ClearTableDataCache() {
     FeatureState::LastShopBuyPrice = 0;
     FeatureState::LastShopBuyOwnCount = -1;
     FeatureState::LastShopBuyWasFree = false;
+}
+
+void ClearTableDataCache() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    ClearTableDataCacheUnlocked();
 }
 
 bool IsBattleActive(uint64_t selfAccountId) {
@@ -2166,12 +2298,13 @@ void RefreshTableDataForMatch(uint64_t selfAccountId) {
     }
 
     bool battleActive = IsBattleActive(selfAccountId);
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     bool selfChanged =
         selfAccountId != 0 &&
         selfAccountId != FeatureState::LastSelfAccountId;
 
     if (battleActive && (!FeatureState::WasInMatch || selfChanged)) {
-        ClearTableDataCache();
+        ClearTableDataCacheUnlocked();
     }
 
     FeatureState::WasInMatch = battleActive;
@@ -2195,6 +2328,10 @@ void EnsureTableDataLoaded() {
     }
 
     RefreshManagedReferences(true);
+
+    std::unordered_map<int, HeroTableEntry> localHeroes;
+    std::unordered_map<int, EquipTableEntry> localEquips;
+    std::unordered_map<int, CardTableEntry> localCards;
 
     if (Originals::CData_MCHero_GetInstance && Originals::CData_MCHero_GetAll) {
         void* heroInstance = Originals::CData_MCHero_GetInstance();
@@ -2246,7 +2383,7 @@ void EnsureTableDataLoaded() {
                 }
 
                 int quality = GetField<int>(reinterpret_cast<Il2CppObject*>(hero), qualityField);
-                FeatureState::Heroes[heroId] = {heroId, heroName, quality, true};
+                localHeroes[heroId] = {heroId, heroName, quality, true};
             }
         }
     }
@@ -2296,7 +2433,7 @@ void EnsureTableDataLoaded() {
                     );
 
                     if (equipId > 0 && !equipName.empty()) {
-                        FeatureState::Equips[equipId] = {equipId, equipName};
+                        localEquips[equipId] = {equipId, equipName};
                     }
                 }
             }
@@ -2347,16 +2484,22 @@ void EnsureTableDataLoaded() {
                 }
 
                 if (cardId > 0) {
-                    FeatureState::Cards[cardId] = {cardId, cardName};
+                    localCards[cardId] = {cardId, cardName};
                 }
             }
         }
     }
 
-    FeatureState::TableDataLoaded =
-        !FeatureState::Heroes.empty() &&
-        !FeatureState::Equips.empty() &&
-        !FeatureState::Cards.empty();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+        FeatureState::Heroes = std::move(localHeroes);
+        FeatureState::Equips = std::move(localEquips);
+        FeatureState::Cards = std::move(localCards);
+        FeatureState::TableDataLoaded =
+            !FeatureState::Heroes.empty() &&
+            !FeatureState::Equips.empty() &&
+            !FeatureState::Cards.empty();
+    }
 }
 
 bool IsPlausibleHeroId(int heroId) {
@@ -2368,15 +2511,15 @@ bool IsKnownHeroIdOrTablePending(int heroId) {
         return false;
     }
 
-    if (!FeatureState::TableDataLoaded || FeatureState::Heroes.empty()) {
-        return true;
-    }
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
 
-    return FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
+    return !FeatureState::TableDataLoaded.load() ||
+        FeatureState::Heroes.empty() ||
+        FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
 }
 
 int GetRecommendLineupTargetCount() {
-    return std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
+    return std::clamp(FeatureState::ShopRecommendTargetCount.load(), 1, 99);
 }
 
 int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
@@ -2421,9 +2564,9 @@ std::string FormatHeroLabel(int heroId) {
         return "Waiting";
     }
 
-    auto it = FeatureState::Heroes.find(heroId);
-    if (it != FeatureState::Heroes.end() && !it->second.name.empty()) {
-        return it->second.name + " (#" + std::to_string(heroId) + ")";
+    HeroTableEntry hero;
+    if (TryGetHeroTableEntry(heroId, &hero) && !hero.name.empty()) {
+        return hero.name + " (#" + std::to_string(heroId) + ")";
     }
 
     return "Hero #" + std::to_string(heroId);
@@ -2600,13 +2743,9 @@ bool HasWorthwhileShopTarget(
             poolCount > 0;
     };
 
-    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+    for (const auto& item : GetSelectedShopHeroTargetsSnapshot()) {
         int heroId = item.first;
         const HeroAutomationState& state = item.second;
-
-        if (!state.selected) {
-            continue;
-        }
 
         if (targetStillNeedsCopies(heroId, state.targetCount)) {
             FeatureState::CachedShopHasWorthwhileTarget = true;
@@ -2850,10 +2989,17 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     bool needRefreshShop = true;
     int cachedCoin = -1;
+    bool useSelectedTargets =
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopStopRefreshAtSelectedHero;
     bool useRecommendLineup =
         FeatureState::ShopBuyRecommendLineup ||
         FeatureState::ShopStopRefreshAtRecommendLineup;
     int recommendHeroId = useRecommendLineup ? GetRecommendLineupHeroId(now) : 0;
+    std::unordered_map<int, HeroAutomationState> shopTargets =
+        useSelectedTargets ?
+            GetShopHeroTargetsSnapshot() :
+            std::unordered_map<int, HeroAutomationState>{};
 
     auto getCoin = [&]() {
         if (cachedCoin < 0) {
@@ -2890,9 +3036,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
         }
 
         int heroId = shopData.m_iHeroId;
-        auto selectedIt = FeatureState::ShopSelectedHeroes.find(heroId);
+        auto selectedIt = shopTargets.find(heroId);
         bool isSelected =
-            selectedIt != FeatureState::ShopSelectedHeroes.end() &&
+            useSelectedTargets &&
+            selectedIt != shopTargets.end() &&
             selectedIt->second.selected;
         bool isRecommend =
             useRecommendLineup &&
@@ -3258,38 +3405,42 @@ float ParseConfigFloat(const std::string& value, float fallback) {
 }
 
 void ClampConfigurableState() {
-    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex, 0, 6);
-    UiState::ThemeIndex = std::clamp(UiState::ThemeIndex, 0, 1);
-    UiState::FontIndex = std::clamp(UiState::FontIndex, 0, 1);
-    UiState::MenuWidth = std::clamp(UiState::MenuWidth, 360.0f, 1600.0f);
-    UiState::MenuHeight = std::clamp(UiState::MenuHeight, 280.0f, 1200.0f);
-    UiState::MenuPosX = std::clamp(UiState::MenuPosX, -2000.0f, 4000.0f);
-    UiState::MenuPosY = std::clamp(UiState::MenuPosY, -2000.0f, 4000.0f);
-    UiState::FontScale = std::clamp(UiState::FontScale, 0.65f, 2.0f);
-    UiState::WindowAlpha = std::clamp(UiState::WindowAlpha, 0.35f, 1.0f);
-    UiState::WindowRounding = std::clamp(UiState::WindowRounding, 0.0f, 20.0f);
-    UiState::ChildRounding = std::clamp(UiState::ChildRounding, 0.0f, 20.0f);
-    UiState::FrameRounding = std::clamp(UiState::FrameRounding, 0.0f, 20.0f);
-    UiState::PopupRounding = std::clamp(UiState::PopupRounding, 0.0f, 20.0f);
-    UiState::ScrollbarRounding = std::clamp(UiState::ScrollbarRounding, 0.0f, 20.0f);
-    UiState::GrabRounding = std::clamp(UiState::GrabRounding, 0.0f, 20.0f);
-    UiState::TabRounding = std::clamp(UiState::TabRounding, 0.0f, 20.0f);
-    UiState::ScrollbarSize = std::clamp(UiState::ScrollbarSize, 8.0f, 32.0f);
-    UiState::WindowBorderSize = std::clamp(UiState::WindowBorderSize, 0.0f, 4.0f);
-    UiState::FrameBorderSize = std::clamp(UiState::FrameBorderSize, 0.0f, 4.0f);
-    UiState::FramePaddingX = std::clamp(UiState::FramePaddingX, 0.0f, 24.0f);
-    UiState::FramePaddingY = std::clamp(UiState::FramePaddingY, 0.0f, 24.0f);
-    UiState::ItemSpacingX = std::clamp(UiState::ItemSpacingX, 0.0f, 32.0f);
-    UiState::ItemSpacingY = std::clamp(UiState::ItemSpacingY, 0.0f, 32.0f);
-    UiState::IndentSpacing = std::clamp(UiState::IndentSpacing, 0.0f, 48.0f);
-    FeatureState::ShopKeepGoldAt = std::clamp(FeatureState::ShopKeepGoldAt, 0, 999999);
+    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 6);
+    UiState::ThemeIndex = std::clamp(UiState::ThemeIndex.load(), 0, 1);
+    UiState::FontIndex = std::clamp(UiState::FontIndex.load(), 0, 1);
+    UiState::MenuWidth = std::clamp(UiState::MenuWidth.load(), 360.0f, 1600.0f);
+    UiState::MenuHeight = std::clamp(UiState::MenuHeight.load(), 280.0f, 1200.0f);
+    UiState::MenuPosX = std::clamp(UiState::MenuPosX.load(), -2000.0f, 4000.0f);
+    UiState::MenuPosY = std::clamp(UiState::MenuPosY.load(), -2000.0f, 4000.0f);
+    UiState::FontScale = std::clamp(UiState::FontScale.load(), 0.65f, 2.0f);
+    UiState::WindowAlpha = std::clamp(UiState::WindowAlpha.load(), 0.35f, 1.0f);
+    UiState::WindowRounding = std::clamp(UiState::WindowRounding.load(), 0.0f, 20.0f);
+    UiState::ChildRounding = std::clamp(UiState::ChildRounding.load(), 0.0f, 20.0f);
+    UiState::FrameRounding = std::clamp(UiState::FrameRounding.load(), 0.0f, 20.0f);
+    UiState::PopupRounding = std::clamp(UiState::PopupRounding.load(), 0.0f, 20.0f);
+    UiState::ScrollbarRounding = std::clamp(UiState::ScrollbarRounding.load(), 0.0f, 20.0f);
+    UiState::GrabRounding = std::clamp(UiState::GrabRounding.load(), 0.0f, 20.0f);
+    UiState::TabRounding = std::clamp(UiState::TabRounding.load(), 0.0f, 20.0f);
+    UiState::ScrollbarSize = std::clamp(UiState::ScrollbarSize.load(), 8.0f, 32.0f);
+    UiState::WindowBorderSize = std::clamp(UiState::WindowBorderSize.load(), 0.0f, 4.0f);
+    UiState::FrameBorderSize = std::clamp(UiState::FrameBorderSize.load(), 0.0f, 4.0f);
+    UiState::FramePaddingX = std::clamp(UiState::FramePaddingX.load(), 0.0f, 24.0f);
+    UiState::FramePaddingY = std::clamp(UiState::FramePaddingY.load(), 0.0f, 24.0f);
+    UiState::ItemSpacingX = std::clamp(UiState::ItemSpacingX.load(), 0.0f, 32.0f);
+    UiState::ItemSpacingY = std::clamp(UiState::ItemSpacingY.load(), 0.0f, 32.0f);
+    UiState::IndentSpacing = std::clamp(UiState::IndentSpacing.load(), 0.0f, 48.0f);
+    FeatureState::ShopKeepGoldAt = std::clamp(FeatureState::ShopKeepGoldAt.load(), 0, 999999);
     FeatureState::ShopRecommendTargetCount =
-        std::clamp(FeatureState::ShopRecommendTargetCount, 1, 99);
-    FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar, 1, 3);
-    FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice, 0, 99);
+        std::clamp(FeatureState::ShopRecommendTargetCount.load(), 1, 99);
+    FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar.load(), 1, 3);
+    FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
-    for (auto& item : FeatureState::ShopSelectedHeroes) {
-        item.second.targetCount = std::clamp(item.second.targetCount, 1, 99);
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+
+        for (auto& item : FeatureState::ShopSelectedHeroes) {
+            item.second.targetCount = std::clamp(item.second.targetCount, 1, 99);
+        }
     }
 }
 
@@ -3335,7 +3486,7 @@ void ResetFeatureSettings() {
     FeatureState::ShopKeepGold = false;
     FeatureState::ShopKeepGoldAt = 20;
     FeatureState::ShopRecommendTargetCount = 9;
-    FeatureState::ShopSelectedHeroes.clear();
+    ClearShopHeroTargets();
     FeatureState::ArenaHeroStar = 1;
     FeatureState::ArenaItemEnhanced = false;
     FeatureState::ArenaGogoCardEnabled = false;
@@ -3425,18 +3576,21 @@ std::string GetDefaultConfigPath() {
 }
 
 void EnsureConfigPathInitialized() {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     if (UiState::ConfigPath.empty()) {
         UiState::ConfigPath = GetDefaultConfigPath();
     }
 }
 
 void SetConfigStatus(const char* prefix, const std::string& path, bool success) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     UiState::ConfigStatus = prefix;
     UiState::ConfigStatus += success ? ": " : " failed: ";
     UiState::ConfigStatus += path;
 }
 
 std::string FormatShopSelectedHeroes() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::string value;
 
     for (const auto& item : FeatureState::ShopSelectedHeroes) {
@@ -3457,6 +3611,7 @@ std::string FormatShopSelectedHeroes() {
 }
 
 void LoadShopSelectedHeroes(const std::string& value) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     FeatureState::ShopSelectedHeroes.clear();
 
     size_t cursor = 0;
@@ -3561,6 +3716,7 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
 }
 
 bool SaveConfigToFile(const std::string& path) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
 
     if (!EnsureParentDirectory(path)) {
@@ -3639,6 +3795,7 @@ bool SaveConfigToFile(const std::string& path) {
 }
 
 bool LoadConfigFromFile(const std::string& path, bool updateStatus) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
 
     FILE* file = fopen(path.c_str(), "r");
@@ -4046,13 +4203,14 @@ void DrawRuntimeStatus() {
     snprintf(selfIdText, sizeof(selfIdText), "%llu", (unsigned long long)selfAccountId);
 
     char tableText[96];
+    TableCacheCounts tableCounts = GetTableCacheCounts();
     snprintf(
         tableText,
         sizeof(tableText),
         "%d heroes / %d items / %d cards",
-        static_cast<int>(FeatureState::Heroes.size()),
-        static_cast<int>(FeatureState::Equips.size()),
-        static_cast<int>(FeatureState::Cards.size())
+        tableCounts.heroes,
+        tableCounts.equips,
+        tableCounts.cards
     );
 
     if (ImGui::BeginTable(
@@ -4105,6 +4263,84 @@ void DrawRuntimeStatus() {
 
 void DrawWaitingText(const char* message) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "%s", message);
+}
+
+bool DrawAtomicCheckbox(const char* label, std::atomic<bool>& value) {
+    bool current = value.load();
+
+    if (!ImGui::Checkbox(label, &current)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicCombo(
+    const char* label,
+    std::atomic<int>& value,
+    const char* const items[],
+    int itemsCount
+) {
+    int current = value.load();
+
+    if (!ImGui::Combo(label, &current, items, itemsCount)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicInputInt(
+    const char* label,
+    std::atomic<int>& value,
+    int step = 1,
+    int stepFast = 100,
+    ImGuiInputTextFlags flags = 0
+) {
+    int current = value.load();
+
+    if (!ImGui::InputInt(label, &current, step, stepFast, flags)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicSliderFloat(
+    const char* label,
+    std::atomic<float>& value,
+    float minValue,
+    float maxValue,
+    const char* format
+) {
+    float current = value.load();
+
+    if (!ImGui::SliderFloat(label, &current, minValue, maxValue, format)) {
+        return false;
+    }
+
+    value = current;
+    return true;
+}
+
+bool DrawAtomicInputFloat(
+    const char* label,
+    std::atomic<float>& value,
+    float step,
+    float stepFast,
+    const char* format
+) {
+    float current = value.load();
+
+    if (!ImGui::InputFloat(label, &current, step, stepFast, format)) {
+        return false;
+    }
+
+    value = current;
+    return true;
 }
 
 bool HasShopSelectBinding() {
@@ -4311,9 +4547,9 @@ void DrawCombatTab() {
         DrawWaitingText("Waiting for spectator hook");
     }
 
-    ImGui::Checkbox(
+    DrawAtomicCheckbox(
         "Invisible Scout - hide spectate switching",
-        &FeatureState::CombatInvisibleScout
+        FeatureState::CombatInvisibleScout
     );
 }
 
@@ -4326,8 +4562,9 @@ void DrawAppearanceTab() {
     };
 
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::Combo("Theme", &UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
-        UiState::ThemeIndex = std::clamp(UiState::ThemeIndex, 0, IM_ARRAYSIZE(themes) - 1);
+    if (DrawAtomicCombo("Theme", UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
+        UiState::ThemeIndex =
+            std::clamp(UiState::ThemeIndex.load(), 0, IM_ARRAYSIZE(themes) - 1);
         ApplyAppearance();
     }
 
@@ -4339,12 +4576,13 @@ void DrawAppearanceTab() {
     };
 
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::Combo("Font", &UiState::FontIndex, fonts, IM_ARRAYSIZE(fonts))) {
-        if (UiState::FontIndex == 1 && !AppearanceState::NotoCjkFont) {
+    if (DrawAtomicCombo("Font", UiState::FontIndex, fonts, IM_ARRAYSIZE(fonts))) {
+        if (UiState::FontIndex.load() == 1 && !AppearanceState::NotoCjkFont) {
             UiState::FontIndex = 0;
         }
 
-        UiState::FontIndex = std::clamp(UiState::FontIndex, 0, IM_ARRAYSIZE(fonts) - 1);
+        UiState::FontIndex =
+            std::clamp(UiState::FontIndex.load(), 0, IM_ARRAYSIZE(fonts) - 1);
         ApplyAppearance();
     }
 
@@ -4397,13 +4635,13 @@ void DrawSettingsTab() {
         if (ImGui::BeginTabItem("Window")) {
             bool changed = false;
 
-            changed |= ImGui::SliderFloat("Menu width", &UiState::MenuWidth, 360.0f, 1600.0f, "%.0f");
-            changed |= ImGui::SliderFloat("Menu height", &UiState::MenuHeight, 280.0f, 1200.0f, "%.0f");
-            changed |= ImGui::Checkbox("Use fixed menu position", &UiState::UseFixedMenuPosition);
+            changed |= DrawAtomicSliderFloat("Menu width", UiState::MenuWidth, 360.0f, 1600.0f, "%.0f");
+            changed |= DrawAtomicSliderFloat("Menu height", UiState::MenuHeight, 280.0f, 1200.0f, "%.0f");
+            changed |= DrawAtomicCheckbox("Use fixed menu position", UiState::UseFixedMenuPosition);
 
-            ImGui::BeginDisabled(!UiState::UseFixedMenuPosition);
-            changed |= ImGui::InputFloat("Menu position X", &UiState::MenuPosX, 1.0f, 20.0f, "%.0f");
-            changed |= ImGui::InputFloat("Menu position Y", &UiState::MenuPosY, 1.0f, 20.0f, "%.0f");
+            ImGui::BeginDisabled(!UiState::UseFixedMenuPosition.load());
+            changed |= DrawAtomicInputFloat("Menu position X", UiState::MenuPosX, 1.0f, 20.0f, "%.0f");
+            changed |= DrawAtomicInputFloat("Menu position Y", UiState::MenuPosY, 1.0f, 20.0f, "%.0f");
             ImGui::EndDisabled();
 
             if (ImGui::Button("Capture current menu size")) {
@@ -4423,8 +4661,8 @@ void DrawSettingsTab() {
             }
 
             ImGui::SeparatorText("Behavior");
-            changed |= ImGui::Checkbox("Move from title bar only", &UiState::MoveFromTitleBarOnly);
-            changed |= ImGui::Checkbox("Resize from edges", &UiState::ResizeFromEdges);
+            changed |= DrawAtomicCheckbox("Move from title bar only", UiState::MoveFromTitleBarOnly);
+            changed |= DrawAtomicCheckbox("Resize from edges", UiState::ResizeFromEdges);
 
             if (changed) {
                 ApplyAppearance();
@@ -4437,29 +4675,29 @@ void DrawSettingsTab() {
             bool changed = false;
 
             ImGui::SeparatorText("Typography");
-            changed |= ImGui::SliderFloat("Font size scale", &UiState::FontScale, 0.65f, 2.0f, "%.2fx");
+            changed |= DrawAtomicSliderFloat("Font size scale", UiState::FontScale, 0.65f, 2.0f, "%.2fx");
 
             ImGui::SeparatorText("Window");
-            changed |= ImGui::SliderFloat("Window opacity", &UiState::WindowAlpha, 0.35f, 1.0f, "%.2f");
-            changed |= ImGui::SliderFloat("Window border", &UiState::WindowBorderSize, 0.0f, 4.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame border", &UiState::FrameBorderSize, 0.0f, 4.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Scrollbar size", &UiState::ScrollbarSize, 8.0f, 32.0f, "%.0f");
+            changed |= DrawAtomicSliderFloat("Window opacity", UiState::WindowAlpha, 0.35f, 1.0f, "%.2f");
+            changed |= DrawAtomicSliderFloat("Window border", UiState::WindowBorderSize, 0.0f, 4.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame border", UiState::FrameBorderSize, 0.0f, 4.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Scrollbar size", UiState::ScrollbarSize, 8.0f, 32.0f, "%.0f");
 
             ImGui::SeparatorText("Rounding");
-            changed |= ImGui::SliderFloat("Window rounding", &UiState::WindowRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Child rounding", &UiState::ChildRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame rounding", &UiState::FrameRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Popup rounding", &UiState::PopupRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Scrollbar rounding", &UiState::ScrollbarRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Grab rounding", &UiState::GrabRounding, 0.0f, 20.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Tab rounding", &UiState::TabRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Window rounding", UiState::WindowRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Child rounding", UiState::ChildRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame rounding", UiState::FrameRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Popup rounding", UiState::PopupRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Scrollbar rounding", UiState::ScrollbarRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Grab rounding", UiState::GrabRounding, 0.0f, 20.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Tab rounding", UiState::TabRounding, 0.0f, 20.0f, "%.1f");
 
             ImGui::SeparatorText("Spacing");
-            changed |= ImGui::SliderFloat("Frame padding X", &UiState::FramePaddingX, 0.0f, 24.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Frame padding Y", &UiState::FramePaddingY, 0.0f, 24.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Item spacing X", &UiState::ItemSpacingX, 0.0f, 32.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Item spacing Y", &UiState::ItemSpacingY, 0.0f, 32.0f, "%.1f");
-            changed |= ImGui::SliderFloat("Indent spacing", &UiState::IndentSpacing, 0.0f, 48.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame padding X", UiState::FramePaddingX, 0.0f, 24.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Frame padding Y", UiState::FramePaddingY, 0.0f, 24.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Item spacing X", UiState::ItemSpacingX, 0.0f, 32.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Item spacing Y", UiState::ItemSpacingY, 0.0f, 32.0f, "%.1f");
+            changed |= DrawAtomicSliderFloat("Indent spacing", UiState::IndentSpacing, 0.0f, 48.0f, "%.1f");
 
             if (changed) {
                 ApplyAppearance();
@@ -4476,19 +4714,19 @@ void DrawSettingsTab() {
 
             ImGui::SameLine();
             if (ImGui::Button("Clear shop hero targets")) {
-                FeatureState::ShopSelectedHeroes.clear();
+                ClearShopHeroTargets();
                 UiState::ConfigStatus = "Shop hero targets cleared";
             }
 
             ImGui::Spacing();
             ImGui::Text(
                 "Tracked shop heroes: %d",
-                static_cast<int>(FeatureState::ShopSelectedHeroes.size())
+                GetTrackedShopHeroTargetCount()
             );
             ImGui::Text(
                 "Selected GogoCards: %d / %d",
-                FeatureState::ArenaGogoCardSelected1,
-                FeatureState::ArenaGogoCardSelected2
+                FeatureState::ArenaGogoCardSelected1.load(),
+                FeatureState::ArenaGogoCardSelected2.load()
             );
 
             ImGui::EndTabItem();
@@ -4533,7 +4771,24 @@ std::string GetRoundResultDataField(void* battleManager, const char* fieldName) 
         return "Waiting";
     }
 
-    FieldInfo* valueField = GetFieldInfoFromName("", "MCFightRoundResultData", fieldName);
+    static std::unordered_map<std::string, FieldInfo*> valueFieldCache;
+    static std::mutex valueFieldCacheMutex;
+    FieldInfo* valueField = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(valueFieldCacheMutex);
+        auto it = valueFieldCache.find(fieldName);
+        if (it != valueFieldCache.end()) {
+            valueField = it->second;
+        }
+    }
+
+    if (!valueField) {
+        valueField = GetFieldInfoFromName("", "MCFightRoundResultData", fieldName);
+        std::lock_guard<std::mutex> lock(valueFieldCacheMutex);
+        valueFieldCache[fieldName] = valueField;
+    }
+
     return FormatFieldInt(roundResultData, valueField);
 }
 
@@ -5167,7 +5422,7 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
 
     if (!ImGui::BeginTable(
         "##OpponentPredictionTable",
-        3,
+        2,
         ImGuiTableFlags_Borders |
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingStretchProp |
@@ -5179,7 +5434,6 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
 
     ImGui::TableSetupColumn("Player");
     ImGui::TableSetupColumn("Will fight", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-    ImGui::TableSetupColumn("Weight", ImGuiTableColumnFlags_WidthFixed, 90.0f);
     ImGui::TableHeadersRow();
 
     for (const OpponentPredictionRow& row : rows) {
@@ -5188,8 +5442,6 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
         ImGui::TextUnformatted(row.name.c_str());
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%d%%", row.percent);
-        ImGui::TableSetColumnIndex(2);
-        ImGui::Text("%.2f", row.weight);
     }
 
     ImGui::EndTable();
@@ -5374,28 +5626,28 @@ void DrawShopTab() {
                 DrawWaitingText("Waiting for shop automation bindings");
             }
 
-            if (FeatureState::ShopRefresh && !HasShopRefreshBindings()) {
+            if (FeatureState::ShopRefresh.load() && !HasShopRefreshBindings()) {
                 DrawWaitingText("Waiting for shop refresh panel");
             }
 
-            if ((FeatureState::ShopBuyRecommendLineup ||
-                 FeatureState::ShopStopRefreshAtRecommendLineup) &&
+            if ((FeatureState::ShopBuyRecommendLineup.load() ||
+                 FeatureState::ShopStopRefreshAtRecommendLineup.load()) &&
                 !HasShopRecommendLineupBindings()) {
                 DrawWaitingText("Waiting for recommendation lineup bindings");
             }
 
-            ImGui::Checkbox("Auto-buy free heroes", &FeatureState::ShopBuyFreeHero);
-            ImGui::Checkbox("Auto-buy selected targets", &FeatureState::ShopBuySelectedHero);
+            DrawAtomicCheckbox("Auto-buy free heroes", FeatureState::ShopBuyFreeHero);
+            DrawAtomicCheckbox("Auto-buy selected targets", FeatureState::ShopBuySelectedHero);
             ImGui::Separator();
             ImGui::SeparatorText("Recommendation Lineup");
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Auto-buy recommendation heroes",
-                &FeatureState::ShopBuyRecommendLineup
+                FeatureState::ShopBuyRecommendLineup
             );
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt(
+            DrawAtomicInputInt(
                 "Recommendation target count",
-                &FeatureState::ShopRecommendTargetCount
+                FeatureState::ShopRecommendTargetCount
             );
             FeatureState::ShopRecommendTargetCount = GetRecommendLineupTargetCount();
 
@@ -5411,25 +5663,25 @@ void DrawShopTab() {
             }
 
             ImGui::Separator();
-            ImGui::Checkbox("Auto-refresh shop", &FeatureState::ShopRefresh);
-            ImGui::Checkbox(
+            DrawAtomicCheckbox("Auto-refresh shop", FeatureState::ShopRefresh);
+            DrawAtomicCheckbox(
                 "Pause refresh when free hero appears",
-                &FeatureState::ShopStopRefreshAtFreeHero
+                FeatureState::ShopStopRefreshAtFreeHero
             );
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Pause refresh when selected target appears",
-                &FeatureState::ShopStopRefreshAtSelectedHero
+                FeatureState::ShopStopRefreshAtSelectedHero
             );
-            ImGui::Checkbox(
+            DrawAtomicCheckbox(
                 "Pause refresh when recommendation hero appears",
-                &FeatureState::ShopStopRefreshAtRecommendLineup
+                FeatureState::ShopStopRefreshAtRecommendLineup
             );
             ImGui::Separator();
-            ImGui::Checkbox("Keep gold reserve", &FeatureState::ShopKeepGold);
+            DrawAtomicCheckbox("Keep gold reserve", FeatureState::ShopKeepGold);
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Minimum reserve gold", &FeatureState::ShopKeepGoldAt);
+            DrawAtomicInputInt("Minimum reserve gold", FeatureState::ShopKeepGoldAt);
             FeatureState::ShopKeepGoldAt =
-                std::clamp(FeatureState::ShopKeepGoldAt, 0, 999999);
+                std::clamp(FeatureState::ShopKeepGoldAt.load(), 0, 999999);
             ImGui::EndTabItem();
         }
 
@@ -5439,27 +5691,27 @@ void DrawShopTab() {
                 "Search heroes by name, ID, or cost",
                 UiState::ShopHeroFilter
             );
-            ImGui::Checkbox("Show tracked heroes only", &UiState::ShopShowSelectedOnly);
+            DrawAtomicCheckbox("Show tracked heroes only", UiState::ShopShowSelectedOnly);
 
             if (ImGui::Button("Clear hero targets", ImVec2(-1.0f, 0.0f))) {
-                for (auto& item : FeatureState::ShopSelectedHeroes) {
-                    item.second.selected = false;
-                }
+                DeselectShopHeroTargets();
             }
 
             ImGui::Spacing();
             std::vector<HeroTableEntry> heroes = GetSortedHeroes(true);
+            std::unordered_map<int, HeroAutomationState> shopTargets =
+                GetShopHeroTargetsSnapshot();
             int totalHeroCount = static_cast<int>(heroes.size());
             FilterHeroes(heroes, UiState::ShopHeroFilter);
 
-            if (UiState::ShopShowSelectedOnly) {
+            if (UiState::ShopShowSelectedOnly.load()) {
                 heroes.erase(
                     std::remove_if(
                         heroes.begin(),
                         heroes.end(),
-                        [](const HeroTableEntry& hero) {
-                            auto it = FeatureState::ShopSelectedHeroes.find(hero.id);
-                            return it == FeatureState::ShopSelectedHeroes.end() ||
+                        [&shopTargets](const HeroTableEntry& hero) {
+                            auto it = shopTargets.find(hero.id);
+                            return it == shopTargets.end() ||
                                 !it->second.selected;
                         }
                     ),
@@ -5495,8 +5747,13 @@ void DrawShopTab() {
                 ImGui::TableHeadersRow();
 
                 for (const HeroTableEntry& hero : heroes) {
-                    HeroAutomationState& state = FeatureState::ShopSelectedHeroes[hero.id];
+                    auto targetIt = shopTargets.find(hero.id);
+                    HeroAutomationState state =
+                        targetIt != shopTargets.end() ?
+                            targetIt->second :
+                            HeroAutomationState{};
                     state.targetCount = std::clamp(state.targetCount, 1, 99);
+                    HeroAutomationState originalState = state;
 
                     ImGui::PushID(hero.id);
                     ImGui::TableNextRow();
@@ -5515,6 +5772,12 @@ void DrawShopTab() {
                     ImGui::TableSetColumnIndex(3);
                     ImGui::Checkbox("##selected", &state.selected);
                     ImGui::PopID();
+
+                    if (state.selected != originalState.selected ||
+                        state.targetCount != originalState.targetCount) {
+                        SetShopHeroTarget(hero.id, state);
+                        shopTargets[hero.id] = state;
+                    }
                 }
 
                 ImGui::EndTable();
@@ -5535,8 +5798,9 @@ void DrawArenaTab() {
             }
 
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Spawn star level", &FeatureState::ArenaHeroStar);
-            FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar, 1, 3);
+            DrawAtomicInputInt("Spawn star level", FeatureState::ArenaHeroStar);
+            FeatureState::ArenaHeroStar =
+                std::clamp(FeatureState::ArenaHeroStar.load(), 1, 3);
             ImGui::Separator();
             DrawSearchInput(
                 "ArenaHeroFilter",
@@ -5583,7 +5847,7 @@ void DrawArenaTab() {
                     ImGui::TableSetColumnIndex(2);
 
                     if (ImGui::Button("Spawn", ImVec2(-1.0f, 0.0f))) {
-                        GiveHero(hero.id, FeatureState::ArenaHeroStar);
+                        GiveHero(hero.id, FeatureState::ArenaHeroStar.load());
                     }
 
                     ImGui::PopID();
@@ -5600,7 +5864,7 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for arena item binding");
             }
 
-            ImGui::Checkbox("Grant enhanced item", &FeatureState::ArenaItemEnhanced);
+            DrawAtomicCheckbox("Grant enhanced item", FeatureState::ArenaItemEnhanced);
             ImGui::Separator();
             DrawSearchInput(
                 "ArenaItemFilter",
@@ -5661,11 +5925,11 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for GogoCard binding");
             }
 
-            ImGui::Checkbox("Force selected GogoCards", &FeatureState::ArenaGogoCardEnabled);
+            DrawAtomicCheckbox("Force selected GogoCards", FeatureState::ArenaGogoCardEnabled);
             ImGui::Text(
                 "Card 1: %d  Card 2: %d",
-                FeatureState::ArenaGogoCardSelected1,
-                FeatureState::ArenaGogoCardSelected2
+                FeatureState::ArenaGogoCardSelected1.load(),
+                FeatureState::ArenaGogoCardSelected2.load()
             );
             if (ImGui::Button("Clear card 1")) {
                 FeatureState::ArenaGogoCardSelected1 = -1;
@@ -5711,11 +5975,13 @@ void DrawArenaTab() {
                 ImGui::TableHeadersRow();
 
                 for (const CardTableEntry& card : cards) {
+                    int selectedCard1 = FeatureState::ArenaGogoCardSelected1.load();
+                    int selectedCard2 = FeatureState::ArenaGogoCardSelected2.load();
+
                     ImGui::PushID(card.id);
                     ImGui::TableNextRow();
 
-                    if (card.id == FeatureState::ArenaGogoCardSelected1 ||
-                        card.id == FeatureState::ArenaGogoCardSelected2) {
+                    if (card.id == selectedCard1 || card.id == selectedCard2) {
                         ImGui::TableSetBgColor(
                             ImGuiTableBgTarget_RowBg0,
                             ImGui::GetColorU32(ImVec4(0.25f, 0.55f, 0.25f, 0.35f))
@@ -5755,19 +6021,22 @@ void DrawArenaTab() {
                 DrawWaitingText("Waiting for player data bindings");
             }
 
-            ImGui::Checkbox("Force all synergies active", &FeatureState::ArenaForceActiveSynergy);
-            ImGui::Checkbox("Force player level 99", &FeatureState::ArenaForceLevel99);
-            ImGui::Checkbox("Allow outside-map placement", &FeatureState::ArenaOutsideMapPlacement);
-            ImGui::Checkbox("Set all enemy HP to 1", &FeatureState::ArenaAllEnemyHpOne);
+            DrawAtomicCheckbox("Force all synergies active", FeatureState::ArenaForceActiveSynergy);
+            DrawAtomicCheckbox("Force player level 99", FeatureState::ArenaForceLevel99);
+            DrawAtomicCheckbox("Allow outside-map placement", FeatureState::ArenaOutsideMapPlacement);
+            DrawAtomicCheckbox("Set all enemy HP to 1", FeatureState::ArenaAllEnemyHpOne);
             ImGui::Separator();
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("Hero cost filter", &FeatureState::ArenaPrice);
-            FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice, 0, 99);
+            DrawAtomicInputInt("Hero cost filter", FeatureState::ArenaPrice);
+            FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
             if (ImGui::Button("Spawn all heroes with selected cost", ImVec2(-1.0f, 0.0f))) {
+                int arenaPrice = FeatureState::ArenaPrice.load();
+                int arenaHeroStar = FeatureState::ArenaHeroStar.load();
+
                 for (const HeroTableEntry& hero : GetSortedHeroes(true)) {
-                    if (hero.quality == FeatureState::ArenaPrice) {
-                        GiveHero(hero.id, FeatureState::ArenaHeroStar);
+                    if (hero.quality == arenaPrice) {
+                        GiveHero(hero.id, arenaHeroStar);
                     }
                 }
             }
@@ -5789,7 +6058,7 @@ struct MainMenuTab {
 };
 
 void DrawMenuTabButton(const char* label, int index) {
-    bool selected = UiState::MainTabIndex == index;
+    bool selected = UiState::MainTabIndex.load() == index;
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
 
@@ -5812,8 +6081,8 @@ ImVec2 GetValidatedMenuSize() {
         1200.0f;
 
     return ImVec2(
-        std::clamp(UiState::MenuWidth, 360.0f, maxWidth),
-        std::clamp(UiState::MenuHeight, 280.0f, maxHeight)
+        std::clamp(UiState::MenuWidth.load(), 360.0f, maxWidth),
+        std::clamp(UiState::MenuHeight.load(), 280.0f, maxHeight)
     );
 }
 
@@ -5825,8 +6094,8 @@ ImVec2 GetValidatedMenuPosition(const ImVec2& menuSize) {
     float minY = menuSize.y > 0.0f ? 48.0f - menuSize.y : -2000.0f;
 
     return ImVec2(
-        std::clamp(UiState::MenuPosX, minX, maxX),
-        std::clamp(UiState::MenuPosY, minY, maxY)
+        std::clamp(UiState::MenuPosX.load(), minX, maxX),
+        std::clamp(UiState::MenuPosY.load(), minY, maxY)
     );
 }
 
@@ -5844,11 +6113,11 @@ void DrawMainMenu() {
     constexpr int tabCount = static_cast<int>(IM_ARRAYSIZE(tabs));
     static_assert(tabCount > 0);
 
-    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex, 0, tabCount - 1);
+    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, tabCount - 1);
 
     const ImVec2 menuSize = GetValidatedMenuSize();
 
-    if (UiState::UseFixedMenuPosition) {
+    if (UiState::UseFixedMenuPosition.load()) {
         ImGui::SetNextWindowPos(GetValidatedMenuPosition(menuSize), ImGuiCond_Always);
     }
 
@@ -5917,8 +6186,8 @@ bool InitializeOverlay() {
     return true;
 }
 
-bool AttachRenderIl2CppThread(bool& attached) {
-    if (attached) {
+bool AttachRenderIl2CppThread(std::atomic<bool>& attached) {
+    if (attached.load()) {
         return true;
     }
 
@@ -6030,8 +6299,8 @@ namespace Hooks {
 
     // Renders the ImGui overlay before the frame is swapped.
     EGLBoolean EglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
-        static bool imguiReady = false;
-        static bool renderThreadAttached = false;
+        static std::atomic<bool> imguiReady{false};
+        static std::atomic<bool> renderThreadAttached{false};
 
         if (!Originals::EglSwapBuffers) {
             return EGL_FALSE;
