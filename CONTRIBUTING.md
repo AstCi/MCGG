@@ -45,14 +45,15 @@ git lfs pull
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, player economy/rank/shop state, battle manager
   fields, battle bridge state, shop panel state, behavior API state, and
-  opponent prediction or enemy lineup preview behavior after feature changes.
+  opponent prediction behavior after feature changes.
 - In the Test prediction table, `Will fight` is the local player's opponent
   probability. Only the exact local current opponent should be forced to
   `100%`; other rows should stay weighted even when their `Current enemy`
   value is known. `Recent` is derived from the per-player opponent history.
-- Enemy lineup preview uses `MCLogicBattleData.ILOGIC_GetHeroInfosInBattle`
-  as read-only data. Keep it de-duplicated by hero GUID and avoid spawning
-  spectator preview models into the local board state.
+- Opponent prediction should use dump-backed runtime state first. Prefer
+  `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
+  `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, and
+  `prevRealPlayerEnemy` before falling back to heuristic account ordering.
 - For Shop changes, preserve the existing throttled automation model: buy,
   repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
   bounded, snapshot-based, and retryable.
@@ -70,9 +71,8 @@ Current user-facing overlay areas are Info, Combat, Appearance, Settings, Shop,
 Arena, and Test. Shop currently includes free-hero buying, manual target buying,
 Recommendation Lineup buying, auto-refresh pause conditions, keep-gold reserve,
 target counts, and client-side shop UI automation. Combat also includes local UI
-visibility toggles backed by `MCBattleBridge` and a read-only next enemy lineup
-preview. Appearance includes ImGui Dark, Catppuccin Mocha, and additional
-palettes inspired by Dear ImGui issue #707.
+visibility toggles backed by `MCBattleBridge`. Appearance includes ImGui Dark,
+Catppuccin Mocha, and additional palettes inspired by Dear ImGui issue #707.
 Test diagnostics are split into tabbed sections for prediction, bindings, round
 state, player data, battle managers, battle bridge, shop UI, behavior API, and
 all-manager views. New user-facing controls should report delayed runtime
