@@ -74,7 +74,9 @@ Target default yang didukung:
 
 ### Appearance
 
-- Selector theme ImGui Dark dan Catppuccin Mocha.
+- Selector theme dengan ImGui Dark, Catppuccin Mocha, dan palette tambahan
+  yang terinspirasi dari [Dear ImGui issue #707](https://github.com/ocornut/imgui/issues/707),
+  termasuk Darcula, Cherry, Dracula, Visual Studio, Deep Dark, dan Maroon.
 - Selector font Default dan font Noto Sans CJK embedded.
 - Status kesiapan font saat font Noto Sans CJK embedded tidak tersedia.
 
@@ -336,6 +338,9 @@ Urutan ini disengaja. Rendering dan input diinisialisasi terpisah dari feature b
   `RuntimeMutex::CacheMutex`, dan lindungi string UI/config dengan
   `RuntimeMutex::UiMutex`.
 - Pertahankan scan selected-target shop tetap bounded dan berbasis snapshot.
+- Pastikan nama theme Appearance dan entry palette tetap sejajar saat
+  menambahkan theme. Config lama mengharapkan Catppuccin Mocha tetap berada di
+  theme index `1`.
 - Pertahankan default ABI sebagai `arm64-v8a`.
 - Jaga kompatibilitas Unity tetap selaras dengan `2019.4.22f1`.
 - Jaga mode bahasa native tetap selaras dengan `c++26` kecuali konfigurasi build memang diubah secara sengaja.

@@ -74,7 +74,9 @@ The default supported target is:
 
 ### Appearance
 
-- ImGui Dark and Catppuccin Mocha theme selector.
+- Theme selector with ImGui Dark, Catppuccin Mocha, and additional palettes
+  inspired by [Dear ImGui issue #707](https://github.com/ocornut/imgui/issues/707),
+  including Darcula, Cherry, Dracula, Visual Studio, Deep Dark, and Maroon.
 - Default font and embedded Noto Sans CJK font selector.
 - Font readiness status when the embedded Noto Sans CJK font is unavailable.
 
@@ -332,6 +334,8 @@ This order is intentional. Rendering and input are initialized separately from f
 - Keep method and field cache changes under `RuntimeMutex::CacheMutex`, and
   guard UI/config strings with `RuntimeMutex::UiMutex`.
 - Keep shop selected-target scans bounded and snapshot-based.
+- Keep Appearance theme names and palette entries aligned when adding themes.
+  Existing configs expect Catppuccin Mocha to remain theme index `1`.
 - Keep the default ABI as `arm64-v8a`.
 - Keep Unity compatibility aligned with `2019.4.22f1`.
 - Keep the native language mode aligned with `c++26` unless the build configuration changes intentionally.
