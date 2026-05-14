@@ -263,6 +263,36 @@ namespace AppearanceState {
     int AppliedFontIndex = -1;
 }
 
+constexpr int kDefaultThemeIndex = 1;
+
+constexpr const char* kAppearanceThemes[] = {
+    "ImGui Dark",
+    "Catppuccin Mocha",
+    "Codz01 Midnight",
+    "Doug Dark",
+    "Microsoft Light",
+    "Darcula",
+    "Unreal Grey",
+    "Cherry",
+    "Light Green",
+    "Photoshop Charcoal",
+    "Corporate Grey",
+    "Raikiri Dark",
+    "Steam VGUI",
+    "Deus Ex Gold",
+    "Visual Studio",
+    "OverShifted Dark",
+    "FontStudio Green",
+    "FontStudio Red",
+    "Deep Dark",
+    "Dracula",
+    "Maroon"
+};
+
+constexpr int kAppearanceThemeCount =
+    static_cast<int>(sizeof(kAppearanceThemes) / sizeof(kAppearanceThemes[0]));
+constexpr int kIssue707ThemeOffset = 2;
+
 // Original function pointers resolved from IL2CPP metadata or hook trampolines.
 namespace Originals {
     EGLBoolean (*EglSwapBuffers)(EGLDisplay dpy, EGLSurface surface);
@@ -3406,7 +3436,8 @@ float ParseConfigFloat(const std::string& value, float fallback) {
 
 void ClampConfigurableState() {
     UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 6);
-    UiState::ThemeIndex = std::clamp(UiState::ThemeIndex.load(), 0, 1);
+    UiState::ThemeIndex =
+        std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
     UiState::FontIndex = std::clamp(UiState::FontIndex.load(), 0, 1);
     UiState::MenuWidth = std::clamp(UiState::MenuWidth.load(), 360.0f, 1600.0f);
     UiState::MenuHeight = std::clamp(UiState::MenuHeight.load(), 280.0f, 1200.0f);
@@ -3445,7 +3476,7 @@ void ClampConfigurableState() {
 }
 
 void ResetVisualSettings() {
-    UiState::ThemeIndex = 1;
+    UiState::ThemeIndex = kDefaultThemeIndex;
     UiState::FontIndex = AppearanceState::NotoCjkFont ? 1 : 0;
     UiState::MoveFromTitleBarOnly = true;
     UiState::ResizeFromEdges = false;
@@ -3839,6 +3870,121 @@ bool LoadConfigFromFile(const std::string& path, bool updateStatus) {
     return true;
 }
 
+struct Issue707ThemePalette {
+    unsigned int text;
+    unsigned int disabledText;
+    unsigned int windowBg;
+    unsigned int panelBg;
+    unsigned int panelHover;
+    unsigned int accent;
+    unsigned int accentHovered;
+    unsigned int accentActive;
+    unsigned int border;
+    unsigned int checkMark;
+    float windowAlpha;
+    float panelAlpha;
+    float popupAlpha;
+};
+
+void ApplyIssue707PaletteTheme(int themeIndex) {
+    static const Issue707ThemePalette palettes[] = {
+        {0xE6E6E6, 0x999999, 0x171724, 0x33334D, 0x4D4D73, 0x6F80B3, 0x899CDD, 0xA8B8FF, 0x6E6E80, 0xA8B8FF, 1.00f, 0.72f, 0.94f},
+        {0xFFFFFF, 0x666666, 0x0F0F0F, 0x294A7A, 0x3D659D, 0x4385D1, 0x5AA2F0, 0x72B7FF, 0xFFFFFF, 0x72B7FF, 0.94f, 0.54f, 0.94f},
+        {0x4F403D, 0x8F807C, 0xF0F0F0, 0xE5E5F5, 0xD4D4F2, 0x7676C9, 0x5B5BB8, 0x4444A0, 0x808080, 0x333399, 1.00f, 0.75f, 0.98f},
+        {0xBBBBBB, 0x585858, 0x3C3F41, 0x2B2B2B, 0x4E5254, 0x6897BB, 0x7FB6E0, 0xA3CCF5, 0x555555, 0x6A8759, 0.98f, 0.76f, 0.96f},
+        {0xFFFFFF, 0x808080, 0x0F0F0F, 0x272727, 0x404040, 0x707070, 0x8A8A8A, 0xA0A0A0, 0x6E6E80, 0xFFB000, 0.94f, 0.74f, 0.94f},
+        {0xDBEDE3, 0x91A096, 0x333845, 0x3B3345, 0x74324D, 0x801341, 0x9A1A52, 0xB82063, 0x74324D, 0xDBEDE3, 1.00f, 0.78f, 0.96f},
+        {0x000000, 0x6B6B6B, 0xF3F6F0, 0xDFEBDD, 0xC6DEC5, 0x5CA66C, 0x67BF77, 0x4A8F58, 0xB5C5B1, 0x2F7D44, 1.00f, 0.88f, 0.98f},
+        {0xFFFFFF, 0x8C8C8C, 0x232323, 0x333333, 0x454545, 0xD98B32, 0xF0A64D, 0xFFBE73, 0x555555, 0xF2A13B, 1.00f, 0.78f, 0.96f},
+        {0xFFFFFF, 0x8C8C8C, 0x2F3136, 0x3F4147, 0x555861, 0xA0A7B5, 0xB7C0D0, 0xD0D7E5, 0x707070, 0xD0D7E5, 1.00f, 0.80f, 0.98f},
+        {0xF2F5FA, 0x5C6B78, 0x1C262B, 0x263039, 0x30404C, 0x73C9E6, 0x8EE2FF, 0xB3ECFF, 0x2E3D47, 0x73C9E6, 1.00f, 0.82f, 0.96f},
+        {0xFFFFFF, 0x808080, 0x4A5742, 0x3D4533, 0x68785A, 0xBFC9A8, 0xD6E3BE, 0xF0F7D8, 0xA0A090, 0xC9D4A8, 1.00f, 0.86f, 0.98f},
+        {0xEBEBEB, 0x707070, 0x0F0F0F, 0x1F1A0B, 0x332A10, 0xC58D2A, 0xE0A63A, 0xF5C15A, 0x6B5A2A, 0xF5C15A, 1.00f, 0.74f, 0.96f},
+        {0xF1F1F1, 0x6A6A6A, 0x252526, 0x333337, 0x525255, 0x007ACC, 0x1C97EA, 0x35A6F2, 0x3F3F46, 0x007ACC, 1.00f, 0.82f, 0.98f},
+        {0xFFFFFF, 0x808080, 0x222426, 0x2A2D30, 0x393D42, 0x00A6ED, 0x20BAFF, 0x4DC8FF, 0x44484C, 0x00A6ED, 1.00f, 0.84f, 0.98f},
+        {0xFFFFFF, 0x808080, 0x0F0F0F, 0x262626, 0x303A3F, 0x1EA896, 0x35D0B8, 0x65E8D5, 0x6E6E80, 0x1EA896, 0.94f, 0.74f, 0.94f},
+        {0xBFBFBF, 0x595959, 0x000000, 0x1A1A1A, 0x352020, 0xC74949, 0xE05A5A, 0xFF7474, 0x2F2F35, 0xE05A5A, 0.94f, 0.74f, 0.94f},
+        {0xFFFFFF, 0x808080, 0x1A1A1A, 0x242424, 0x333333, 0x4D77C9, 0x668FE0, 0x80A8F5, 0x333333, 0x5DADE2, 1.00f, 0.78f, 0.96f},
+        {0xF8F8F2, 0x6272A4, 0x1A1A21, 0x282A36, 0x383A4A, 0xBD93F9, 0xD6ACFF, 0xFF79C6, 0x705E9C, 0x50FA7B, 1.00f, 0.82f, 0.98f},
+        {0xE6E6E6, 0x999999, 0x120505, 0x241C1C, 0x5C3535, 0x8F2D2D, 0xB84444, 0xD95A5A, 0x808080, 0xD95A5A, 0.92f, 0.72f, 0.94f}
+    };
+    static_assert(
+        kAppearanceThemeCount ==
+            kIssue707ThemeOffset +
+                static_cast<int>(sizeof(palettes) / sizeof(palettes[0]))
+    );
+
+    const int paletteIndex = themeIndex - kIssue707ThemeOffset;
+    if (paletteIndex < 0 ||
+        paletteIndex >= static_cast<int>(sizeof(palettes) / sizeof(palettes[0]))) {
+        ImGui::StyleColorsDark();
+        return;
+    }
+
+    const Issue707ThemePalette& palette = palettes[paletteIndex];
+    ImGui::StyleColorsDark();
+
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4* colors = style.Colors;
+
+    colors[ImGuiCol_Text] = HexColor(palette.text);
+    colors[ImGuiCol_TextDisabled] = HexColor(palette.disabledText);
+    colors[ImGuiCol_WindowBg] = HexColor(palette.windowBg, palette.windowAlpha);
+    colors[ImGuiCol_ChildBg] = HexColor(palette.panelBg, palette.panelAlpha * 0.55f);
+    colors[ImGuiCol_PopupBg] = HexColor(palette.panelBg, palette.popupAlpha);
+    colors[ImGuiCol_Border] = HexColor(palette.border, 0.62f);
+    colors[ImGuiCol_BorderShadow] = HexColor(0x000000, 0.0f);
+    colors[ImGuiCol_FrameBg] = HexColor(palette.panelBg, palette.panelAlpha);
+    colors[ImGuiCol_FrameBgHovered] = HexColor(palette.panelHover, 0.88f);
+    colors[ImGuiCol_FrameBgActive] = HexColor(palette.accent, 0.72f);
+    colors[ImGuiCol_TitleBg] = HexColor(palette.windowBg, 1.0f);
+    colors[ImGuiCol_TitleBgActive] = HexColor(palette.panelBg, 1.0f);
+    colors[ImGuiCol_TitleBgCollapsed] = HexColor(palette.windowBg, 0.82f);
+    colors[ImGuiCol_MenuBarBg] = HexColor(palette.panelBg, 0.88f);
+    colors[ImGuiCol_ScrollbarBg] = HexColor(palette.windowBg, 0.70f);
+    colors[ImGuiCol_ScrollbarGrab] = HexColor(palette.panelHover, 0.72f);
+    colors[ImGuiCol_ScrollbarGrabHovered] = HexColor(palette.accent, 0.68f);
+    colors[ImGuiCol_ScrollbarGrabActive] = HexColor(palette.accentActive, 0.90f);
+    colors[ImGuiCol_CheckMark] = HexColor(palette.checkMark);
+    colors[ImGuiCol_SliderGrab] = HexColor(palette.accentHovered, 0.90f);
+    colors[ImGuiCol_SliderGrabActive] = HexColor(palette.accentActive);
+    colors[ImGuiCol_Button] = HexColor(palette.panelBg, 0.72f);
+    colors[ImGuiCol_ButtonHovered] = HexColor(palette.accent, 0.48f);
+    colors[ImGuiCol_ButtonActive] = HexColor(palette.accentActive, 0.74f);
+    colors[ImGuiCol_Header] = HexColor(palette.accent, 0.30f);
+    colors[ImGuiCol_HeaderHovered] = HexColor(palette.accentHovered, 0.46f);
+    colors[ImGuiCol_HeaderActive] = HexColor(palette.accentActive, 0.62f);
+    colors[ImGuiCol_Separator] = HexColor(palette.border, 0.70f);
+    colors[ImGuiCol_SeparatorHovered] = HexColor(palette.accentHovered, 0.78f);
+    colors[ImGuiCol_SeparatorActive] = HexColor(palette.accentActive);
+    colors[ImGuiCol_ResizeGrip] = HexColor(palette.accent, 0.25f);
+    colors[ImGuiCol_ResizeGripHovered] = HexColor(palette.accentHovered, 0.58f);
+    colors[ImGuiCol_ResizeGripActive] = HexColor(palette.accentActive, 0.88f);
+    colors[ImGuiCol_Tab] = HexColor(palette.panelBg, 0.72f);
+    colors[ImGuiCol_TabHovered] = HexColor(palette.accent, 0.50f);
+    colors[ImGuiCol_TabActive] = HexColor(palette.panelHover, 0.86f);
+    colors[ImGuiCol_TabUnfocused] = HexColor(palette.windowBg, 0.78f);
+    colors[ImGuiCol_TabUnfocusedActive] = HexColor(palette.panelBg, 0.78f);
+    colors[ImGuiCol_PlotLines] = HexColor(palette.accentHovered);
+    colors[ImGuiCol_PlotLinesHovered] = HexColor(palette.accentActive);
+    colors[ImGuiCol_PlotHistogram] = HexColor(palette.accent);
+    colors[ImGuiCol_PlotHistogramHovered] = HexColor(palette.accentActive);
+    colors[ImGuiCol_TableHeaderBg] = HexColor(palette.panelBg, 0.92f);
+    colors[ImGuiCol_TableBorderStrong] = HexColor(palette.border, 0.80f);
+    colors[ImGuiCol_TableBorderLight] = HexColor(palette.border, 0.45f);
+    colors[ImGuiCol_TableRowBg] = HexColor(0x000000, 0.0f);
+    colors[ImGuiCol_TableRowBgAlt] = HexColor(palette.panelHover, 0.22f);
+    colors[ImGuiCol_TextSelectedBg] = HexColor(palette.accent, 0.35f);
+    colors[ImGuiCol_DragDropTarget] = HexColor(palette.accentActive);
+    colors[ImGuiCol_NavHighlight] = HexColor(palette.accentHovered);
+    colors[ImGuiCol_NavWindowingHighlight] = HexColor(palette.text, 0.70f);
+    colors[ImGuiCol_NavWindowingDimBg] = HexColor(0x000000, 0.55f);
+    colors[ImGuiCol_ModalWindowDimBg] = HexColor(0x000000, 0.55f);
+
+    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+}
+
 void ApplyCatppuccinMochaTheme() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec4* colors = style.Colors;
@@ -3934,12 +4080,17 @@ void ApplyCatppuccinMochaTheme() {
 }
 
 void ApplySelectedTheme() {
-    if (AppearanceState::AppliedThemeIndex == UiState::ThemeIndex) {
+    int themeIndex = std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
+    if (AppearanceState::AppliedThemeIndex == themeIndex) {
         return;
     }
 
-    if (UiState::ThemeIndex == 1) {
+    UiState::ThemeIndex = themeIndex;
+
+    if (themeIndex == 1) {
         ApplyCatppuccinMochaTheme();
+    } else if (themeIndex >= kIssue707ThemeOffset) {
+        ApplyIssue707PaletteTheme(themeIndex);
     } else {
         ImGui::StyleColorsDark();
         ImGuiStyle& style = ImGui::GetStyle();
@@ -3947,7 +4098,7 @@ void ApplySelectedTheme() {
         style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
     }
 
-    AppearanceState::AppliedThemeIndex = UiState::ThemeIndex;
+    AppearanceState::AppliedThemeIndex = themeIndex;
 }
 
 void ApplyUserStyleSettings() {
@@ -4556,15 +4707,15 @@ void DrawCombatTab() {
 void DrawAppearanceTab() {
     ImGui::SeparatorText("Theme");
 
-    const char* themes[] = {
-        "ImGui Dark",
-        "Catppuccin Mocha"
-    };
-
     ImGui::SetNextItemWidth(220.0f);
-    if (DrawAtomicCombo("Theme", UiState::ThemeIndex, themes, IM_ARRAYSIZE(themes))) {
+    if (DrawAtomicCombo(
+            "Theme",
+            UiState::ThemeIndex,
+            kAppearanceThemes,
+            kAppearanceThemeCount
+        )) {
         UiState::ThemeIndex =
-            std::clamp(UiState::ThemeIndex.load(), 0, IM_ARRAYSIZE(themes) - 1);
+            std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
         ApplyAppearance();
     }
 

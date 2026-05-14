@@ -61,8 +61,10 @@ git lfs pull
 Current user-facing overlay areas are Info, Combat, Appearance, Settings, Shop,
 Arena, and Test. Shop currently includes free-hero buying, manual target buying,
 Recommendation Lineup buying, auto-refresh pause conditions, keep-gold reserve,
-and target counts. New user-facing controls should report delayed runtime
-dependencies with a clear `Waiting for ...` state where practical.
+and target counts. Appearance includes ImGui Dark, Catppuccin Mocha, and
+additional palettes inspired by Dear ImGui issue #707. New user-facing controls
+should report delayed runtime dependencies with a clear `Waiting for ...` state
+where practical.
 
 ## Threading and Shared State
 
@@ -92,6 +94,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
   rename is part of the requested change.
 - Keep appearance changes local to the existing theme/font setup unless a
   broader UI refactor is part of the requested change.
+- When adding Appearance themes, keep `kAppearanceThemes` and
+  `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme
+  index `1` for existing configs.
 - Keep config parsing simple, bounded, and compatible with the existing
   key-value Settings file format.
 

@@ -128,5 +128,9 @@ auto-refresh pause conditions, keep-gold reserve, and target counts. Use the
 Runtime Status and Test tabs when checking binding readiness, managed
 references, round state, battle manager fields, behavior API state,
 Recommendation Lineup state, or opponent prediction logic.
+Appearance currently includes ImGui Dark, Catppuccin Mocha, and additional
+palettes inspired by Dear ImGui issue #707. Keep `kAppearanceThemes` and
+`Issue707ThemePalette` entries aligned, and preserve Catppuccin Mocha at theme
+index `1` for existing configs.
 Settings config should default to the running game package directory as
 `/data/data/<game-package>/files/mcgg_config.ini`.
