@@ -126,15 +126,19 @@ show a `Waiting for ...` state rather than failing silently. Shop currently
 includes free-hero buying, selected target buying, Recommendation Lineup buying,
 auto-refresh pause conditions, keep-gold reserve, target counts, and client-side
 shop UI automation. Combat includes local UI visibility toggles backed by
-`MCBattleBridge`. Use the Runtime Status and Test tabs when checking binding
-readiness, managed references, round state, player economy/rank/shop state,
-battle manager fields, battle bridge state, shop panel state, behavior API
-state, Recommendation Lineup state, or opponent prediction logic. Test
+`MCBattleBridge` and a read-only next enemy lineup preview backed by
+`MCLogicBattleData.ILOGIC_GetHeroInfosInBattle`. Keep that preview de-duplicated
+by hero GUID and do not spawn spectator models into the local board state. Use
+the Runtime Status and Test tabs when checking binding readiness, managed
+references, round state, player economy/rank/shop state, battle manager fields,
+battle bridge state, shop panel state, behavior API state, Recommendation
+Lineup state, enemy lineup preview state, or opponent prediction logic. Test
 diagnostics should stay read-only unless the task explicitly requests an action.
 In the Test prediction table, `Will fight` is the local player's opponent
 probability and `Current enemy` is the observed opponent for that row. Only the
 exact local current opponent should be forced to `100%`; do not mark every row
-as `100%` just because that row has a known current enemy.
+as `100%` just because that row has a known current enemy. Preserve per-player
+enemy history collection so prediction weights can account for recent meetings.
 Appearance currently includes ImGui Dark, Catppuccin Mocha, and additional
 palettes inspired by Dear ImGui issue #707. Keep `kAppearanceThemes` and
 `Issue707ThemePalette` entries aligned, and preserve Catppuccin Mocha at theme

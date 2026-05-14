@@ -63,7 +63,7 @@ Target default yang didukung:
 
 ### Info
 
-- Tabel runtime status untuk binding battle data, GGC, shop, Recommendation Lineup, local UI, arena, test, spectator, synergy, dan placement.
+- Tabel runtime status untuk binding battle data, GGC, shop, Recommendation Lineup, local UI, preview lineup enemy, arena, test, spectator, synergy, dan placement.
 - Tabel player dan next-enemy yang diurutkan dengan player lokal di posisi pertama.
 - Readout kualitas GGC untuk round 7 dan round 13.
 - Indikator status overlay untuk binding yang terlambat atau belum tersedia.
@@ -71,6 +71,7 @@ Target default yang didukung:
 ### Combat
 
 - Toggle Invisible Scout.
+- Window preview lineup enemy berikutnya yang membaca data hero battle tanpa mengganti target spectate dan melakukan de-duplicate unit berdasarkan hero GUID sebelum ditampilkan.
 - Toggle local UI untuk semua blood bar, visibilitas joystick, dan visibilitas social drag area.
 - Readout kesiapan keyboard dari battle bridge.
 
@@ -120,7 +121,8 @@ Target default yang didukung:
 - Tabel prediksi fight dengan sinyal direct, manager-derived, invasion-pair,
   round-robin, dan riwayat opponent. `Will fight` adalah peluang row tersebut
   menjadi opponent player lokal; `Current enemy` menampilkan opponent yang
-  terdeteksi untuk row tersebut jika tersedia.
+  terdeteksi untuk row tersebut jika tersedia; `Recent` menampilkan pertemuan
+  terbaru dari riwayat opponent per player.
 - Readout runtime bertab untuk kesiapan binding, round state, identitas player,
   rank, ekonomi, state shop, field battle manager, state battle bridge, state
   panel shop, state behavior API, dan seluruh manager entry.
@@ -333,6 +335,9 @@ Urutan ini disengaja. Rendering dan input diinisialisasi terpisah dari feature b
 - Pertahankan runtime code fitur di `jni/Main.cpp` kecuali refactor memang diminta secara eksplisit.
 - Gunakan section lokal yang jelas dan komentar singkat di sekitar IL2CPP call yang berisiko.
 - Gunakan tab Runtime Status dan Test saat memvalidasi binding baru atau menelusuri runtime state yang terlambat tersedia.
+- Preview lineup enemy bergantung pada `MCLogicBattleData.ILOGIC_GetHeroInfosInBattle`
+  dan harus tetap read-only: jangan spawn model spectator atau memutasi board
+  lokal untuk render preview.
 - Pertahankan diagnostik Test sebagai read-only kecuali task secara eksplisit
   meminta aksi, dan verifikasi setiap binding tambahan terhadap `dump/dump.cs`.
 - Jaga overlay utama tetap mudah diakses pada display mobile sambil
@@ -465,6 +470,9 @@ Periksa log GitHub Actions untuk:
 - Runtime binding dapat berubah ketika target application update.
 - Ketersediaan fitur bergantung pada runtime state dan managed object yang sedang loaded.
 - Automation Recommendation Lineup bergantung pada data lineup match aktif yang diekspos runtime.
+- Preview lineup enemy bergantung pada data hero battle aktif dan dapat
+  menampilkan state `Waiting for ...` sebelum binding next-enemy atau hero-info
+  siap.
 - Font Noto Sans CJK embedded menambah ukuran input source native dan waktu build atlas font.
 - Termux tidak dikelola sebagai target build resmi.
 - Dokumentasi sengaja tidak menyertakan instruksi deployment runtime dan instruksi yang berorientasi penyalahgunaan.

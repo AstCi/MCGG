@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -90,6 +91,61 @@ struct AstarInt2 {
 
 static_assert(sizeof(AstarInt2) == 8);
 
+// Value type layouts from dump/dump.cs: HeroStarData and HeroStructMore.
+struct HeroStarData {
+    int m_iHeroId;
+    int m_iHeroStarLv;
+    int m_CustomCraftType;
+    int m_CustomCraftData;
+    int m_iStraEffectType;
+    Il2CppString* m_sSpecialColor;
+    int m_iSeasonId;
+};
+
+static_assert(offsetof(HeroStarData, m_sSpecialColor) == 0x18);
+static_assert(sizeof(HeroStarData) == 0x28);
+
+struct HeroStructMore {
+    uint32_t m_uGuid;
+    uint32_t m_OwnerGuid;
+    uint64_t m_AccountId;
+    int m_locationType;
+    int m_eEntityCampType;
+    int m_SummonsType;
+    int m_MonsterType;
+    Unity::Vector3 m_Rot;
+    AstarInt2 m_Pos;
+    int m_HeroId;
+    int m_skinId;
+    int m_Index;
+    uint32_t m_CommanderLv;
+    int m_StarLevel;
+    int m_RealStarLevel;
+    int m_Lvl;
+    Il2CppString* m_roleName;
+    Unity::Vector3 m_WorldPos;
+    double m_dHurtValue;
+    void* m_TypeHurtValue;
+    void* m_TypeHurtValueByChess;
+    void* m_TypeDefValue;
+    double m_dHealValuePerRound;
+    bool m_bHero;
+    bool m_bIsChessPlayer;
+    uint8_t _padding0[2];
+    int m_continueVictoryTimes;
+    void* m_relation;
+    void* m_equip;
+    void* m_equipDynamicSkill;
+    void* m_variation;
+    int m_superCrystal;
+    uint32_t EquipSuperCrystalGuid;
+    HeroStarData m_HeroStarData;
+};
+
+static_assert(offsetof(HeroStructMore, m_HeroId) == 0x34);
+static_assert(offsetof(HeroStructMore, m_HeroStarData) == 0xC0);
+static_assert(sizeof(HeroStructMore) == 0xE8);
+
 // Cached table rows used by menu lists and automation.
 struct HeroTableEntry {
     int id = 0;
@@ -138,6 +194,7 @@ namespace RuntimeConfig {
     constexpr int ArenaTickMs = 100;
     constexpr int ShopTickMs = 100;
     constexpr int LocalUiTickMs = 250;
+    constexpr int OpponentPredictionTickMs = 500;
     constexpr int ShopActionCooldownMs = 350;
     constexpr int ShopRepeatBuyCooldownMs = 1500;
     constexpr int ShopRefreshCooldownMs = 650;
@@ -148,6 +205,7 @@ namespace RuntimeConfig {
     constexpr int MaxManagedListItems = 2048;
     constexpr int MaxManagedStringChars = 4096;
     constexpr int MaxOpponentHistoryRounds = 32;
+    constexpr int MaxEnemyLineupPreviewUnits = 32;
 }
 
 namespace RuntimeMutex {
@@ -161,9 +219,14 @@ namespace RuntimeState {
     std::atomic<bool> BindingRetryRequested{false};
 }
 
+void TickOpponentPredictionHistory(uint64_t selfAccountId);
+bool HasEnemyLineupPreviewBindings();
+void DrawEnemyLineupPreviewWindow();
+
 // Feature toggles, cached managed references, and throttled runtime state.
 namespace FeatureState {
     std::atomic<bool> CombatInvisibleScout{false};
+    std::atomic<bool> CombatEnemyLineupPreview{false};
     std::atomic<bool> CombatHideAllBloodBars{false};
     std::atomic<bool> CombatHideJoystick{false};
     std::atomic<bool> CombatHideSocialDragArea{false};
@@ -216,6 +279,7 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastArenaTick{};
     std::chrono::steady_clock::time_point LastShopTick{};
     std::chrono::steady_clock::time_point LastLocalUiTick{};
+    std::chrono::steady_clock::time_point LastOpponentPredictionTick{};
     std::chrono::steady_clock::time_point LastTableLoadAttempt{};
     std::chrono::steady_clock::time_point LastShopAction{};
     std::chrono::steady_clock::time_point LastShopBuyAttempt{};
@@ -431,6 +495,15 @@ namespace Originals {
     int (*MCLogicBattleData_ILOGIC_GetBattleHeroTotalStart)(
         void* instance,
         uint64_t accountId
+    );
+    MonoStructures::List<HeroStructMore>* (*MCLogicBattleData_ILOGIC_GetHeroInfosInBattle)(
+        void* instance,
+        uint64_t accountId,
+        bool bIncludePlayer,
+        bool includeVariation,
+        MonoStructures::Array<int>* whiteList,
+        bool bIncludeOutSideFighter,
+        MonoStructures::List<uint32_t>* whiteGuidList
     );
     int (*MCLogicBattleData_ILOGIC_GetBattleCount)(void* instance, uint64_t accountId);
     bool (*MCLogicBattleData_ILOGIC_IsCurrentLogic)(void* instance, uint64_t accountId);
@@ -1715,6 +1788,13 @@ void ResolveFeatureBindings() {
         "MCLogicBattleData",
         "ILOGIC_GetBattleHeroTotalStart",
         {"UInt64"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleData_ILOGIC_GetHeroInfosInBattle,
+        "",
+        "MCLogicBattleData",
+        "ILOGIC_GetHeroInfosInBattle",
+        {"UInt64", "Boolean", "Boolean", "Int32", "Boolean", "List"}
     );
     ResolveOriginal(
         Originals::MCLogicBattleData_ILOGIC_GetBattleCount,
@@ -3826,6 +3906,14 @@ void TickFeatures() {
     if (IntervalElapsed(FeatureState::LastLocalUiTick, RuntimeConfig::LocalUiTickMs, now)) {
         ApplyLocalUiFeatures(selfAccountId);
     }
+
+    if (IntervalElapsed(
+            FeatureState::LastOpponentPredictionTick,
+            RuntimeConfig::OpponentPredictionTickMs,
+            now
+        )) {
+        TickOpponentPredictionHistory(selfAccountId);
+    }
 }
 
 const char* GgcQualityName(int quality) {
@@ -4060,6 +4148,7 @@ void ResetVisualSettings() {
 
 void ResetFeatureSettings() {
     FeatureState::CombatInvisibleScout = false;
+    FeatureState::CombatEnemyLineupPreview = false;
     FeatureState::CombatHideAllBloodBars = false;
     FeatureState::CombatHideJoystick = false;
     FeatureState::CombatHideSocialDragArea = false;
@@ -4283,6 +4372,7 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     else if (key == "itemSpacingY") UiState::ItemSpacingY = ParseConfigFloat(value, UiState::ItemSpacingY);
     else if (key == "indentSpacing") UiState::IndentSpacing = ParseConfigFloat(value, UiState::IndentSpacing);
     else if (key == "combatInvisibleScout") FeatureState::CombatInvisibleScout = ParseConfigBool(value, FeatureState::CombatInvisibleScout);
+    else if (key == "combatEnemyLineupPreview") FeatureState::CombatEnemyLineupPreview = ParseConfigBool(value, FeatureState::CombatEnemyLineupPreview);
     else if (key == "combatHideAllBloodBars") FeatureState::CombatHideAllBloodBars = ParseConfigBool(value, FeatureState::CombatHideAllBloodBars);
     else if (key == "combatHideJoystick") FeatureState::CombatHideJoystick = ParseConfigBool(value, FeatureState::CombatHideJoystick);
     else if (key == "combatHideSocialDragArea") FeatureState::CombatHideSocialDragArea = ParseConfigBool(value, FeatureState::CombatHideSocialDragArea);
@@ -4361,6 +4451,7 @@ bool SaveConfigToFile(const std::string& path) {
     WriteConfigFloat(file, "itemSpacingY", UiState::ItemSpacingY);
     WriteConfigFloat(file, "indentSpacing", UiState::IndentSpacing);
     WriteConfigBool(file, "combatInvisibleScout", FeatureState::CombatInvisibleScout);
+    WriteConfigBool(file, "combatEnemyLineupPreview", FeatureState::CombatEnemyLineupPreview);
     WriteConfigBool(file, "combatHideAllBloodBars", FeatureState::CombatHideAllBloodBars);
     WriteConfigBool(file, "combatHideJoystick", FeatureState::CombatHideJoystick);
     WriteConfigBool(
@@ -5003,6 +5094,7 @@ void DrawRuntimeStatus() {
         DrawStatusRow("Shop refresh panel", HasShopRefreshBindings());
         DrawStatusRow("Combat local UI", HasCombatLocalUiBindings());
         DrawStatusRow("Client UI automation", HasClientUiAutomationBindings());
+        DrawStatusRow("Enemy lineup preview", HasEnemyLineupPreviewBindings());
         DrawStatusRow("Arena heroes", HasArenaHeroBindings());
         DrawStatusRow("Arena items", HasArenaItemBindings());
         DrawStatusRow("Arena GogoCards", HasArenaGogoCardBindings());
@@ -5201,6 +5293,12 @@ bool HasBattleTestBindings() {
         Originals::MCLogicBattleManager_get_m_bDefendFaild;
 }
 
+bool HasEnemyLineupPreviewBindings() {
+    return IsIl2CppRuntimeReady() &&
+        Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr &&
+        Originals::MCLogicBattleData_ILOGIC_GetHeroInfosInBattle;
+}
+
 void DrawGgcInfo() {
     ImGui::SeparatorText("GGC");
 
@@ -5330,6 +5428,15 @@ void DrawCombatTab() {
     if (!Originals::MCShowSpectatorComp_SetSpectate) {
         DrawWaitingText("Waiting for spectator hook");
     }
+
+    if (!HasEnemyLineupPreviewBindings()) {
+        DrawWaitingText("Waiting for enemy lineup preview data");
+    }
+
+    DrawAtomicCheckbox(
+        "Next enemy lineup preview",
+        FeatureState::CombatEnemyLineupPreview
+    );
 
     DrawAtomicCheckbox(
         "Invisible Scout - hide spectate switching",
@@ -6488,6 +6595,7 @@ struct OpponentPredictionRow {
     bool alive = false;
     bool mirror = false;
     bool lockedPercent = false;
+    int recentMeetings = 0;
     std::string currentEnemyName;
 };
 
@@ -6642,6 +6750,39 @@ int CountRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxE
     return count;
 }
 
+double ScoreRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxEntries) {
+    if (accountId == 0 || opponentId == 0 || maxEntries <= 0) {
+        return 0.0;
+    }
+
+    auto found = PredictionCache::OpponentHistory.find(accountId);
+    if (found == PredictionCache::OpponentHistory.end()) {
+        return 0.0;
+    }
+
+    const std::vector<OpponentHistoryEntry>& history = found->second;
+    double score = 0.0;
+    int inspected = 0;
+
+    for (auto it = history.rbegin(); it != history.rend() && inspected < maxEntries; ++it) {
+        if (it->opponentId == opponentId) {
+            double recency = 1.0 - (static_cast<double>(inspected) / maxEntries);
+            score += it->mirror ? recency * 0.6 : recency;
+        }
+
+        ++inspected;
+    }
+
+    return score;
+}
+
+double ScoreMutualRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxEntries) {
+    return std::max(
+        ScoreRecentOpponentHistory(accountId, opponentId, maxEntries),
+        ScoreRecentOpponentHistory(opponentId, accountId, maxEntries)
+    );
+}
+
 void RefreshPredictionOpponentCache(
     uint64_t selfAccountId,
     void* selfManager,
@@ -6709,6 +6850,17 @@ void RefreshPredictionOpponentCache(
     for (const auto& observed : PredictionCache::CurrentRoundOpponents) {
         RememberOpponentObservation(observed.second, round);
     }
+}
+
+void TickOpponentPredictionHistory(uint64_t selfAccountId) {
+    if (selfAccountId == 0 || !Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        return;
+    }
+
+    void* selfManager = GetBattleManagerByAccountId(selfAccountId);
+    void* invasionManager = GetLogicInvasionManager();
+    std::vector<PredictionPlayer> players = CollectPredictionPlayers(selfAccountId);
+    RefreshPredictionOpponentCache(selfAccountId, selfManager, invasionManager, players);
 }
 
 uint64_t FindExactPredictedOpponent(
@@ -6785,6 +6937,7 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
             player.alive,
             false,
             false,
+            0,
             {}
         });
     }
@@ -6872,9 +7025,17 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
                 true,
                 exactMirror,
                 true,
+                0,
                 {}
             });
         }
+    }
+
+    for (OpponentPredictionRow& row : rows) {
+        row.recentMeetings = std::max(
+            CountRecentOpponentHistory(selfAccountId, row.accountId, 8),
+            CountRecentOpponentHistory(row.accountId, selfAccountId, 8)
+        );
     }
 
     if (!realPlayerMode) {
@@ -6985,16 +7146,24 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         }
 
         int recentSelfMeetings = std::max(
-            CountRecentOpponentHistory(selfAccountId, row.accountId, 6),
-            CountRecentOpponentHistory(row.accountId, selfAccountId, 6)
+            CountRecentOpponentHistory(selfAccountId, row.accountId, 8),
+            CountRecentOpponentHistory(row.accountId, selfAccountId, 8)
         );
+        double recentSelfScore = ScoreMutualRecentOpponentHistory(
+            selfAccountId,
+            row.accountId,
+            8
+        );
+        row.recentMeetings = recentSelfMeetings;
 
-        if (recentSelfMeetings >= 2) {
-            weight *= 0.45;
+        if (recentSelfScore >= 1.60) {
+            weight *= 0.38;
+        } else if (recentSelfScore >= 0.85) {
+            weight *= 0.62;
         } else if (recentSelfMeetings == 1) {
-            weight *= 0.70;
+            weight *= 0.78;
         } else {
-            weight *= 1.12;
+            weight *= 1.15;
         }
 
         row.weight = std::max(weight, 0.0);
@@ -7070,7 +7239,7 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
 
     if (!ImGui::BeginTable(
         "##OpponentPredictionTable",
-        3,
+        4,
         ImGuiTableFlags_Borders |
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingStretchProp |
@@ -7082,6 +7251,7 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
 
     ImGui::TableSetupColumn("Player");
     ImGui::TableSetupColumn("Will fight", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn("Recent", ImGuiTableColumnFlags_WidthFixed, 70.0f);
     ImGui::TableSetupColumn("Current enemy");
     ImGui::TableHeadersRow();
 
@@ -7096,10 +7266,337 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%d%%", row.percent);
         ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%d", row.recentMeetings);
+        ImGui::TableSetColumnIndex(3);
         ImGui::TextUnformatted(row.currentEnemyName.empty() ? "-" : row.currentEnemyName.c_str());
     }
 
     ImGui::EndTable();
+}
+
+struct EnemyLineupPreviewTarget {
+    uint64_t accountId = 0;
+    std::string name;
+    int percent = 0;
+    double weight = 0.0;
+    bool mirror = false;
+    bool exact = false;
+};
+
+struct EnemyLineupPreviewUnit {
+    uint32_t guid = 0;
+    int heroId = 0;
+    std::string name;
+    int star = 0;
+    int x = 0;
+    int y = 0;
+    int index = 0;
+};
+
+struct EnemyLineupPreviewData {
+    EnemyLineupPreviewTarget target;
+    int battleHeroCount = -1;
+    int allHeroCount = -1;
+    int totalStars = -1;
+    std::vector<EnemyLineupPreviewUnit> units;
+    std::string status;
+};
+
+int GetPreviewHeroStar(const HeroStructMore& hero) {
+    int star = hero.m_HeroStarData.m_iHeroStarLv > 0 ?
+        hero.m_HeroStarData.m_iHeroStarLv :
+        hero.m_StarLevel;
+
+    if (star <= 0) {
+        star = hero.m_RealStarLevel;
+    }
+
+    return std::clamp(star, 0, 9);
+}
+
+bool HasPreviewGuid(const std::vector<uint32_t>& guids, uint32_t guid) {
+    return guid != 0 && std::find(guids.begin(), guids.end(), guid) != guids.end();
+}
+
+EnemyLineupPreviewTarget SelectEnemyLineupPreviewTarget(uint64_t selfAccountId) {
+    EnemyLineupPreviewTarget target{};
+
+    if (selfAccountId == 0) {
+        return target;
+    }
+
+    std::vector<OpponentPredictionRow> rows = BuildOpponentPredictions(selfAccountId);
+    const OpponentPredictionRow* best = nullptr;
+
+    for (const OpponentPredictionRow& row : rows) {
+        if ((!row.alive && !row.lockedPercent) || row.accountId == 0) {
+            continue;
+        }
+
+        if (!best ||
+            row.lockedPercent > best->lockedPercent ||
+            row.percent > best->percent ||
+            (row.percent == best->percent && row.weight > best->weight)) {
+            best = &row;
+        }
+    }
+
+    if (!best || (!best->lockedPercent && best->percent <= 0 && best->weight <= 0.0)) {
+        return target;
+    }
+
+    target.accountId = best->accountId;
+    target.name = best->name.empty() ? FormatUInt64(best->accountId) : best->name;
+    target.percent = best->percent;
+    target.weight = best->weight;
+    target.mirror = best->mirror;
+    target.exact = best->lockedPercent;
+    return target;
+}
+
+void AppendPreviewUnitsFromList(
+    MonoStructures::List<HeroStructMore>* heroList,
+    std::vector<uint32_t>& seenGuids,
+    std::vector<EnemyLineupPreviewUnit>& units
+) {
+    const HeroStructMore* heroes = nullptr;
+    int heroCount = 0;
+
+    if (!TryGetManagedListData(
+            heroList,
+            &heroes,
+            &heroCount,
+            RuntimeConfig::MaxManagedListItems
+        )) {
+        return;
+    }
+
+    for (int i = 0;
+         heroes && i < heroCount &&
+         units.size() < static_cast<size_t>(RuntimeConfig::MaxEnemyLineupPreviewUnits);
+         ++i) {
+        const HeroStructMore& hero = heroes[i];
+
+        if (!hero.m_bHero ||
+            hero.m_bIsChessPlayer ||
+            !IsPlausibleHeroId(hero.m_HeroId) ||
+            HasPreviewGuid(seenGuids, hero.m_uGuid)) {
+            continue;
+        }
+
+        if (hero.m_uGuid != 0) {
+            seenGuids.push_back(hero.m_uGuid);
+        }
+
+        units.push_back({
+            hero.m_uGuid,
+            hero.m_HeroId,
+            FormatHeroLabel(hero.m_HeroId),
+            GetPreviewHeroStar(hero),
+            hero.m_Pos.x,
+            hero.m_Pos.y,
+            hero.m_Index
+        });
+    }
+}
+
+EnemyLineupPreviewData BuildEnemyLineupPreview(uint64_t selfAccountId) {
+    EnemyLineupPreviewData preview{};
+
+    if (!IsIl2CppRuntimeReady()) {
+        preview.status = "Waiting for IL2CPP";
+        return preview;
+    }
+
+    preview.target = SelectEnemyLineupPreviewTarget(selfAccountId);
+    if (preview.target.accountId == 0) {
+        preview.status = "Waiting for next enemy";
+        return preview;
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum) {
+        preview.battleHeroCount =
+            Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum(
+                nullptr,
+                preview.target.accountId
+            );
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetAllHeroNum) {
+        preview.allHeroCount =
+            Originals::MCLogicBattleData_ILOGIC_GetAllHeroNum(
+                nullptr,
+                preview.target.accountId
+            );
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetBattleHeroTotalStart) {
+        preview.totalStars =
+            Originals::MCLogicBattleData_ILOGIC_GetBattleHeroTotalStart(
+                nullptr,
+                preview.target.accountId
+            );
+    }
+
+    if (!Originals::MCLogicBattleData_ILOGIC_GetHeroInfosInBattle) {
+        preview.status = "Waiting for lineup API";
+        return preview;
+    }
+
+    std::vector<uint32_t> seenGuids;
+    seenGuids.reserve(static_cast<size_t>(RuntimeConfig::MaxEnemyLineupPreviewUnits));
+
+    auto* heroList = Originals::MCLogicBattleData_ILOGIC_GetHeroInfosInBattle(
+        nullptr,
+        preview.target.accountId,
+        false,
+        true,
+        nullptr,
+        false,
+        nullptr
+    );
+    AppendPreviewUnitsFromList(heroList, seenGuids, preview.units);
+
+    if (preview.units.empty()) {
+        heroList = Originals::MCLogicBattleData_ILOGIC_GetHeroInfosInBattle(
+            nullptr,
+            preview.target.accountId,
+            true,
+            true,
+            nullptr,
+            false,
+            nullptr
+        );
+        AppendPreviewUnitsFromList(heroList, seenGuids, preview.units);
+    }
+
+    std::sort(
+        preview.units.begin(),
+        preview.units.end(),
+        [](const EnemyLineupPreviewUnit& left, const EnemyLineupPreviewUnit& right) {
+            if (left.y != right.y) {
+                return left.y > right.y;
+            }
+
+            if (left.x != right.x) {
+                return left.x < right.x;
+            }
+
+            if (left.index != right.index) {
+                return left.index < right.index;
+            }
+
+            return left.guid < right.guid;
+        }
+    );
+
+    if (preview.units.empty()) {
+        preview.status = "Waiting for enemy heroes";
+    }
+
+    return preview;
+}
+
+std::string FormatPreviewCount(int value) {
+    return value >= 0 ? std::to_string(value) : std::string("Waiting");
+}
+
+void DrawEnemyLineupPreviewContent(uint64_t selfAccountId) {
+    EnemyLineupPreviewData preview = BuildEnemyLineupPreview(selfAccountId);
+
+    if (!preview.status.empty()) {
+        DrawWaitingText(preview.status.c_str());
+    }
+
+    if (preview.target.accountId == 0) {
+        return;
+    }
+
+    std::string enemyName = preview.target.name;
+    if (preview.target.mirror) {
+        enemyName += " (Mirror)";
+    }
+
+    ImGui::Text("Enemy: %s", enemyName.c_str());
+    ImGui::Text(
+        "Confidence: %d%% %s",
+        preview.target.percent,
+        preview.target.exact ? "(Exact)" : "(Predicted)"
+    );
+    ImGui::Text(
+        "Heroes: %s / Total: %s / Stars: %s",
+        FormatPreviewCount(preview.battleHeroCount).c_str(),
+        FormatPreviewCount(preview.allHeroCount).c_str(),
+        FormatPreviewCount(preview.totalStars).c_str()
+    );
+
+    if (preview.units.empty()) {
+        return;
+    }
+
+    if (!ImGui::BeginTable(
+        "##EnemyLineupPreviewTable",
+        3,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_ScrollY,
+        ImVec2(0.0f, 170.0f)
+    )) {
+        return;
+    }
+
+    ImGui::TableSetupColumn("Hero");
+    ImGui::TableSetupColumn("Star", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+    ImGui::TableSetupColumn("Pos", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+    ImGui::TableHeadersRow();
+
+    for (const EnemyLineupPreviewUnit& unit : preview.units) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(unit.name.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%d", unit.star);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::Text("%d,%d", unit.x, unit.y);
+    }
+
+    ImGui::EndTable();
+}
+
+void DrawEnemyLineupPreviewWindow() {
+    if (!FeatureState::CombatEnemyLineupPreview.load()) {
+        return;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    float width = io.DisplaySize.x > 0.0f ?
+        std::min(420.0f, std::max(300.0f, io.DisplaySize.x - 24.0f)) :
+        380.0f;
+
+    if (io.DisplaySize.x > 0.0f && io.DisplaySize.y > 0.0f) {
+        ImGui::SetNextWindowPos(
+            ImVec2(
+                std::max(8.0f, (io.DisplaySize.x - width) * 0.5f),
+                std::max(8.0f, io.DisplaySize.y * 0.08f)
+            ),
+            ImGuiCond_FirstUseEver
+        );
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(width, 285.0f), ImGuiCond_FirstUseEver);
+
+    if (!ImGui::Begin(
+            "Next Enemy Lineup",
+            nullptr,
+            ImGuiWindowFlags_NoCollapse
+        )) {
+        ImGui::End();
+        return;
+    }
+
+    DrawEnemyLineupPreviewContent(GetSelfAccountId());
+    ImGui::End();
 }
 
 void DrawTestAllManagersTable() {
@@ -8086,6 +8583,7 @@ namespace Hooks {
         }
 
         DrawMainMenu();
+        DrawEnemyLineupPreviewWindow();
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

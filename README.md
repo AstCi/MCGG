@@ -63,7 +63,7 @@ The default supported target is:
 
 ### Info
 
-- Runtime status table for battle data, GGC, shop, Recommendation Lineup, local UI, arena, test, spectator, synergy, and placement bindings.
+- Runtime status table for battle data, GGC, shop, Recommendation Lineup, local UI, enemy lineup preview, arena, test, spectator, synergy, and placement bindings.
 - Player and next-enemy table sorted with the local player first.
 - GGC quality readout for round 7 and round 13.
 - Overlay status indicators for delayed or unavailable bindings.
@@ -71,6 +71,7 @@ The default supported target is:
 ### Combat
 
 - Invisible Scout toggle.
+- Next enemy lineup preview window that reads battle hero data without switching spectate target and de-duplicates units by hero GUID before display.
 - Local UI toggles for all blood bars, joystick visibility, and social drag area visibility.
 - Keyboard readiness readout from the battle bridge.
 
@@ -119,7 +120,8 @@ The default supported target is:
 - Fight prediction table with direct, manager-derived, invasion-pair,
   round-robin, and opponent-history signals. `Will fight` is the chance that
   the row is the local player's opponent; `Current enemy` shows that row's
-  observed opponent when available.
+  observed opponent when available; `Recent` shows recent local meetings from
+  the per-player opponent history.
 - Tabbed runtime readouts for binding readiness, round state, player identity,
   rank, economy, shop state, battle manager fields, battle bridge state, shop
   panel state, behavior API state, and all manager entries.
@@ -330,6 +332,9 @@ This order is intentional. Rendering and input are initialized separately from f
 - Keep feature runtime code in `jni/Main.cpp` unless a refactor is explicitly requested.
 - Use clear local sections and concise comments around risky IL2CPP calls.
 - Use the Runtime Status and Test tabs when validating new bindings or investigating delayed runtime state.
+- Enemy lineup preview depends on `MCLogicBattleData.ILOGIC_GetHeroInfosInBattle`
+  and should stay read-only: do not spawn spectator models or mutate the local
+  board to render previews.
 - Keep Test diagnostics read-only unless a task explicitly requests an action,
   and verify each added binding against `dump/dump.cs`.
 - Keep the main overlay accessible on mobile displays while preserving the
@@ -458,6 +463,8 @@ Check the GitHub Actions log for:
 - Runtime bindings may change when the target application updates.
 - Feature availability depends on current runtime state and loaded managed objects.
 - Recommendation Lineup automation depends on the active match lineup data exposed by the runtime.
+- Enemy lineup preview depends on active battle hero data and may show a
+  `Waiting for ...` state before next-enemy or hero-info bindings are ready.
 - The embedded Noto Sans CJK font increases native source input size and font atlas build time.
 - Termux is not maintained as an official build target.
 - Documentation intentionally excludes runtime deployment and abuse-oriented instructions.
