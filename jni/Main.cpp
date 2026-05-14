@@ -18,6 +18,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <mutex>
+#include <atomic>
 
 #include "structures/Structures.hpp"
 #include "xdl.h"
@@ -140,46 +142,52 @@ namespace RuntimeConfig {
     constexpr int MaxManagedStringChars = 4096;
 }
 
+namespace RuntimeMutex {
+    std::mutex CacheMutex;
+    std::mutex FeatureMutex;
+    std::recursive_mutex UiMutex;
+}
+
 namespace RuntimeState {
-    bool Il2CppReady = false;
-    bool BindingRetryRequested = false;
+    std::atomic<bool> Il2CppReady{false};
+    std::atomic<bool> BindingRetryRequested{false};
 }
 
 // Feature toggles, cached managed references, and throttled runtime state.
 namespace FeatureState {
-    bool CombatInvisibleScout = false;
+    std::atomic<bool> CombatInvisibleScout{false};
 
-    bool ShopBuyFreeHero = false;
-    bool ShopBuySelectedHero = false;
-    bool ShopBuyRecommendLineup = false;
-    bool ShopRefresh = false;
-    bool ShopStopRefreshAtFreeHero = false;
-    bool ShopStopRefreshAtSelectedHero = false;
-    bool ShopStopRefreshAtRecommendLineup = false;
-    bool ShopKeepGold = false;
-    int ShopKeepGoldAt = 20;
-    int ShopRecommendTargetCount = 9;
+    std::atomic<bool> ShopBuyFreeHero{false};
+    std::atomic<bool> ShopBuySelectedHero{false};
+    std::atomic<bool> ShopBuyRecommendLineup{false};
+    std::atomic<bool> ShopRefresh{false};
+    std::atomic<bool> ShopStopRefreshAtFreeHero{false};
+    std::atomic<bool> ShopStopRefreshAtSelectedHero{false};
+    std::atomic<bool> ShopStopRefreshAtRecommendLineup{false};
+    std::atomic<bool> ShopKeepGold{false};
+    std::atomic<int> ShopKeepGoldAt{20};
+    std::atomic<int> ShopRecommendTargetCount{9};
     std::unordered_map<int, HeroAutomationState> ShopSelectedHeroes;
 
-    int ArenaHeroStar = 1;
-    bool ArenaItemEnhanced = false;
-    bool ArenaGogoCardEnabled = false;
-    int ArenaGogoCardSelected1 = -1;
-    int ArenaGogoCardSelected2 = -1;
-    bool ArenaForceActiveSynergy = false;
-    bool ArenaForceLevel99 = false;
-    bool ArenaOutsideMapPlacement = false;
-    bool ArenaAllEnemyHpOne = false;
-    int ArenaPrice = 5;
+    std::atomic<int> ArenaHeroStar{1};
+    std::atomic<bool> ArenaItemEnhanced{false};
+    std::atomic<bool> ArenaGogoCardEnabled{false};
+    std::atomic<int> ArenaGogoCardSelected1{-1};
+    std::atomic<int> ArenaGogoCardSelected2{-1};
+    std::atomic<bool> ArenaForceActiveSynergy{false};
+    std::atomic<bool> ArenaForceLevel99{false};
+    std::atomic<bool> ArenaOutsideMapPlacement{false};
+    std::atomic<bool> ArenaAllEnemyHpOne{false};
+    std::atomic<int> ArenaPrice{5};
 
-    void* BattleBridge = nullptr;
-    void* HeroShopPanel = nullptr;
-    void* HeroShopItemList = nullptr;
-    void* LoadResInstance = nullptr;
+    std::atomic<void*> BattleBridge{nullptr};
+    std::atomic<void*> HeroShopPanel{nullptr};
+    std::atomic<void*> HeroShopItemList{nullptr};
+    std::atomic<void*> LoadResInstance{nullptr};
 
-    bool TableDataLoaded = false;
-    bool WasInMatch = false;
-    uint64_t LastSelfAccountId = 0;
+    std::atomic<bool> TableDataLoaded{false};
+    std::atomic<bool> WasInMatch{false};
+    std::atomic<uint64_t> LastSelfAccountId{0};
     std::unordered_map<int, HeroTableEntry> Heroes;
     std::unordered_map<int, EquipTableEntry> Equips;
     std::unordered_map<int, CardTableEntry> Cards;
@@ -194,14 +202,14 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastShopRefreshAttempt{};
     std::chrono::steady_clock::time_point LastShopWorthCheck{};
     std::chrono::steady_clock::time_point LastRecommendLineupCheck{};
-    bool CachedShopHasWorthwhileTarget = false;
-    int CachedRecommendLineupHeroId = 0;
-    uint64_t LastShopBuyAccountId = 0;
-    int LastShopBuySlot = -1;
-    int LastShopBuyHeroId = 0;
-    int LastShopBuyPrice = 0;
-    int LastShopBuyOwnCount = -1;
-    bool LastShopBuyWasFree = false;
+    std::atomic<bool> CachedShopHasWorthwhileTarget{false};
+    std::atomic<int> CachedRecommendLineupHeroId{0};
+    std::atomic<uint64_t> LastShopBuyAccountId{0};
+    std::atomic<int> LastShopBuySlot{-1};
+    std::atomic<int> LastShopBuyHeroId{0};
+    std::atomic<int> LastShopBuyPrice{0};
+    std::atomic<int> LastShopBuyOwnCount{-1};
+    std::atomic<bool> LastShopBuyWasFree{false};
 }
 
 namespace UiState {
@@ -212,34 +220,34 @@ namespace UiState {
     std::string TestAccountId;
     std::string ConfigPath;
     std::string ConfigStatus;
-    int MainTabIndex = 0;
-    int ThemeIndex = 1;
-    int FontIndex = 1;
-    bool ShopShowSelectedOnly = false;
-    bool MoveFromTitleBarOnly = true;
-    bool ResizeFromEdges = false;
-    bool UseFixedMenuPosition = false;
-    float MenuWidth = 760.0f;
-    float MenuHeight = 560.0f;
-    float MenuPosX = 20.0f;
-    float MenuPosY = 20.0f;
-    float FontScale = 1.0f;
-    float WindowAlpha = 1.0f;
-    float WindowRounding = 7.0f;
-    float ChildRounding = 6.0f;
-    float FrameRounding = 5.0f;
-    float PopupRounding = 6.0f;
-    float ScrollbarRounding = 6.0f;
-    float GrabRounding = 5.0f;
-    float TabRounding = 5.0f;
-    float ScrollbarSize = 14.0f;
-    float WindowBorderSize = 1.0f;
-    float FrameBorderSize = 0.0f;
-    float FramePaddingX = 4.0f;
-    float FramePaddingY = 3.0f;
-    float ItemSpacingX = 8.0f;
-    float ItemSpacingY = 4.0f;
-    float IndentSpacing = 21.0f;
+    std::atomic<int> MainTabIndex{0};
+    std::atomic<int> ThemeIndex{1};
+    std::atomic<int> FontIndex{1};
+    std::atomic<bool> ShopShowSelectedOnly{false};
+    std::atomic<bool> MoveFromTitleBarOnly{true};
+    std::atomic<bool> ResizeFromEdges{false};
+    std::atomic<bool> UseFixedMenuPosition{false};
+    std::atomic<float> MenuWidth{760.0f};
+    std::atomic<float> MenuHeight{560.0f};
+    std::atomic<float> MenuPosX{20.0f};
+    std::atomic<float> MenuPosY{20.0f};
+    std::atomic<float> FontScale{1.0f};
+    std::atomic<float> WindowAlpha{1.0f};
+    std::atomic<float> WindowRounding{7.0f};
+    std::atomic<float> ChildRounding{6.0f};
+    std::atomic<float> FrameRounding{5.0f};
+    std::atomic<float> PopupRounding{6.0f};
+    std::atomic<float> ScrollbarRounding{6.0f};
+    std::atomic<float> GrabRounding{5.0f};
+    std::atomic<float> TabRounding{5.0f};
+    std::atomic<float> ScrollbarSize{14.0f};
+    std::atomic<float> WindowBorderSize{1.0f};
+    std::atomic<float> FrameBorderSize{0.0f};
+    std::atomic<float> FramePaddingX{4.0f};
+    std::atomic<float> FramePaddingY{3.0f};
+    std::atomic<float> ItemSpacingX{8.0f};
+    std::atomic<float> ItemSpacingY{4.0f};
+    std::atomic<float> IndentSpacing{21.0f};
 }
 
 namespace AppearanceState {
@@ -603,9 +611,12 @@ FieldInfo* GetFieldInfoFromName(
 
     std::string cacheKey = GenerateFieldCacheKey(ns, className, fieldName);
 
-    auto cached = FieldCache.find(cacheKey);
-    if (cached != FieldCache.end() && cached->second) {
-        return cached->second;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        auto cached = FieldCache.find(cacheKey);
+        if (cached != FieldCache.end() && cached->second) {
+            return cached->second;
+        }
     }
 
     size_t size = 0;
@@ -633,12 +644,16 @@ FieldInfo* GetFieldInfoFromName(
 
         FieldInfo* field = FindFieldInClassHierarchy(klass, fieldName);
         if (field) {
+            std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
             FieldCache[cacheKey] = field;
             return field;
         }
     }
 
-    FieldCache[cacheKey] = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        FieldCache[cacheKey] = nullptr;
+    }
     return nullptr;
 }
 
@@ -829,9 +844,12 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
 
     std::string cacheKey = GenerateCacheKey(ns, className, methodName, paramTypes);
 
-    auto cached = MultiMethodCache.find(cacheKey);
-    if (cached != MultiMethodCache.end() && !cached->second.empty()) {
-        return cached->second;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        auto cached = MultiMethodCache.find(cacheKey);
+        if (cached != MultiMethodCache.end() && !cached->second.empty()) {
+            return cached->second;
+        }
     }
 
     size_t size = 0;
@@ -906,7 +924,10 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
         }
     }
 
-    MultiMethodCache[cacheKey] = foundMethods;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        MultiMethodCache[cacheKey] = foundMethods;
+    }
     return foundMethods;
 }
 
@@ -954,6 +975,11 @@ bool ResolveOriginal(
         return true;
     }
 
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+    if (target) {
+        return true;
+    }
+
     void* method = GetFirstMethodFromName(ns, className, methodName, paramTypes);
 
     if (method) {
@@ -972,6 +998,11 @@ bool HookResolvedMethod(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
+    if (original) {
+        return true;
+    }
+
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
     if (original) {
         return true;
     }
@@ -2041,6 +2072,7 @@ void RefreshManagedReferences(bool force = false) {
 }
 
 std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<HeroTableEntry> heroes;
     heroes.reserve(FeatureState::Heroes.size());
 
@@ -2068,6 +2100,7 @@ std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
 }
 
 std::vector<EquipTableEntry> GetSortedEquips() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<EquipTableEntry> equips;
     equips.reserve(FeatureState::Equips.size());
 
@@ -2091,6 +2124,7 @@ std::vector<EquipTableEntry> GetSortedEquips() {
 }
 
 std::vector<CardTableEntry> GetSortedCards() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<CardTableEntry> cards;
     cards.reserve(FeatureState::Cards.size());
 
@@ -2114,6 +2148,7 @@ std::vector<CardTableEntry> GetSortedCards() {
 }
 
 void ClearTableDataCache() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     FeatureState::TableDataLoaded = false;
     FeatureState::Heroes.clear();
     FeatureState::Equips.clear();
@@ -2165,13 +2200,33 @@ void RefreshTableDataForMatch(uint64_t selfAccountId) {
         return;
     }
 
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     bool battleActive = IsBattleActive(selfAccountId);
     bool selfChanged =
         selfAccountId != 0 &&
         selfAccountId != FeatureState::LastSelfAccountId;
 
     if (battleActive && (!FeatureState::WasInMatch || selfChanged)) {
-        ClearTableDataCache();
+        // Note: ClearTableDataCache also locks, so we must use a non-locking internal version 
+        // or just do the clearing here.
+        FeatureState::TableDataLoaded = false;
+        FeatureState::Heroes.clear();
+        FeatureState::Equips.clear();
+        FeatureState::Cards.clear();
+        FeatureState::LastTableLoadAttempt = {};
+        FeatureState::LastShopAction = {};
+        FeatureState::LastShopBuyAttempt = {};
+        FeatureState::LastShopRefreshAttempt = {};
+        FeatureState::LastShopWorthCheck = {};
+        FeatureState::LastRecommendLineupCheck = {};
+        FeatureState::CachedShopHasWorthwhileTarget = false;
+        FeatureState::CachedRecommendLineupHeroId = 0;
+        FeatureState::LastShopBuyAccountId = 0;
+        FeatureState::LastShopBuySlot = -1;
+        FeatureState::LastShopBuyHeroId = 0;
+        FeatureState::LastShopBuyPrice = 0;
+        FeatureState::LastShopBuyOwnCount = -1;
+        FeatureState::LastShopBuyWasFree = false;
     }
 
     FeatureState::WasInMatch = battleActive;
@@ -2195,6 +2250,10 @@ void EnsureTableDataLoaded() {
     }
 
     RefreshManagedReferences(true);
+
+    std::unordered_map<int, HeroTableEntry> localHeroes;
+    std::unordered_map<int, EquipTableEntry> localEquips;
+    std::unordered_map<int, CardTableEntry> localCards;
 
     if (Originals::CData_MCHero_GetInstance && Originals::CData_MCHero_GetAll) {
         void* heroInstance = Originals::CData_MCHero_GetInstance();
@@ -2246,7 +2305,7 @@ void EnsureTableDataLoaded() {
                 }
 
                 int quality = GetField<int>(reinterpret_cast<Il2CppObject*>(hero), qualityField);
-                FeatureState::Heroes[heroId] = {heroId, heroName, quality, true};
+                localHeroes[heroId] = {heroId, heroName, quality, true};
             }
         }
     }
@@ -2296,7 +2355,7 @@ void EnsureTableDataLoaded() {
                     );
 
                     if (equipId > 0 && !equipName.empty()) {
-                        FeatureState::Equips[equipId] = {equipId, equipName};
+                        localEquips[equipId] = {equipId, equipName};
                     }
                 }
             }
@@ -2347,16 +2406,22 @@ void EnsureTableDataLoaded() {
                 }
 
                 if (cardId > 0) {
-                    FeatureState::Cards[cardId] = {cardId, cardName};
+                    localCards[cardId] = {cardId, cardName};
                 }
             }
         }
     }
 
-    FeatureState::TableDataLoaded =
-        !FeatureState::Heroes.empty() &&
-        !FeatureState::Equips.empty() &&
-        !FeatureState::Cards.empty();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+        FeatureState::Heroes = std::move(localHeroes);
+        FeatureState::Equips = std::move(localEquips);
+        FeatureState::Cards = std::move(localCards);
+        FeatureState::TableDataLoaded =
+            !FeatureState::Heroes.empty() &&
+            !FeatureState::Equips.empty() &&
+            !FeatureState::Cards.empty();
+    }
 }
 
 bool IsPlausibleHeroId(int heroId) {
@@ -3425,18 +3490,21 @@ std::string GetDefaultConfigPath() {
 }
 
 void EnsureConfigPathInitialized() {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     if (UiState::ConfigPath.empty()) {
         UiState::ConfigPath = GetDefaultConfigPath();
     }
 }
 
 void SetConfigStatus(const char* prefix, const std::string& path, bool success) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     UiState::ConfigStatus = prefix;
     UiState::ConfigStatus += success ? ": " : " failed: ";
     UiState::ConfigStatus += path;
 }
 
 std::string FormatShopSelectedHeroes() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::string value;
 
     for (const auto& item : FeatureState::ShopSelectedHeroes) {
@@ -3457,6 +3525,7 @@ std::string FormatShopSelectedHeroes() {
 }
 
 void LoadShopSelectedHeroes(const std::string& value) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     FeatureState::ShopSelectedHeroes.clear();
 
     size_t cursor = 0;
@@ -3561,6 +3630,7 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
 }
 
 bool SaveConfigToFile(const std::string& path) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
 
     if (!EnsureParentDirectory(path)) {
@@ -3639,6 +3709,7 @@ bool SaveConfigToFile(const std::string& path) {
 }
 
 bool LoadConfigFromFile(const std::string& path, bool updateStatus) {
+    std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
 
     FILE* file = fopen(path.c_str(), "r");
@@ -4534,13 +4605,20 @@ std::string GetRoundResultDataField(void* battleManager, const char* fieldName) 
     }
 
     static std::unordered_map<std::string, FieldInfo*> valueFieldCache;
+    static std::mutex valueFieldCacheMutex;
     FieldInfo* valueField = nullptr;
 
-    auto it = valueFieldCache.find(fieldName);
-    if (it != valueFieldCache.end()) {
-        valueField = it->second;
-    } else {
+    {
+        std::lock_guard<std::mutex> lock(valueFieldCacheMutex);
+        auto it = valueFieldCache.find(fieldName);
+        if (it != valueFieldCache.end()) {
+            valueField = it->second;
+        }
+    }
+
+    if (!valueField) {
         valueField = GetFieldInfoFromName("", "MCFightRoundResultData", fieldName);
+        std::lock_guard<std::mutex> lock(valueFieldCacheMutex);
         valueFieldCache[fieldName] = valueField;
     }
 
@@ -6037,8 +6115,8 @@ namespace Hooks {
 
     // Renders the ImGui overlay before the frame is swapped.
     EGLBoolean EglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
-        static bool imguiReady = false;
-        static bool renderThreadAttached = false;
+        static std::atomic<bool> imguiReady{false};
+        static std::atomic<bool> renderThreadAttached{false};
 
         if (!Originals::EglSwapBuffers) {
             return EGL_FALSE;
