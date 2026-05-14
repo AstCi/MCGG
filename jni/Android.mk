@@ -13,7 +13,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := main
 
 LOCAL_CFLAGS := \
-    -O0 \
+    -Oz \
     -DNDEBUG \
     -ffunction-sections \
     -fdata-sections \
@@ -28,6 +28,10 @@ LOCAL_CFLAGS := \
     -DUNITY_VERSION_MINOR=4 \
     -DUNITY_VERSION_PATCH=22 \
     -DUNITY_VER=194
+
+ifeq ($(NDK_DEBUG),1)
+LOCAL_CFLAGS += -O0
+endif
 
 LOCAL_CPPFLAGS := \
     $(LOCAL_CFLAGS) \

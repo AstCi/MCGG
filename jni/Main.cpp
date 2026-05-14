@@ -971,18 +971,17 @@ bool ResolveOriginal(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
-    if (target) {
-        return true;
-    }
-
-    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
-    if (target) {
-        return true;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        if (target) {
+            return true;
+        }
     }
 
     void* method = GetFirstMethodFromName(ns, className, methodName, paramTypes);
 
-    if (method) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+    if (method && !target) {
         target = reinterpret_cast<T>(method);
     }
 
@@ -998,20 +997,30 @@ bool HookResolvedMethod(
     const char* methodName,
     const std::vector<const char*>& paramTypes
 ) {
-    if (original) {
-        return true;
-    }
-
-    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
-    if (original) {
-        return true;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        if (original) {
+            return true;
+        }
     }
 
     void* method = GetFirstMethodFromName(ns, className, methodName, paramTypes);
 
-    if (method) {
-        if (DobbyHook(method, replacement, reinterpret_cast<void**>(&original)) != RT_SUCCESS) {
-            original = nullptr;
+    if (!method) {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        return original != nullptr;
+    }
+
+    T hookedOriginal = nullptr;
+    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+
+    if (!original) {
+        if (DobbyHook(
+            method,
+            replacement,
+            reinterpret_cast<void**>(&hookedOriginal)
+        ) == RT_SUCCESS) {
+            original = hookedOriginal;
         }
     }
 
@@ -2147,8 +2156,7 @@ std::vector<CardTableEntry> GetSortedCards() {
     return cards;
 }
 
-void ClearTableDataCache() {
-    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+void ClearTableDataCacheUnlocked() {
     FeatureState::TableDataLoaded = false;
     FeatureState::Heroes.clear();
     FeatureState::Equips.clear();
@@ -2167,6 +2175,11 @@ void ClearTableDataCache() {
     FeatureState::LastShopBuyPrice = 0;
     FeatureState::LastShopBuyOwnCount = -1;
     FeatureState::LastShopBuyWasFree = false;
+}
+
+void ClearTableDataCache() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    ClearTableDataCacheUnlocked();
 }
 
 bool IsBattleActive(uint64_t selfAccountId) {
@@ -2207,26 +2220,7 @@ void RefreshTableDataForMatch(uint64_t selfAccountId) {
         selfAccountId != FeatureState::LastSelfAccountId;
 
     if (battleActive && (!FeatureState::WasInMatch || selfChanged)) {
-        // Note: ClearTableDataCache also locks, so we must use a non-locking internal version 
-        // or just do the clearing here.
-        FeatureState::TableDataLoaded = false;
-        FeatureState::Heroes.clear();
-        FeatureState::Equips.clear();
-        FeatureState::Cards.clear();
-        FeatureState::LastTableLoadAttempt = {};
-        FeatureState::LastShopAction = {};
-        FeatureState::LastShopBuyAttempt = {};
-        FeatureState::LastShopRefreshAttempt = {};
-        FeatureState::LastShopWorthCheck = {};
-        FeatureState::LastRecommendLineupCheck = {};
-        FeatureState::CachedShopHasWorthwhileTarget = false;
-        FeatureState::CachedRecommendLineupHeroId = 0;
-        FeatureState::LastShopBuyAccountId = 0;
-        FeatureState::LastShopBuySlot = -1;
-        FeatureState::LastShopBuyHeroId = 0;
-        FeatureState::LastShopBuyPrice = 0;
-        FeatureState::LastShopBuyOwnCount = -1;
-        FeatureState::LastShopBuyWasFree = false;
+        ClearTableDataCacheUnlocked();
     }
 
     FeatureState::WasInMatch = battleActive;
