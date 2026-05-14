@@ -108,6 +108,12 @@ struct CardTableEntry {
     std::string name;
 };
 
+struct TableCacheCounts {
+    int heroes = 0;
+    int equips = 0;
+    int cards = 0;
+};
+
 struct HeroAutomationState {
     bool selected = false;
     int targetCount = 9;
@@ -2060,24 +2066,102 @@ void RefreshManagedReferences(bool force = false) {
         loadResInstanceField = GetFieldInfoFromName("", "LoadRes", "s_instance");
     }
 
-    FeatureState::BattleBridge = GetStaticField<void*>(battleBridgeField);
-    FeatureState::LoadResInstance = GetStaticField<void*>(loadResInstanceField);
-    FeatureState::HeroShopPanel = nullptr;
-    FeatureState::HeroShopItemList = nullptr;
+    void* battleBridge = GetStaticField<void*>(battleBridgeField);
+    void* loadResInstance = GetStaticField<void*>(loadResInstanceField);
+    void* heroShopPanel = nullptr;
+    void* heroShopItemList = nullptr;
 
-    if (FeatureState::BattleBridge) {
-        FeatureState::HeroShopPanel = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::BattleBridge.load()),
+    if (battleBridge) {
+        heroShopPanel = GetField<void*>(
+            reinterpret_cast<Il2CppObject*>(battleBridge),
             heroShopPanelField
         );
     }
 
-    if (FeatureState::HeroShopPanel) {
-        FeatureState::HeroShopItemList = GetField<void*>(
-            reinterpret_cast<Il2CppObject*>(FeatureState::HeroShopPanel.load()),
+    if (heroShopPanel) {
+        heroShopItemList = GetField<void*>(
+            reinterpret_cast<Il2CppObject*>(heroShopPanel),
             heroShopItemListField
         );
     }
+
+    FeatureState::BattleBridge = battleBridge;
+    FeatureState::LoadResInstance = loadResInstance;
+    FeatureState::HeroShopPanel = heroShopPanel;
+    FeatureState::HeroShopItemList = heroShopItemList;
+}
+
+TableCacheCounts GetTableCacheCounts() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return {
+        static_cast<int>(FeatureState::Heroes.size()),
+        static_cast<int>(FeatureState::Equips.size()),
+        static_cast<int>(FeatureState::Cards.size())
+    };
+}
+
+bool TryGetHeroTableEntry(int heroId, HeroTableEntry* entry) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    auto it = FeatureState::Heroes.find(heroId);
+
+    if (it == FeatureState::Heroes.end()) {
+        return false;
+    }
+
+    if (entry) {
+        *entry = it->second;
+    }
+
+    return true;
+}
+
+std::unordered_map<int, HeroAutomationState> GetShopHeroTargetsSnapshot() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return FeatureState::ShopSelectedHeroes;
+}
+
+std::vector<std::pair<int, HeroAutomationState>> GetSelectedShopHeroTargetsSnapshot() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    std::vector<std::pair<int, HeroAutomationState>> targets;
+    targets.reserve(FeatureState::ShopSelectedHeroes.size());
+
+    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+        if (item.second.selected) {
+            targets.push_back(item);
+        }
+    }
+
+    return targets;
+}
+
+void SetShopHeroTarget(int heroId, const HeroAutomationState& state) {
+    if (heroId <= 0 || heroId > 10000000) {
+        return;
+    }
+
+    HeroAutomationState clampedState = state;
+    clampedState.targetCount = std::clamp(clampedState.targetCount, 1, 99);
+
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    FeatureState::ShopSelectedHeroes[heroId] = clampedState;
+}
+
+void DeselectShopHeroTargets() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+
+    for (auto& item : FeatureState::ShopSelectedHeroes) {
+        item.second.selected = false;
+    }
+}
+
+void ClearShopHeroTargets() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    FeatureState::ShopSelectedHeroes.clear();
+}
+
+int GetTrackedShopHeroTargetCount() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    return static_cast<int>(FeatureState::ShopSelectedHeroes.size());
 }
 
 std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
@@ -2213,8 +2297,8 @@ void RefreshTableDataForMatch(uint64_t selfAccountId) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     bool battleActive = IsBattleActive(selfAccountId);
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     bool selfChanged =
         selfAccountId != 0 &&
         selfAccountId != FeatureState::LastSelfAccountId;
@@ -2427,11 +2511,11 @@ bool IsKnownHeroIdOrTablePending(int heroId) {
         return false;
     }
 
-    if (!FeatureState::TableDataLoaded || FeatureState::Heroes.empty()) {
-        return true;
-    }
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
 
-    return FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
+    return !FeatureState::TableDataLoaded.load() ||
+        FeatureState::Heroes.empty() ||
+        FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
 }
 
 int GetRecommendLineupTargetCount() {
@@ -2480,9 +2564,9 @@ std::string FormatHeroLabel(int heroId) {
         return "Waiting";
     }
 
-    auto it = FeatureState::Heroes.find(heroId);
-    if (it != FeatureState::Heroes.end() && !it->second.name.empty()) {
-        return it->second.name + " (#" + std::to_string(heroId) + ")";
+    HeroTableEntry hero;
+    if (TryGetHeroTableEntry(heroId, &hero) && !hero.name.empty()) {
+        return hero.name + " (#" + std::to_string(heroId) + ")";
     }
 
     return "Hero #" + std::to_string(heroId);
@@ -2659,13 +2743,9 @@ bool HasWorthwhileShopTarget(
             poolCount > 0;
     };
 
-    for (const auto& item : FeatureState::ShopSelectedHeroes) {
+    for (const auto& item : GetSelectedShopHeroTargetsSnapshot()) {
         int heroId = item.first;
         const HeroAutomationState& state = item.second;
-
-        if (!state.selected) {
-            continue;
-        }
 
         if (targetStillNeedsCopies(heroId, state.targetCount)) {
             FeatureState::CachedShopHasWorthwhileTarget = true;
@@ -2909,10 +2989,17 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     bool needRefreshShop = true;
     int cachedCoin = -1;
+    bool useSelectedTargets =
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopStopRefreshAtSelectedHero;
     bool useRecommendLineup =
         FeatureState::ShopBuyRecommendLineup ||
         FeatureState::ShopStopRefreshAtRecommendLineup;
     int recommendHeroId = useRecommendLineup ? GetRecommendLineupHeroId(now) : 0;
+    std::unordered_map<int, HeroAutomationState> shopTargets =
+        useSelectedTargets ?
+            GetShopHeroTargetsSnapshot() :
+            std::unordered_map<int, HeroAutomationState>{};
 
     auto getCoin = [&]() {
         if (cachedCoin < 0) {
@@ -2949,9 +3036,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
         }
 
         int heroId = shopData.m_iHeroId;
-        auto selectedIt = FeatureState::ShopSelectedHeroes.find(heroId);
+        auto selectedIt = shopTargets.find(heroId);
         bool isSelected =
-            selectedIt != FeatureState::ShopSelectedHeroes.end() &&
+            useSelectedTargets &&
+            selectedIt != shopTargets.end() &&
             selectedIt->second.selected;
         bool isRecommend =
             useRecommendLineup &&
@@ -3347,8 +3435,12 @@ void ClampConfigurableState() {
     FeatureState::ArenaHeroStar = std::clamp(FeatureState::ArenaHeroStar.load(), 1, 3);
     FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
-    for (auto& item : FeatureState::ShopSelectedHeroes) {
-        item.second.targetCount = std::clamp(item.second.targetCount, 1, 99);
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+
+        for (auto& item : FeatureState::ShopSelectedHeroes) {
+            item.second.targetCount = std::clamp(item.second.targetCount, 1, 99);
+        }
     }
 }
 
@@ -3394,7 +3486,7 @@ void ResetFeatureSettings() {
     FeatureState::ShopKeepGold = false;
     FeatureState::ShopKeepGoldAt = 20;
     FeatureState::ShopRecommendTargetCount = 9;
-    FeatureState::ShopSelectedHeroes.clear();
+    ClearShopHeroTargets();
     FeatureState::ArenaHeroStar = 1;
     FeatureState::ArenaItemEnhanced = false;
     FeatureState::ArenaGogoCardEnabled = false;
@@ -4111,13 +4203,14 @@ void DrawRuntimeStatus() {
     snprintf(selfIdText, sizeof(selfIdText), "%llu", (unsigned long long)selfAccountId);
 
     char tableText[96];
+    TableCacheCounts tableCounts = GetTableCacheCounts();
     snprintf(
         tableText,
         sizeof(tableText),
         "%d heroes / %d items / %d cards",
-        static_cast<int>(FeatureState::Heroes.size()),
-        static_cast<int>(FeatureState::Equips.size()),
-        static_cast<int>(FeatureState::Cards.size())
+        tableCounts.heroes,
+        tableCounts.equips,
+        tableCounts.cards
     );
 
     if (ImGui::BeginTable(
@@ -4621,14 +4714,14 @@ void DrawSettingsTab() {
 
             ImGui::SameLine();
             if (ImGui::Button("Clear shop hero targets")) {
-                FeatureState::ShopSelectedHeroes.clear();
+                ClearShopHeroTargets();
                 UiState::ConfigStatus = "Shop hero targets cleared";
             }
 
             ImGui::Spacing();
             ImGui::Text(
                 "Tracked shop heroes: %d",
-                static_cast<int>(FeatureState::ShopSelectedHeroes.size())
+                GetTrackedShopHeroTargetCount()
             );
             ImGui::Text(
                 "Selected GogoCards: %d / %d",
@@ -5601,13 +5694,13 @@ void DrawShopTab() {
             DrawAtomicCheckbox("Show tracked heroes only", UiState::ShopShowSelectedOnly);
 
             if (ImGui::Button("Clear hero targets", ImVec2(-1.0f, 0.0f))) {
-                for (auto& item : FeatureState::ShopSelectedHeroes) {
-                    item.second.selected = false;
-                }
+                DeselectShopHeroTargets();
             }
 
             ImGui::Spacing();
             std::vector<HeroTableEntry> heroes = GetSortedHeroes(true);
+            std::unordered_map<int, HeroAutomationState> shopTargets =
+                GetShopHeroTargetsSnapshot();
             int totalHeroCount = static_cast<int>(heroes.size());
             FilterHeroes(heroes, UiState::ShopHeroFilter);
 
@@ -5616,9 +5709,9 @@ void DrawShopTab() {
                     std::remove_if(
                         heroes.begin(),
                         heroes.end(),
-                        [](const HeroTableEntry& hero) {
-                            auto it = FeatureState::ShopSelectedHeroes.find(hero.id);
-                            return it == FeatureState::ShopSelectedHeroes.end() ||
+                        [&shopTargets](const HeroTableEntry& hero) {
+                            auto it = shopTargets.find(hero.id);
+                            return it == shopTargets.end() ||
                                 !it->second.selected;
                         }
                     ),
@@ -5654,8 +5747,13 @@ void DrawShopTab() {
                 ImGui::TableHeadersRow();
 
                 for (const HeroTableEntry& hero : heroes) {
-                    HeroAutomationState& state = FeatureState::ShopSelectedHeroes[hero.id];
+                    auto targetIt = shopTargets.find(hero.id);
+                    HeroAutomationState state =
+                        targetIt != shopTargets.end() ?
+                            targetIt->second :
+                            HeroAutomationState{};
                     state.targetCount = std::clamp(state.targetCount, 1, 99);
+                    HeroAutomationState originalState = state;
 
                     ImGui::PushID(hero.id);
                     ImGui::TableNextRow();
@@ -5674,6 +5772,12 @@ void DrawShopTab() {
                     ImGui::TableSetColumnIndex(3);
                     ImGui::Checkbox("##selected", &state.selected);
                     ImGui::PopID();
+
+                    if (state.selected != originalState.selected ||
+                        state.targetCount != originalState.targetCount) {
+                        SetShopHeroTarget(hero.id, state);
+                        shopTargets[hero.id] = state;
+                    }
                 }
 
                 ImGui::EndTable();
