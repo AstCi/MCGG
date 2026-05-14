@@ -19,14 +19,17 @@ LOCAL_CFLAGS := \
     -Wno-everything \
     -Wno-error \
     -Wformat \
-
-LOCAL_CPPFLAGS := \
-    $(LOCAL_CFLAGS) \
-    -std=c++26 \
+    -DIMGUI_DISABLE_DEMO_WINDOWS \
+    -DIMGUI_DISABLE_DEBUG_TOOLS \
+    -DIMGUI_USE_WCHAR32 \
     -DUNITY_VERSION_MAJOR=2019 \
     -DUNITY_VERSION_MINOR=4 \
     -DUNITY_VERSION_PATCH=22 \
     -DUNITY_VER=194
+
+LOCAL_CPPFLAGS := \
+    $(LOCAL_CFLAGS) \
+    -std=c++26
 
 LOCAL_LDFLAGS :=
 

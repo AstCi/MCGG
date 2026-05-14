@@ -19,10 +19,6 @@
 #include <utility>
 #include <vector>
 
-#define IMGUI_DISABLE_DEMO_WINDOWS
-#define IMGUI_DISABLE_DEBUG_TOOLS
-#define IMGUI_USE_WCHAR32
-
 #include "structures/Structures.hpp"
 #include "xdl.h"
 #include "dobby/dobby.h"
