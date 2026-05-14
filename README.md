@@ -116,7 +116,10 @@ The default supported target is:
 
 - Manual binding retry and managed reference refresh controls.
 - Account inspection by self, opponent, or explicit account ID.
-- Fight prediction table with direct, manager-derived, invasion-pair, and round-robin signals.
+- Fight prediction table with direct, manager-derived, invasion-pair,
+  round-robin, and opponent-history signals. `Will fight` is the chance that
+  the row is the local player's opponent; `Current enemy` shows that row's
+  observed opponent when available.
 - Tabbed runtime readouts for binding readiness, round state, player identity,
   rank, economy, shop state, battle manager fields, battle bridge state, shop
   panel state, behavior API state, and all manager entries.

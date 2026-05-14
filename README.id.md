@@ -117,7 +117,10 @@ Target default yang didukung:
 
 - Kontrol manual untuk retry binding dan refresh managed reference.
 - Inspeksi account berdasarkan self, opponent, atau account ID eksplisit.
-- Tabel prediksi fight dengan sinyal direct, manager-derived, invasion-pair, dan round-robin.
+- Tabel prediksi fight dengan sinyal direct, manager-derived, invasion-pair,
+  round-robin, dan riwayat opponent. `Will fight` adalah peluang row tersebut
+  menjadi opponent player lokal; `Current enemy` menampilkan opponent yang
+  terdeteksi untuk row tersebut jika tersedia.
 - Readout runtime bertab untuk kesiapan binding, round state, identitas player,
   rank, ekonomi, state shop, field battle manager, state battle bridge, state
   panel shop, state behavior API, dan seluruh manager entry.

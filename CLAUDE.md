@@ -24,7 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat and Arena behavior.
 - **Runtime Ticks**: Shop automation and Arena effects run on separate 100 ms ticks for stability and responsiveness. Shop automation also uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
-- **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Recommendation Lineup readiness, managed reference refresh, local UI readiness, round state, player economy/rank/shop state, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals.
+- **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Recommendation Lineup readiness, managed reference refresh, local UI readiness, round state, player economy/rank/shop state, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row.
 - **Configuration**: Settings saves and loads visual settings plus Combat, Shop, and Arena state from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
@@ -36,7 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, font scale, style tuning, and save/load configuration.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and client-side shop UI automation.
 - **Arena**: hero spawn, equipment grant, GogoCard forcing, active synergy forcing, level 99, outside-map placement, enemy HP 1, and gold grant helpers.
-- **Test**: manual binding retry, account inspection, fight prediction, binding, round, player, manager, bridge, shop UI, behavior API, and all-manager diagnostics.
+- **Test**: manual binding retry, account inspection, fight prediction, binding, round, player, manager, bridge, shop UI, behavior API, and all-manager diagnostics. Only the exact local current opponent should be locked to `100%` in `Will fight`.
 
 ### Project Constraints
 - **Target ABI**: `arm64-v8a`

@@ -46,6 +46,10 @@ git lfs pull
   references, round state, player economy/rank/shop state, battle manager
   fields, battle bridge state, shop panel state, behavior API state, and
   opponent prediction behavior after feature changes.
+- In the Test prediction table, `Will fight` is the local player's opponent
+  probability. Only the exact local current opponent should be forced to
+  `100%`; other rows should stay weighted even when their `Current enemy`
+  value is known.
 - For Shop changes, preserve the existing throttled automation model: buy,
   repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
   bounded, snapshot-based, and retryable.

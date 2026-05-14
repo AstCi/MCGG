@@ -131,6 +131,10 @@ readiness, managed references, round state, player economy/rank/shop state,
 battle manager fields, battle bridge state, shop panel state, behavior API
 state, Recommendation Lineup state, or opponent prediction logic. Test
 diagnostics should stay read-only unless the task explicitly requests an action.
+In the Test prediction table, `Will fight` is the local player's opponent
+probability and `Current enemy` is the observed opponent for that row. Only the
+exact local current opponent should be forced to `100%`; do not mark every row
+as `100%` just because that row has a known current enemy.
 Appearance currently includes ImGui Dark, Catppuccin Mocha, and additional
 palettes inspired by Dear ImGui issue #707. Keep `kAppearanceThemes` and
 `Issue707ThemePalette` entries aligned, and preserve Catppuccin Mocha at theme

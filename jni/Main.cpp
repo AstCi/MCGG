@@ -6497,8 +6497,6 @@ struct CurrentOpponentObservation {
     bool alive = false;
     bool mirror = false;
     bool fromCurrentApi = false;
-    bool fromInvasionPair = false;
-    bool fromManager = false;
     bool inferred = false;
 };
 
@@ -6644,22 +6642,6 @@ int CountRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxE
     return count;
 }
 
-int GetObservedOpponentConfidence(const CurrentOpponentObservation& observation) {
-    if (observation.opponentId == 0) {
-        return 0;
-    }
-
-    if (observation.fromCurrentApi) {
-        return 100;
-    }
-
-    if (observation.fromInvasionPair || observation.fromManager) {
-        return 95;
-    }
-
-    return observation.inferred ? 90 : 0;
-}
-
 void RefreshPredictionOpponentCache(
     uint64_t selfAccountId,
     void* selfManager,
@@ -6686,8 +6668,6 @@ void RefreshPredictionOpponentCache(
             alive,
             lookup.mirror,
             lookup.fromCurrentApi,
-            lookup.fromInvasionPair,
-            lookup.fromManager,
             false
         };
     };
@@ -6822,10 +6802,6 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
             FindCurrentOpponentObservation(row.accountId);
         if (observation) {
             row.currentEnemyName = FormatObservedEnemyName(*observation);
-            row.percent = GetObservedOpponentConfidence(*observation);
-            row.weight = static_cast<double>(row.percent);
-            row.mirror = observation->mirror;
-            row.lockedPercent = row.percent > 0;
         }
     }
 
