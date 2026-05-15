@@ -85,6 +85,10 @@ Target default yang didukung:
   Aggressive berdasarkan progress round, kehilangan HP, kondisi gold, fight
   value sendiri, fight value opponent saat ini, dan opponent terkuat yang
   terdeteksi.
+- Planner gold interest yang mengevaluasi tier interest per 10 gold, breakpoint
+  interest berikutnya, reserve terkonfigurasi, spend budget, tekanan population,
+  tekanan HP, defisit fight value, dan strategi sebelum mengizinkan spending
+  shop, bid auction, aksi level-up, target passive gold, atau assist free economy.
 - Scan semua battle manager untuk menghitung opponent, mendeteksi perebutan
   target, melacak opponent saat ini, dan membandingkan board lokal dengan board
   terkuat.
@@ -195,10 +199,10 @@ snapshot atau access yang sudah ada dan tidak menahan `FeatureMutex` saat
 memanggil API IL2CPP managed.
 
 Auto-Play memakai model tick terbatas yang sama dengan fitur runtime lain. Fitur
-ini mengumpulkan snapshot lokal terlebih dahulu, menilai opsi
-strategy/formation/shop/card/auction dari data lokal, hanya mem-publish counter
-ringkas dan selected target di bawah `FeatureMutex`, dan menghindari lock proyek
-saat memanggil API IL2CPP managed.
+ini mengumpulkan snapshot lokal terlebih dahulu, membangun satu gold-interest
+plan, menilai opsi strategy/formation/shop/card/auction dari data lokal, hanya
+mem-publish counter ringkas dan selected target di bawah `FeatureMutex`, dan
+menghindari lock proyek saat memanggil API IL2CPP managed.
 
 ## Kebutuhan
 

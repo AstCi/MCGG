@@ -62,7 +62,9 @@ git lfs pull
   built-in AI startup, deployment/formation moves, level-up actions, and auction
   bids must stay cooldown-based. Use runtime snapshots, table metadata, current
   opponent data, board-unit scans, and selected-target helpers instead of
-  unbounded searches or long lock holds.
+  unbounded searches or long lock holds. Keep gold-interest decisions centralized
+  in the Auto-Play gold plan so shop spending, auction bids, passive gold,
+  free-economy assists, and level-up actions share the same reserve logic.
 - Auto-Play depends on dump-backed bindings for
   `MCLogicBattleManager.StartAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
   `GetLineupWorth`, `CalcCurrentFightValue`,
@@ -91,11 +93,11 @@ git lfs pull
 Current user-facing overlay areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. Auto-Play includes adaptive strategy pressure,
 opponent-aware board analysis, smart formation moves, selected shop target
-promotion, GogoCard scoring, auction scoring, economy decisions, and optional
-coordination of Combat and Arena assists. Shop currently includes free-hero
-buying, manual target buying, Recommendation Lineup buying, auto-refresh pause
-conditions, keep-gold reserve, and target counts. Combat includes Invisible
-Scout. Arena includes hero/item/card granting, Battle Power controls for
+promotion, GogoCard scoring, auction scoring, gold-interest economy decisions,
+and optional coordination of Combat and Arena assists. Shop currently includes
+free-hero buying, manual target buying, Recommendation Lineup buying,
+auto-refresh pause conditions, keep-gold reserve, and target counts. Combat
+includes Invisible Scout. Arena includes hero/item/card granting, Battle Power controls for
 force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting, and
 enemy-board crippling, active synergy forcing, level/population forcing, enemy
 HP pressure, passive gold, free economy, unlimited hero pool, shop-lock bypass

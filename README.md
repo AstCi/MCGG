@@ -84,6 +84,10 @@ The default supported target is:
 - Adaptive strategy pressure model that shifts between Economy, Balanced, and
   Aggressive based on round progression, HP loss, gold state, own fight value,
   current opponent fight value, and strongest observed opponent.
+- Gold-interest planner that evaluates 10-gold interest tiers, next interest
+  breakpoints, configured reserve, spend budget, population pressure, HP
+  pressure, fight-value deficits, and strategy before allowing shop spending,
+  auction bids, level-up actions, passive gold targets, or free-economy assists.
 - Opponent-aware scan across battle managers to count opponents, detect target
   contesting, track the current opponent, and compare the local board against
   the strongest board.
@@ -192,10 +196,10 @@ access helpers and should not hold `FeatureMutex` while calling managed IL2CPP
 APIs.
 
 Auto-Play uses the same bounded tick model as the other runtime features. It
-gathers local snapshots first, scores strategy/formation/shop/card/auction
-options from local data, publishes only compact counters and selected targets
-under `FeatureMutex`, and avoids holding project locks while calling managed
-IL2CPP APIs.
+gathers local snapshots first, builds one gold-interest plan, scores
+strategy/formation/shop/card/auction options from local data, publishes only
+compact counters and selected targets under `FeatureMutex`, and avoids holding
+project locks while calling managed IL2CPP APIs.
 
 ## Requirements
 

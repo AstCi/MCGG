@@ -221,6 +221,11 @@ namespace FeatureState {
     std::atomic<int> AutoPlayContestedTargets{0};
     std::atomic<int> AutoPlayStrongestOpponentFightValue{0};
     std::atomic<uint64_t> AutoPlayCurrentOpponentId{0};
+    std::atomic<int> AutoPlayInterestTier{0};
+    std::atomic<int> AutoPlayInterestNextGold{10};
+    std::atomic<int> AutoPlayInterestReserveGold{20};
+    std::atomic<int> AutoPlaySpendBudget{0};
+    std::atomic<bool> AutoPlayHoldInterest{false};
 
     std::atomic<bool> CombatInvisibleScout{false};
     std::atomic<bool> CombatForceWin{false};
@@ -4270,6 +4275,20 @@ struct AutoPlaySnapshot {
     bool monsterRound = false;
 };
 
+struct AutoPlayGoldPlan {
+    int interestTier = 0;
+    int nextInterestGold = 10;
+    int reserveGold = 20;
+    int levelReserveGold = 20;
+    int spendBudget = 0;
+    int passiveTargetGold = 80;
+    int recommendationTarget = 6;
+    int maxAuctionBid = 0;
+    bool holdForInterest = false;
+    bool useFreeEconomy = false;
+    bool forceLevel = false;
+};
+
 struct AutoPlayBoardUnit {
     void* instance = nullptr;
     uint32_t guid = 0;
@@ -4309,6 +4328,23 @@ int ClampAutoPlayStrategy(int strategy) {
         static_cast<int>(AutoPlayStrategyEconomy),
         static_cast<int>(AutoPlayStrategyAggressive)
     );
+}
+
+int ClampAutoPlayGold(int gold, int maxGold = 999999) {
+    return std::clamp(gold, 0, maxGold);
+}
+
+int AutoPlayInterestTierForGold(int gold) {
+    return std::clamp(ClampAutoPlayGold(gold) / 10, 0, 5);
+}
+
+int AutoPlayInterestFloorForTier(int tier) {
+    return std::clamp(tier, 0, 5) * 10;
+}
+
+int AutoPlayNextInterestGoldForGold(int gold) {
+    int tier = AutoPlayInterestTierForGold(gold);
+    return tier >= 5 ? 50 : (tier + 1) * 10;
 }
 
 bool HeroHasGroup(const HeroTableEntry& hero, int groupId) {
@@ -4957,6 +4993,7 @@ int ScoreAuctionRewardItem(void* rewardItem, const AutoPlayBoardPlan& plan, cons
 bool TryAutoPlayAuction(
     const AutoPlaySnapshot& snapshot,
     const AutoPlayBoardPlan& plan,
+    const AutoPlayGoldPlan& goldPlan,
     std::chrono::steady_clock::time_point now
 ) {
     if (!FeatureState::AutoPlayUseAuction.load() ||
@@ -5050,6 +5087,10 @@ bool TryAutoPlayAuction(
 
         int bidPrice = GetField<int>(reinterpret_cast<Il2CppObject*>(slot), nextBidField);
         if (snapshot.coin >= 0 && bidPrice > std::max(snapshot.coin, 0)) {
+            continue;
+        }
+
+        if (bidPrice > goldPlan.maxAuctionBid) {
             continue;
         }
 
@@ -5349,26 +5390,193 @@ int SelectAutoPlayStrategy(const AutoPlaySnapshot& snapshot, int pressure) {
     return strategy;
 }
 
-void ApplyAutoPlayPolicy(const AutoPlaySnapshot& snapshot, int strategy) {
-    int reserve = std::clamp(FeatureState::AutoPlayMinReserveGold.load(), 0, 999999);
-    int targetGold = 80;
-    int recommendationTarget = 6;
-    float timeScale = 2.0f;
+// Converts combat pressure into economy pressure so gold plans can protect
+// interest tiers until survival or population needs justify spending down.
+int EstimateAutoPlayGoldThreat(const AutoPlaySnapshot& snapshot, int pressure) {
+    int threat = std::clamp(pressure, 0, 100);
+
+    if (snapshot.hp >= 0) {
+        if (snapshot.hp <= 25) {
+            threat += 35;
+        } else if (snapshot.hp <= 40) {
+            threat += 22;
+        } else if (snapshot.hp <= 55) {
+            threat += 10;
+        }
+    }
+
+    int opponentValue = std::max(
+        snapshot.currentOpponentFightValue,
+        snapshot.strongestOpponentFightValue
+    );
+    if (opponentValue > 0 && snapshot.fightValue > 0 && opponentValue > snapshot.fightValue) {
+        int deficit = std::min(opponentValue - snapshot.fightValue, 50000);
+        threat += std::clamp(deficit / 700, 6, 28);
+    }
+
+    if (snapshot.round >= 18) {
+        threat += 22;
+    } else if (snapshot.round >= 14) {
+        threat += 12;
+    } else if (snapshot.round > 0 && snapshot.round <= 8) {
+        threat -= 8;
+    }
+
+    return std::clamp(threat, 0, 100);
+}
+
+bool AutoPlayNeedsPopulationGold(const AutoPlaySnapshot& snapshot) {
+    if (snapshot.currentPopulation < 0 || snapshot.totalPopulation <= 0) {
+        return false;
+    }
+
+    if (snapshot.currentPopulation >= snapshot.totalPopulation) {
+        return true;
+    }
+
+    return snapshot.spareChess > 2 &&
+        snapshot.currentPopulation + 1 >= snapshot.totalPopulation;
+}
+
+// Builds one bounded economy plan for shop, auction, arena assists, and level-up
+// actions so they do not fight over gold interest breakpoints independently.
+AutoPlayGoldPlan BuildAutoPlayGoldPlan(
+    const AutoPlaySnapshot& snapshot,
+    int strategy,
+    int pressure
+) {
+    AutoPlayGoldPlan plan{};
+    strategy = ClampAutoPlayStrategy(strategy);
+
+    int configuredReserve =
+        std::clamp(FeatureState::AutoPlayMinReserveGold.load(), 0, 999999);
+    bool hasCoin = snapshot.coin >= 0;
+    int coin = hasCoin ? ClampAutoPlayGold(snapshot.coin, 999999999) : configuredReserve;
+    int threat = EstimateAutoPlayGoldThreat(snapshot, pressure);
+    int tier = AutoPlayInterestTierForGold(coin);
+    int currentInterestFloor = AutoPlayInterestFloorForTier(tier);
+    int nextInterestGold = AutoPlayNextInterestGoldForGold(coin);
+    int nextInterestGap = hasCoin ? nextInterestGold - coin : 999999;
+    bool earlyOrMidGame = snapshot.round <= 0 || snapshot.round <= 14;
+    bool healthyEnough = snapshot.hp < 0 || snapshot.hp >= 45;
+    bool canBank =
+        strategy != AutoPlayStrategyAggressive &&
+        earlyOrMidGame &&
+        healthyEnough &&
+        threat < (strategy == AutoPlayStrategyEconomy ? 72 : 54);
+    int reserve = configuredReserve;
+    int levelReserve = configuredReserve;
 
     if (strategy == AutoPlayStrategyEconomy) {
         reserve = std::max(reserve, 40);
-        targetGold = 80;
+        if (canBank) {
+            reserve = std::max(reserve, 50);
+        }
+    } else if (strategy == AutoPlayStrategyAggressive) {
+        reserve = std::min(reserve, threat >= 70 ? 0 : 8);
+    } else {
+        reserve = std::max(reserve, snapshot.round >= 12 ? 10 : 20);
+    }
+
+    if (canBank) {
+        int chaseWindow = strategy == AutoPlayStrategyEconomy ? 8 : 4;
+        if (tier < 5 && nextInterestGap > 0 && nextInterestGap <= chaseWindow) {
+            reserve = std::max(reserve, nextInterestGold);
+            plan.holdForInterest = true;
+        } else if (tier > 0) {
+            reserve = std::max(reserve, currentInterestFloor);
+        }
+    }
+
+    if (threat >= 80) {
+        reserve = std::min(reserve, configuredReserve);
+    } else if (threat >= 65) {
+        reserve = std::min(reserve, std::max(configuredReserve, currentInterestFloor - 10));
+    } else if (threat >= 50 && strategy != AutoPlayStrategyEconomy) {
+        reserve = std::min(reserve, std::max(configuredReserve, currentInterestFloor));
+    }
+
+    reserve = std::clamp(reserve, 0, 999999);
+    if (hasCoin && coin < reserve) {
+        plan.holdForInterest = true;
+    }
+
+    bool populationPressure = AutoPlayNeedsPopulationGold(snapshot);
+    levelReserve = reserve;
+    if (populationPressure || snapshot.round >= 12) {
+        levelReserve = std::min(levelReserve, currentInterestFloor);
+    }
+    if (strategy == AutoPlayStrategyAggressive || threat >= 75) {
+        levelReserve = 0;
+    }
+    levelReserve = std::clamp(levelReserve, 0, 999999);
+
+    int auctionReserve = reserve;
+    if (snapshot.round >= 14 || threat >= 65) {
+        auctionReserve = std::min(auctionReserve, levelReserve);
+    }
+    if (strategy == AutoPlayStrategyAggressive || threat >= 80) {
+        auctionReserve = 0;
+    }
+
+    int spendBudget = hasCoin ? std::max(coin - reserve, 0) : 0;
+    int maxAuctionBid = hasCoin ? std::max(coin - auctionReserve, 0) : 999999;
+    int passiveTarget = 80;
+    int recommendationTarget = 6;
+    bool critical = threat >= 75 || (snapshot.hp >= 0 && snapshot.hp <= 35);
+
+    if (strategy == AutoPlayStrategyEconomy) {
+        passiveTarget = snapshot.round >= 12 ? 80 : std::max(50, nextInterestGold);
         recommendationTarget = 6;
+    } else if (strategy == AutoPlayStrategyAggressive) {
+        passiveTarget = 999999;
+        recommendationTarget = 9;
+    } else {
+        passiveTarget = (critical || snapshot.round >= 12) ? 120 : std::max(60, reserve + 20);
+        recommendationTarget = (critical || snapshot.round >= 10) ? 9 : 6;
+    }
+
+    plan.interestTier = tier;
+    plan.nextInterestGold = nextInterestGold;
+    plan.reserveGold = reserve;
+    plan.levelReserveGold = levelReserve;
+    plan.spendBudget = spendBudget;
+    plan.passiveTargetGold = std::clamp(passiveTarget, 0, 999999999);
+    plan.recommendationTarget = std::clamp(recommendationTarget, 1, 99);
+    plan.maxAuctionBid = std::clamp(maxAuctionBid, 0, 999999999);
+    plan.useFreeEconomy = strategy == AutoPlayStrategyAggressive || critical;
+    plan.forceLevel =
+        strategy == AutoPlayStrategyAggressive ||
+        critical ||
+        populationPressure ||
+        snapshot.round >= 12;
+
+    return plan;
+}
+
+void PublishAutoPlayGoldPlan(const AutoPlayGoldPlan& plan) {
+    FeatureState::AutoPlayInterestTier = plan.interestTier;
+    FeatureState::AutoPlayInterestNextGold = plan.nextInterestGold;
+    FeatureState::AutoPlayInterestReserveGold = plan.reserveGold;
+    FeatureState::AutoPlaySpendBudget = plan.spendBudget;
+    FeatureState::AutoPlayHoldInterest = plan.holdForInterest;
+}
+
+void ApplyAutoPlayPolicy(
+    const AutoPlaySnapshot& snapshot,
+    int strategy,
+    const AutoPlayGoldPlan& goldPlan
+) {
+    int reserve = goldPlan.reserveGold;
+    int targetGold = goldPlan.passiveTargetGold;
+    int recommendationTarget = goldPlan.recommendationTarget;
+    float timeScale = 2.0f;
+
+    if (strategy == AutoPlayStrategyEconomy) {
         timeScale = 1.5f;
     } else if (strategy == AutoPlayStrategyAggressive) {
-        reserve = std::min(reserve, 5);
-        targetGold = 999999;
-        recommendationTarget = 9;
         timeScale = 3.0f;
     } else {
-        reserve = std::max(reserve, 20);
-        targetGold = 120;
-        recommendationTarget = snapshot.round >= 10 ? 9 : 6;
         timeScale = 2.0f;
     }
 
@@ -5393,12 +5601,10 @@ void ApplyAutoPlayPolicy(const AutoPlaySnapshot& snapshot, int strategy) {
         FeatureState::ArenaGoldTarget = targetGold;
         FeatureState::ArenaFreeEconomy =
             FeatureState::AutoPlayUseEconomy.load() &&
-            strategy != AutoPlayStrategyEconomy;
+            goldPlan.useFreeEconomy;
         FeatureState::ArenaForceLevel99 =
             FeatureState::AutoPlayUseEconomy.load() &&
-            (strategy == AutoPlayStrategyAggressive ||
-             snapshot.round >= 8 ||
-             (snapshot.hp >= 0 && snapshot.hp <= 50));
+            goldPlan.forceLevel;
         FeatureState::ArenaAllEnemyHpOne =
             strategy == AutoPlayStrategyAggressive ||
             (snapshot.hp >= 0 && snapshot.hp <= 35);
@@ -5488,6 +5694,7 @@ void RunBuiltInAutoPlayAI(
 
 void TryAutoPlayLevelUp(
     const AutoPlaySnapshot& snapshot,
+    const AutoPlayGoldPlan& goldPlan,
     std::chrono::steady_clock::time_point now
 ) {
     if (!FeatureState::AutoPlayUseEconomy.load() ||
@@ -5529,6 +5736,10 @@ void TryAutoPlayLevelUp(
         return;
     }
 
+    if (snapshot.coin - upgradeCost < goldPlan.levelReserveGold) {
+        return;
+    }
+
     void* selfManager = GetSelfLogicBattleManager();
     if (!selfManager) {
         return;
@@ -5553,6 +5764,7 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
     int pressure = UpdateAutoPlayLearning(snapshot);
     int strategy = SelectAutoPlayStrategy(snapshot, pressure);
+    AutoPlayGoldPlan goldPlan = BuildAutoPlayGoldPlan(snapshot, strategy, pressure);
     std::vector<AutoPlayBoardUnit> selfUnits = CollectAutoPlayBoardUnits(GetSelfLogicBattleManager());
     std::vector<AutoPlayBoardUnit> enemyUnits;
 
@@ -5577,14 +5789,15 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     AutoPlayBoardPlan plan = BuildAutoPlayBoardPlan(snapshot, selfUnits, enemyUnits);
     plan.contestedTargets = snapshot.contestedTargetOwners;
     PublishAutoPlayBoardPlan(plan);
+    PublishAutoPlayGoldPlan(goldPlan);
 
-    ApplyAutoPlayPolicy(snapshot, strategy);
+    ApplyAutoPlayPolicy(snapshot, strategy, goldPlan);
     ApplyAutoPlayShopTargets(plan, snapshot);
     ApplyAutoPlayGoGoCardChoice(snapshot, plan);
-    TryAutoPlayAuction(snapshot, plan, now);
+    TryAutoPlayAuction(snapshot, plan, goldPlan, now);
     TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
     RunBuiltInAutoPlayAI(selfAccountId, snapshot, now);
-    TryAutoPlayLevelUp(snapshot, now);
+    TryAutoPlayLevelUp(snapshot, goldPlan, now);
     FeatureState::AutoPlayWasRunning = true;
 }
 
@@ -6132,6 +6345,11 @@ void ResetFeatureSettings() {
     FeatureState::AutoPlayContestedTargets = 0;
     FeatureState::AutoPlayStrongestOpponentFightValue = 0;
     FeatureState::AutoPlayCurrentOpponentId = 0;
+    FeatureState::AutoPlayInterestTier = 0;
+    FeatureState::AutoPlayInterestNextGold = 10;
+    FeatureState::AutoPlayInterestReserveGold = 20;
+    FeatureState::AutoPlaySpendBudget = 0;
+    FeatureState::AutoPlayHoldInterest = false;
     FeatureState::CombatInvisibleScout = false;
     FeatureState::CombatForceWin = false;
     FeatureState::CombatPreventHpLoss = false;
@@ -7545,9 +7763,13 @@ void DrawAutoPlayTab() {
     ImGui::SeparatorText("Runtime");
     uint64_t selfAccountId = IsIl2CppRuntimeReady() ? GetSelfAccountId() : 0;
     AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
-    float pressure = static_cast<float>(
-        std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100)
-    ) / 100.0f;
+    int pressureValue = std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100);
+    float pressure = static_cast<float>(pressureValue) / 100.0f;
+    AutoPlayGoldPlan goldPlan = BuildAutoPlayGoldPlan(
+        snapshot,
+        FeatureState::AutoPlayStrategy.load(),
+        pressureValue
+    );
 
     ImGui::Text("Strategy: %s", AutoPlayStrategyName(FeatureState::AutoPlayStrategy.load()));
     ImGui::Text(
@@ -7571,6 +7793,26 @@ void DrawAutoPlayTab() {
         DrawValueRow("Phase", snapshot.phase >= 0 ? FormatInt(snapshot.phase) : "Waiting");
         DrawValueRow("HP", snapshot.hp >= 0 ? FormatInt(snapshot.hp) : "Waiting");
         DrawValueRow("Gold", snapshot.coin >= 0 ? FormatInt(snapshot.coin) : "Waiting");
+        DrawValueRow(
+            "Interest tier",
+            snapshot.coin >= 0 ? FormatInt(goldPlan.interestTier) + "/5" : "Waiting"
+        );
+        DrawValueRow(
+            "Next interest",
+            snapshot.coin >= 0 ? FormatInt(goldPlan.nextInterestGold) : "Waiting"
+        );
+        DrawValueRow(
+            "Gold reserve",
+            snapshot.coin >= 0 ? FormatInt(goldPlan.reserveGold) : "Waiting"
+        );
+        DrawValueRow(
+            "Spend budget",
+            snapshot.coin >= 0 ? FormatInt(goldPlan.spendBudget) : "Waiting"
+        );
+        DrawValueRow(
+            "Banking interest",
+            snapshot.coin >= 0 ? FormatBool(goldPlan.holdForInterest) : "Waiting"
+        );
         DrawValueRow("Level", snapshot.level >= 0 ? FormatInt(snapshot.level) : "Waiting");
         DrawValueRow(
             "Population",

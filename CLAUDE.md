@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → setup thread → dependency resolution (`liblogic.so`) → IL2CPP API attachment → retryable game method and field resolution → function hooking (via Dobby) → managed reference refresh → feature ticks → appearance/config setup → ImGui overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Shop automation and Arena effects run on separate 100 ms ticks for stability and responsiveness. Auto-Play runs on a separate 250 ms tick and uses bounded cooldowns for built-in AI startup, deployment/formation moves, level-up actions, and auction bidding. Opponent prediction history refreshes on a separate throttled tick so per-player enemy history is collected outside the Test tab. Shop automation also uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
+- **Runtime Ticks**: Shop automation and Arena effects run on separate 100 ms ticks for stability and responsiveness. Auto-Play runs on a separate 250 ms tick, builds a shared gold-interest plan, and uses bounded cooldowns for built-in AI startup, deployment/formation moves, level-up actions, and auction bidding. Opponent prediction history refreshes on a separate throttled tick so per-player enemy history is collected outside the Test tab. Shop automation also uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
 - **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual settings plus Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
@@ -40,7 +40,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   live board unit positions, hero table metadata, GogoCard choices, and auction
   slots. It chooses Economy/Balanced/Aggressive pressure, publishes selected
   shop targets, scores smart formation moves, scores GogoCards, scores auction
-  bids, and can coordinate existing shop/economy/combat/arena assist controls.
+  bids, protects 10-gold interest breakpoints through a shared reserve/spend
+  budget plan, and can coordinate existing shop/economy/combat/arena assist
+  controls.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
 - **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, font scale, style tuning, and save/load configuration, including Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, and Recommendation Lineup target counts.
@@ -75,11 +77,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.
 - **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.
 - **Auto-Play automation**: Preserve the 250 ms tick and bounded cooldowns. Use
-  `ReadAutoPlaySnapshot()`, `CollectAutoPlayBoardUnits()`,
-  `BuildAutoPlayBoardPlan()`, and the existing table/target helpers. Keep
-  opponent scans bounded to the battle manager dictionary limit, keep board
-  placement to one move per cooldown, and never hold `FeatureMutex` while
-  calling managed IL2CPP APIs.
+  `ReadAutoPlaySnapshot()`, `BuildAutoPlayGoldPlan()`,
+  `CollectAutoPlayBoardUnits()`, `BuildAutoPlayBoardPlan()`, and the existing
+  table/target helpers. Keep opponent scans bounded to the battle manager
+  dictionary limit, keep board placement to one move per cooldown, keep shop,
+  auction, passive-gold, free-economy, and level-up decisions on the shared
+  gold plan, and never hold `FeatureMutex` while calling managed IL2CPP APIs.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,
