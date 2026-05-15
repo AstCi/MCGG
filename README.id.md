@@ -58,7 +58,8 @@ Target default yang didukung:
 - Build system: `ndk-build`
 - Standar C++: `c++26`
 - Branch utama: `master`
-- Tab overlay saat ini: Info, Combat, Appearance, Settings, Shop, Arena, dan Test
+- Tab overlay saat ini: Info, Combat, Auto-Play, Shop, Arena, Appearance,
+  Settings, dan Test
 
 ## Fitur
 
@@ -75,6 +76,34 @@ Target default yang didukung:
 
 - Toggle Invisible Scout.
 
+### Auto-Play
+
+- Controller di sisi binary yang membaca round, phase, HP, gold, level,
+  population, lineup worth, fight value, target Recommendation Lineup, target
+  star-up, dan opponent saat ini.
+- Model tekanan strategi adaptif yang berpindah antara Economy, Balanced, dan
+  Aggressive berdasarkan progress round, kehilangan HP, kondisi gold, fight
+  value sendiri, fight value opponent saat ini, dan opponent terkuat yang
+  terdeteksi.
+- Scan semua battle manager untuk menghitung opponent, mendeteksi perebutan
+  target, melacak opponent saat ini, dan membandingkan board lokal dengan board
+  terkuat.
+- Smart formation scorer yang membaca unit chess managed dari
+  `LogicHeroContainer.m_ChessList`, mengevaluasi hero ID, star, grid position,
+  metadata tank/role, synergy group, dan centroid enemy, lalu melakukan
+  reposition battlefield terbatas satu langkah per cooldown.
+- Pemilihan target shop yang mempromosikan hero terbaik saat ini atau target
+  star-up ke selected shop target sambil tetap memakai throttle buy/refresh
+  yang sudah ada.
+- Scoring GogoCard yang memprioritaskan resource, EXP/economy, hero/shop,
+  star-up, synergy, equipment, dan combat card sesuai round, tekanan HP, focus
+  synergy, dan kekuatan opponent.
+- Scoring auction yang membaca phase auction, state slot, bid price, reward
+  item, reward hero/equipment, dan special upgrade effect sebelum menawar opsi
+  bernilai tertinggi secara terbatas.
+- Kontrol opsional untuk built-in battle AI, shop, economy, combat power, arena
+  assist, SpeedHack, smart formation, auction scoring, dan GogoCard scoring.
+
 ### Appearance
 
 - Selector theme dengan ImGui Dark, Catppuccin Mocha, dan palette tambahan
@@ -88,7 +117,7 @@ Target default yang didukung:
 - Kontrol ukuran menu, posisi tetap opsional, navigasi tab yang lebih ramah
   perangkat mobile, dan interaksi window.
 - Kontrol font scale, opacity, rounding, border, padding, spacing, scrollbar, dan indentation.
-- Save dan load untuk visual settings serta kontrol Combat, Shop, dan Arena.
+- Save dan load untuk visual settings serta kontrol Auto-Play, Combat, Shop, dan Arena.
 - Path config default berada di package game yang sedang berjalan, di-resolve sebagai `/data/data/<game-package>/files/mcgg_config.ini`.
 
 ### Shop
@@ -149,8 +178,9 @@ Secara umum, proyek ini berisi:
 - Persistence konfigurasi milik proyek untuk overlay dan feature state.
 - State runtime primitive yang bersifat atomic dengan domain mutex terpisah
   untuk cache IL2CPP, koleksi fitur, dan string UI/config.
-- Helper snapshot untuk data hero, equipment, GogoCard, dan selected target
-  shop yang dipakai overlay serta tick fitur yang di-throttle.
+- Helper snapshot untuk data hero, equipment, GogoCard, selected target shop,
+  opponent, unit board, auction, dan strategi yang dipakai overlay serta tick
+  fitur yang di-throttle.
 - Local reference artifacts untuk validasi signature method, field, dan type.
 
 Sebagian besar logic fitur tetap berada di `jni/Main.cpp` agar native entry point, runtime state, dan retry behavior mudah diperiksa. Refactor besar sebaiknya tetap mempertahankan lifecycle binding yang ada, kecuali refactor tersebut memang secara eksplisit mengubah desain tersebut.
@@ -163,6 +193,12 @@ pointer managed reference, dan counter fitur disimpan sebagai nilai
 `std::atomic`. Kode yang membaca koleksi kompleks sebaiknya memakai helper
 snapshot atau access yang sudah ada dan tidak menahan `FeatureMutex` saat
 memanggil API IL2CPP managed.
+
+Auto-Play memakai model tick terbatas yang sama dengan fitur runtime lain. Fitur
+ini mengumpulkan snapshot lokal terlebih dahulu, menilai opsi
+strategy/formation/shop/card/auction dari data lokal, hanya mem-publish counter
+ringkas dan selected target di bawah `FeatureMutex`, dan menghindari lock proyek
+saat memanggil API IL2CPP managed.
 
 ## Kebutuhan
 

@@ -44,8 +44,9 @@ git lfs pull
   intentionally changes.
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, player economy/rank/shop state, battle manager
-  fields, battle bridge state, shop panel state, behavior API state, and
-  opponent prediction behavior after feature changes.
+  fields, battle bridge state, shop panel state, behavior API state, Auto-Play
+  state, auction state, GogoCard state, board formation state, and opponent
+  prediction behavior after feature changes.
 - In the Test prediction table, `Will fight` is the local player's opponent
   probability. Only the exact local current opponent should be forced to
   `100%`; other rows should stay weighted even when their `Current enemy`
@@ -57,6 +58,21 @@ git lfs pull
 - For Shop changes, preserve the existing throttled automation model: buy,
   repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
   bounded, snapshot-based, and retryable.
+- For Auto-Play changes, preserve the 250 ms tick and bounded action model:
+  built-in AI startup, deployment/formation moves, level-up actions, and auction
+  bids must stay cooldown-based. Use runtime snapshots, table metadata, current
+  opponent data, board-unit scans, and selected-target helpers instead of
+  unbounded searches or long lock holds.
+- Auto-Play depends on dump-backed bindings for
+  `MCLogicBattleManager.StartAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
+  `GetLineupWorth`, `CalcCurrentFightValue`,
+  `MoveHeroInBattleField(UInt32, Byte, Byte, Boolean)`,
+  `MCLogicBattleData.ILOGIC_GetAllBattleMgr`,
+  `MCLogicBattleData.ILOGIC_GetCurrentOpponentAccountID`,
+  `LogicRoundMgr.get_m_AuctionComp`,
+  `MCLogicAuctionComp.Bid(MCLogicAuctionSlotInfo, UInt64, UInt32)`, and
+  `MCLogicGoGoCardComp.get_m_CurrData`. Verify these against `dump/dump.cs`
+  before changing related function pointers or field reads.
 - Recommendation Lineup automation depends on both `MCLogicBattleData` and
   `MCBattleBridge` bindings. Verify signatures against `dump/dump.cs` before
   changing related method pointers.
@@ -72,15 +88,18 @@ git lfs pull
 - Do not edit vendored directories such as `jni/Il2CppVersions/`, `jni/imgui/`,
   or `jni/xDL/` unless the change explicitly requires it.
 
-Current user-facing overlay areas are Info, Combat, Appearance, Settings, Shop,
-Arena, and Test. Shop currently includes free-hero buying, manual target buying,
-Recommendation Lineup buying, auto-refresh pause conditions, keep-gold reserve,
-and target counts. Combat includes Invisible Scout. Arena includes
-hero/item/card granting, Battle Power controls for force-win, HP-loss
-prevention, attack-ratio boosting, fight-value boosting, and enemy-board
-crippling, active synergy forcing, level/population forcing, enemy HP pressure,
-passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, Skip
-Round, and SpeedHack.
+Current user-facing overlay areas are Info, Combat, Auto-Play, Shop, Arena,
+Appearance, Settings, and Test. Auto-Play includes adaptive strategy pressure,
+opponent-aware board analysis, smart formation moves, selected shop target
+promotion, GogoCard scoring, auction scoring, economy decisions, and optional
+coordination of Combat and Arena assists. Shop currently includes free-hero
+buying, manual target buying, Recommendation Lineup buying, auto-refresh pause
+conditions, keep-gold reserve, and target counts. Combat includes Invisible
+Scout. Arena includes hero/item/card granting, Battle Power controls for
+force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting, and
+enemy-board crippling, active synergy forcing, level/population forcing, enemy
+HP pressure, passive gold, free economy, unlimited hero pool, shop-lock bypass
+helpers, Skip Round, and SpeedHack.
 Appearance includes ImGui
 Dark, Catppuccin Mocha, and additional palettes inspired by Dear ImGui issue #707.
 Test diagnostics are split into tabbed sections for prediction, bindings, round

@@ -10,9 +10,11 @@
 #include <string.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -90,11 +92,24 @@ struct AstarInt2 {
 
 static_assert(sizeof(AstarInt2) == 8);
 
+struct UnityVector3 {
+    float x;
+    float y;
+    float z;
+};
+
+static_assert(sizeof(UnityVector3) == 12);
+
 // Cached table rows used by menu lists and automation.
 struct HeroTableEntry {
     int id = 0;
     std::string name;
     int quality = 0;
+    int isTank = 0;
+    int occupation = 0;
+    int attackType = 0;
+    int heroType = 0;
+    std::vector<int> groups;
     bool valid = false;
 };
 
@@ -138,6 +153,7 @@ namespace RuntimeConfig {
     constexpr int ArenaTickMs = 100;
     constexpr int ShopTickMs = 100;
     constexpr int CombatTickMs = 250;
+    constexpr int AutoPlayTickMs = 250;
     constexpr int OpponentPredictionTickMs = 500;
     constexpr int ShopActionCooldownMs = 350;
     constexpr int ShopRepeatBuyCooldownMs = 1500;
@@ -145,6 +161,10 @@ namespace RuntimeConfig {
     constexpr int ShopWorthCheckMs = 500;
     constexpr int RecommendLineupCheckMs = 500;
     constexpr int ArenaSkipCooldownMs = 750;
+    constexpr int AutoPlayAiStartCooldownMs = 2000;
+    constexpr int AutoPlayDeployCooldownMs = 750;
+    constexpr int AutoPlayLevelCooldownMs = 900;
+    constexpr int AutoPlayAuctionCooldownMs = 750;
     constexpr int MaxShopTargetChecks = 256;
     constexpr int MaxManagedDictionaryEntries = 8192;
     constexpr int MaxManagedListItems = 2048;
@@ -167,6 +187,41 @@ void TickOpponentPredictionHistory(uint64_t selfAccountId);
 
 // Feature toggles, cached managed references, and throttled runtime state.
 namespace FeatureState {
+    std::atomic<bool> AutoPlayEnabled{false};
+    std::atomic<bool> AutoPlayAdaptive{true};
+    std::atomic<bool> AutoPlayUseBuiltInAI{true};
+    std::atomic<bool> AutoPlayUseShop{true};
+    std::atomic<bool> AutoPlayUseEconomy{true};
+    std::atomic<bool> AutoPlayUseCombat{true};
+    std::atomic<bool> AutoPlayUseArenaAssist{true};
+    std::atomic<bool> AutoPlayUseSpeedHack{false};
+    std::atomic<bool> AutoPlayUseFormation{true};
+    std::atomic<bool> AutoPlayUseAuction{true};
+    std::atomic<bool> AutoPlayUseGoGoCards{true};
+    std::atomic<int> AutoPlayAiDifficulty{3};
+    std::atomic<int> AutoPlayMinReserveGold{20};
+    std::atomic<int> AutoPlayTargetLevel{9};
+    std::atomic<int> AutoPlayPressure{25};
+    std::atomic<int> AutoPlayStrategy{1};
+    std::atomic<int> AutoPlayLearnedRounds{0};
+    std::atomic<int> AutoPlayStrategyChanges{0};
+    std::atomic<int> AutoPlayLastRound{0};
+    std::atomic<int> AutoPlayLastHp{-1};
+    std::atomic<bool> AutoPlayWasRunning{false};
+    std::atomic<uint64_t> AutoPlayLastAiStartAccountId{0};
+    std::atomic<int> AutoPlayFocusGroup{0};
+    std::atomic<int> AutoPlayTargetHeroId{0};
+    std::atomic<int> AutoPlayBestCardId{0};
+    std::atomic<int> AutoPlayBestAuctionIndex{-1};
+    std::atomic<int> AutoPlayBestAuctionScore{0};
+    std::atomic<int> AutoPlayBoardSelfUnits{0};
+    std::atomic<int> AutoPlayBoardEnemyUnits{0};
+    std::atomic<int> AutoPlayBoardMoves{0};
+    std::atomic<int> AutoPlayOpponentCount{0};
+    std::atomic<int> AutoPlayContestedTargets{0};
+    std::atomic<int> AutoPlayStrongestOpponentFightValue{0};
+    std::atomic<uint64_t> AutoPlayCurrentOpponentId{0};
+
     std::atomic<bool> CombatInvisibleScout{false};
     std::atomic<bool> CombatForceWin{false};
     std::atomic<bool> CombatPreventHpLoss{false};
@@ -225,6 +280,7 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastArenaTick{};
     std::chrono::steady_clock::time_point LastShopTick{};
     std::chrono::steady_clock::time_point LastCombatTick{};
+    std::chrono::steady_clock::time_point LastAutoPlayTick{};
     std::chrono::steady_clock::time_point LastOpponentPredictionTick{};
     std::chrono::steady_clock::time_point LastTableLoadAttempt{};
     std::chrono::steady_clock::time_point LastShopAction{};
@@ -233,6 +289,10 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastShopWorthCheck{};
     std::chrono::steady_clock::time_point LastRecommendLineupCheck{};
     std::chrono::steady_clock::time_point LastArenaSkipAttempt{};
+    std::chrono::steady_clock::time_point LastAutoPlayAiStartAttempt{};
+    std::chrono::steady_clock::time_point LastAutoPlayDeployAttempt{};
+    std::chrono::steady_clock::time_point LastAutoPlayLevelAttempt{};
+    std::chrono::steady_clock::time_point LastAutoPlayAuctionAttempt{};
     std::atomic<bool> CachedShopHasWorthwhileTarget{false};
     std::atomic<int> CachedRecommendLineupHeroId{0};
     std::atomic<uint64_t> LastShopBuyAccountId{0};
@@ -457,10 +517,12 @@ namespace Originals {
     void* (*MCLogicBattleData_get_logicRoundMgr)(void* instance);
     void (*LogicRoundMgr_SetRound)(void* instance, uint32_t round);
     void (*LogicRoundMgr_NextRound)(void* instance, bool isAfterWelfare);
+    void* (*LogicRoundMgr_get_m_AuctionComp)(void* instance);
     void (*UnityEngine_Time_set_timeScale)(float value);
 
     void* (*MCComp_GetGamer)(uint64_t accountId);
     void* (*MCComp_GetGoGoCardComp)(uint64_t accountId);
+    void* (*MCLogicGoGoCardComp_get_m_CurrData)(void* instance);
 
     void* (*CData_MCHero_GetInstance)();
     MonoStructures::Dictionary<int, void*>* (*CData_MCHero_GetAll)(void* instance);
@@ -476,6 +538,27 @@ namespace Originals {
         void* instance,
         MCLogicHeroShopItemData* itemData,
         bool* ignoreExtraRule
+    );
+    void (*MCLogicBattleManager_StartAI)(void* instance, int difficulty);
+    void (*MCLogicBattleManager_StopAI)(void* instance);
+    void (*MCLogicBattleManager_TryAutoDeploy)(void* instance);
+    bool (*MCLogicBattleManager_OnPlayerLvlUp)(void* instance);
+    int (*MCLogicBattleManager_GetLineupWorth)(void* instance);
+    int (*MCLogicBattleManager_CalcCurrentFightValue)(void* instance);
+    bool (*MCLogicBattleManager_MoveHeroToBattleField_ById)(
+        void* instance,
+        uint32_t instanceId,
+        uint8_t gridX,
+        uint8_t gridY,
+        bool byAI,
+        bool bIsAIApi
+    );
+    void (*MCLogicBattleManager_MoveHeroInBattleField)(
+        void* instance,
+        uint32_t instanceId,
+        uint8_t gridX,
+        uint8_t gridY,
+        bool bIsAi
     );
     bool (*MCLogicBattleManager_get_m_bDefendFaild)(void* instance);
     bool (*MCLogicBattleManager_get_IsHost)(void* instance);
@@ -531,6 +614,15 @@ namespace Originals {
     float (*MCBattleBridge_GetStdevPing)(void* instance);
     float (*MCBattleBridge_GetStdevFps)(void* instance);
     void (*MCChessPlayerData_UpdateCoin)(void* instance, int addValue, int changeType);
+    int (*MCLogicAuctionComp_get_m_CurrPhase)(void* instance);
+    bool (*MCLogicAuctionComp_Bid)(
+        void* instance,
+        void* slotInfo,
+        uint64_t accountId,
+        uint32_t bidPrice
+    );
+    void (*MCLogicAuctionComp_FixedPrice)(void* instance, void* slotInfo, uint64_t accountId);
+    int (*MCLogicAuctionComp_GetSelectItemIndexByAccId)(void* instance, uint64_t accountId);
 
     void (*MCShowSpectatorComp_SetSpectate)(void* instance, uint64_t accountId);
     bool (*MCBondUtil_CheckRelationActive_Config)(void* config, int curActiveCount, void* curBondDict);
@@ -1290,6 +1382,46 @@ bool TryGetManagedListData(
     return true;
 }
 
+template <typename T>
+bool TryGetManagedArrayData(
+    const MonoStructures::Array<T>* array,
+    const T** outData,
+    int* outSize,
+    int maxItems = RuntimeConfig::MaxManagedListItems
+) {
+    if (outData) {
+        *outData = nullptr;
+    }
+
+    if (outSize) {
+        *outSize = 0;
+    }
+
+    if (!array || maxItems < 0 || !IsManagedArrayValid(array, maxItems)) {
+        return false;
+    }
+
+    int capacity = array->getCapacity();
+    if (capacity < 0 || capacity > maxItems) {
+        return false;
+    }
+
+    const T* data = array->GetData();
+    if (!data && capacity > 0) {
+        return false;
+    }
+
+    if (outData) {
+        *outData = data;
+    }
+
+    if (outSize) {
+        *outSize = capacity;
+    }
+
+    return true;
+}
+
 template <typename TKey, typename TValue>
 bool TryGetDictionaryEntries(
     const MonoStructures::Dictionary<TKey, TValue>* dictionary,
@@ -1856,6 +1988,13 @@ void ResolveFeatureBindings() {
         {"Boolean"}
     );
     ResolveOriginal(
+        Originals::LogicRoundMgr_get_m_AuctionComp,
+        "",
+        "LogicRoundMgr",
+        "get_m_AuctionComp",
+        {}
+    );
+    ResolveOriginal(
         Originals::UnityEngine_Time_set_timeScale,
         "UnityEngine",
         "Time",
@@ -1869,6 +2008,13 @@ void ResolveFeatureBindings() {
         "MCComp",
         "GetGoGoCardComp",
         {"UInt64"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicGoGoCardComp_get_m_CurrData,
+        "Battle",
+        "MCLogicGoGoCardComp",
+        "get_m_CurrData",
+        {}
     );
     ResolveOriginal(
         Originals::CData_MCHero_GetInstance,
@@ -1914,6 +2060,62 @@ void ResolveFeatureBindings() {
         "MCLogicBattleManager",
         "BuyNormalHero",
         {"MCLogicHeroShopItemData", "Boolean"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_StartAI,
+        "",
+        "MCLogicBattleManager",
+        "StartAI",
+        {"Int32"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_StopAI,
+        "",
+        "MCLogicBattleManager",
+        "StopAI",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_TryAutoDeploy,
+        "",
+        "MCLogicBattleManager",
+        "TryAutoDeploy",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_OnPlayerLvlUp,
+        "",
+        "MCLogicBattleManager",
+        "OnPlayerLvlUp",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_GetLineupWorth,
+        "",
+        "MCLogicBattleManager",
+        "GetLineupWorth",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_CalcCurrentFightValue,
+        "",
+        "MCLogicBattleManager",
+        "CalcCurrentFightValue",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_MoveHeroToBattleField_ById,
+        "",
+        "MCLogicBattleManager",
+        "MoveHeroToBattleField",
+        {"UInt32", "Byte", "Byte", "Boolean", "Boolean"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicBattleManager_MoveHeroInBattleField,
+        "",
+        "MCLogicBattleManager",
+        "MoveHeroInBattleField",
+        {"UInt32", "Byte", "Byte", "Boolean"}
     );
     HookResolvedMethod(
         Originals::MCLogicBattleManager_get_m_bDefendFaild,
@@ -2148,6 +2350,34 @@ void ResolveFeatureBindings() {
         "MCChessPlayerData",
         "UpdateCoin",
         {"Int32", "CoinChangeType"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicAuctionComp_get_m_CurrPhase,
+        "Battle",
+        "MCLogicAuctionComp",
+        "get_m_CurrPhase",
+        {}
+    );
+    ResolveOriginal(
+        Originals::MCLogicAuctionComp_Bid,
+        "Battle",
+        "MCLogicAuctionComp",
+        "Bid",
+        {"MCLogicAuctionSlotInfo", "UInt64", "UInt32"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicAuctionComp_FixedPrice,
+        "Battle",
+        "MCLogicAuctionComp",
+        "FixedPrice",
+        {"MCLogicAuctionSlotInfo", "UInt64"}
+    );
+    ResolveOriginal(
+        Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId,
+        "Battle",
+        "MCLogicAuctionComp",
+        "GetSelectItemIndexByAccId",
+        {"UInt64"}
     );
 
     HookResolvedMethod(
@@ -2798,6 +3028,36 @@ bool TryGetHeroTableEntry(int heroId, HeroTableEntry* entry) {
     return true;
 }
 
+bool TryGetEquipTableEntry(int equipId, EquipTableEntry* entry) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    auto it = FeatureState::Equips.find(equipId);
+
+    if (it == FeatureState::Equips.end()) {
+        return false;
+    }
+
+    if (entry) {
+        *entry = it->second;
+    }
+
+    return true;
+}
+
+bool TryGetCardTableEntry(int cardId, CardTableEntry* entry) {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
+    auto it = FeatureState::Cards.find(cardId);
+
+    if (it == FeatureState::Cards.end()) {
+        return false;
+    }
+
+    if (entry) {
+        *entry = it->second;
+    }
+
+    return true;
+}
+
 std::unordered_map<int, HeroAutomationState> GetShopHeroTargetsSnapshot() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     return FeatureState::ShopSelectedHeroes;
@@ -3026,6 +3286,11 @@ void EnsureTableDataLoaded() {
             static FieldInfo* idField = nullptr;
             static FieldInfo* nameField = nullptr;
             static FieldInfo* qualityField = nullptr;
+            static FieldInfo* tankField = nullptr;
+            static FieldInfo* occupationField = nullptr;
+            static FieldInfo* attackTypeField = nullptr;
+            static FieldInfo* heroTypeField = nullptr;
+            static FieldInfo* heroGroupField = nullptr;
 
             if (!idField) {
                 idField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_ID");
@@ -3037,6 +3302,26 @@ void EnsureTableDataLoaded() {
 
             if (!qualityField) {
                 qualityField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_Quality");
+            }
+
+            if (!tankField) {
+                tankField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_IsTank");
+            }
+
+            if (!occupationField) {
+                occupationField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_occupation");
+            }
+
+            if (!attackTypeField) {
+                attackTypeField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_AttackType");
+            }
+
+            if (!heroTypeField) {
+                heroTypeField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_HeroType");
+            }
+
+            if (!heroGroupField) {
+                heroGroupField = GetFieldInfoFromName("", "CData_MCHero_Element", "m_HeroGroup");
             }
 
             for (const auto& item : CopyDictionaryEntries(heroDictionary)) {
@@ -3067,7 +3352,40 @@ void EnsureTableDataLoaded() {
                 }
 
                 int quality = GetField<int>(reinterpret_cast<Il2CppObject*>(hero), qualityField);
-                localHeroes[heroId] = {heroId, heroName, quality, true};
+                int isTank = GetField<int>(reinterpret_cast<Il2CppObject*>(hero), tankField);
+                int occupation =
+                    GetField<int>(reinterpret_cast<Il2CppObject*>(hero), occupationField);
+                int attackType =
+                    GetField<int>(reinterpret_cast<Il2CppObject*>(hero), attackTypeField);
+                int heroType =
+                    GetField<int>(reinterpret_cast<Il2CppObject*>(hero), heroTypeField);
+                std::vector<int> groups;
+                auto* groupArray = GetField<MonoStructures::Array<int>*>(
+                    reinterpret_cast<Il2CppObject*>(hero),
+                    heroGroupField
+                );
+                const int* groupData = nullptr;
+                int groupCount = 0;
+
+                if (TryGetManagedArrayData(groupArray, &groupData, &groupCount, 16)) {
+                    for (int i = 0; groupData && i < groupCount; ++i) {
+                        if (groupData[i] > 0) {
+                            groups.push_back(groupData[i]);
+                        }
+                    }
+                }
+
+                localHeroes[heroId] = {
+                    heroId,
+                    heroName,
+                    quality,
+                    isTank,
+                    occupation,
+                    attackType,
+                    heroType,
+                    std::move(groups),
+                    true
+                };
             }
         }
     }
@@ -3919,6 +4237,1357 @@ void ApplyArenaState(uint64_t selfAccountId) {
     }
 }
 
+enum AutoPlayStrategyKind {
+    AutoPlayStrategyEconomy = 0,
+    AutoPlayStrategyBalanced = 1,
+    AutoPlayStrategyAggressive = 2
+};
+
+struct AutoPlaySnapshot {
+    uint64_t accountId = 0;
+    int round = 0;
+    int phase = -1;
+    int hp = -1;
+    int coin = -1;
+    int level = -1;
+    int currentPopulation = -1;
+    int totalPopulation = -1;
+    int spareChess = -1;
+    int battleHeroCount = -1;
+    int allHeroCount = -1;
+    int shopLevel = -1;
+    int refreshCost = -1;
+    int recommendHeroId = 0;
+    int starUpHeroId = 0;
+    int lineupWorth = -1;
+    int fightValue = -1;
+    int opponentCount = 0;
+    int currentOpponentFightValue = -1;
+    int strongestOpponentFightValue = -1;
+    int contestedTargetOwners = 0;
+    uint64_t currentOpponentId = 0;
+    bool fightSection = false;
+    bool monsterRound = false;
+};
+
+struct AutoPlayBoardUnit {
+    void* instance = nullptr;
+    uint32_t guid = 0;
+    int heroId = 0;
+    int star = 1;
+    int quality = 0;
+    int location = 0;
+    int camp = 0;
+    AstarInt2 grid{0, 0};
+    bool reserve = false;
+    bool chessPlayer = false;
+};
+
+struct AutoPlayBoardPlan {
+    int focusGroup = 0;
+    int targetHeroId = 0;
+    int selfUnits = 0;
+    int enemyUnits = 0;
+    int contestedTargets = 0;
+    int boardScore = 0;
+};
+
+const char* AutoPlayStrategyName(int strategy) {
+    switch (strategy) {
+        case AutoPlayStrategyEconomy:
+            return "Economy";
+        case AutoPlayStrategyAggressive:
+            return "Aggressive";
+        default:
+            return "Balanced";
+    }
+}
+
+int ClampAutoPlayStrategy(int strategy) {
+    return std::clamp(
+        strategy,
+        static_cast<int>(AutoPlayStrategyEconomy),
+        static_cast<int>(AutoPlayStrategyAggressive)
+    );
+}
+
+bool HeroHasGroup(const HeroTableEntry& hero, int groupId) {
+    if (groupId <= 0) {
+        return false;
+    }
+
+    return std::find(hero.groups.begin(), hero.groups.end(), groupId) != hero.groups.end();
+}
+
+int ScoreHeroForAutoPlay(
+    int heroId,
+    int star,
+    int focusGroup,
+    int recommendHeroId,
+    int starUpHeroId
+) {
+    HeroTableEntry hero;
+    int quality = 1;
+    int score = std::max(star, 1) * std::max(star, 1) * 120;
+
+    if (TryGetHeroTableEntry(heroId, &hero)) {
+        quality = std::max(hero.quality, 1);
+        score += quality * 75;
+
+        if (hero.isTank > 0) {
+            score += 70;
+        }
+
+        if (HeroHasGroup(hero, focusGroup)) {
+            score += 180;
+        }
+    }
+
+    if (heroId > 0 && heroId == recommendHeroId) {
+        score += 260;
+    }
+
+    if (heroId > 0 && heroId == starUpHeroId) {
+        score += 220;
+    }
+
+    return score + quality;
+}
+
+bool IsFrontlineHero(int heroId) {
+    HeroTableEntry hero;
+    if (!TryGetHeroTableEntry(heroId, &hero)) {
+        return false;
+    }
+
+    return hero.isTank > 0 ||
+        hero.heroType == 1 ||
+        hero.attackType == 1 ||
+        StringIncludesCaseInsensitive(hero.name, "tank");
+}
+
+std::vector<AutoPlayBoardUnit> CollectAutoPlayBoardUnits(void* battleManager) {
+    std::vector<AutoPlayBoardUnit> units;
+
+    if (!battleManager) {
+        return units;
+    }
+
+    static FieldInfo* chessListField = nullptr;
+    static FieldInfo* guidField = nullptr;
+    static FieldInfo* idField = nullptr;
+    static FieldInfo* locationField = nullptr;
+    static FieldInfo* campField = nullptr;
+    static FieldInfo* gridField = nullptr;
+    static FieldInfo* starField = nullptr;
+    static FieldInfo* reserveField = nullptr;
+    static FieldInfo* chessPlayerField = nullptr;
+
+    if (!chessListField) {
+        chessListField = GetFieldInfoFromName("", "LogicHeroContainer", "m_ChessList");
+    }
+
+    if (!guidField) {
+        guidField = GetFieldInfoFromName("Battle", "MCEntityBase", "m_uGuid");
+    }
+
+    if (!idField) {
+        idField = GetFieldInfoFromName("Battle", "MCEntityBase", "m_ID");
+    }
+
+    if (!locationField) {
+        locationField =
+            GetFieldInfoFromName("Battle", "MCEntityBase", "m_eEntityLocatoinType");
+    }
+
+    if (!campField) {
+        campField =
+            GetFieldInfoFromName("Battle", "MCEntityBase", "<m_EntityCampType>k__BackingField");
+    }
+
+    if (!gridField) {
+        gridField = GetFieldInfoFromName("Battle", "MCLogicFighter", "_gridPos");
+    }
+
+    if (!starField) {
+        starField = GetFieldInfoFromName("Battle", "MCLogicFighter", "_iStarLevel");
+    }
+
+    if (!reserveField) {
+        reserveField = GetFieldInfoFromName("Battle", "MCLogicFighter", "m_updateAtReserve");
+    }
+
+    if (!chessPlayerField) {
+        chessPlayerField = GetFieldInfoFromName("Battle", "MCEntityBase", "IsChessPlayer");
+    }
+
+    auto* chessList = GetField<MonoStructures::List<void*>*>(
+        reinterpret_cast<Il2CppObject*>(battleManager),
+        chessListField
+    );
+    void* const* fighters = nullptr;
+    int fighterCount = 0;
+
+    if (!TryGetManagedListData(chessList, &fighters, &fighterCount, 96)) {
+        return units;
+    }
+
+    units.reserve(static_cast<size_t>(std::max(fighterCount, 0)));
+
+    for (int i = 0; fighters && i < fighterCount; ++i) {
+        void* fighter = fighters[i];
+        if (!fighter) {
+            continue;
+        }
+
+        AutoPlayBoardUnit unit{};
+        unit.instance = fighter;
+        unit.guid = GetField<uint32_t>(reinterpret_cast<Il2CppObject*>(fighter), guidField);
+        unit.heroId = GetField<int>(reinterpret_cast<Il2CppObject*>(fighter), idField);
+        unit.location = GetField<int>(reinterpret_cast<Il2CppObject*>(fighter), locationField);
+        unit.camp = GetField<int>(reinterpret_cast<Il2CppObject*>(fighter), campField);
+        unit.grid = GetField<AstarInt2>(reinterpret_cast<Il2CppObject*>(fighter), gridField);
+        unit.star = std::clamp(
+            GetField<int>(reinterpret_cast<Il2CppObject*>(fighter), starField),
+            1,
+            5
+        );
+        unit.reserve = GetField<bool>(reinterpret_cast<Il2CppObject*>(fighter), reserveField) ||
+            unit.location == 2 ||
+            unit.location == 5;
+        unit.chessPlayer =
+            GetField<bool>(reinterpret_cast<Il2CppObject*>(fighter), chessPlayerField) ||
+            unit.location == 3;
+
+        HeroTableEntry hero;
+        if (TryGetHeroTableEntry(unit.heroId, &hero)) {
+            unit.quality = hero.quality;
+        }
+
+        if (!unit.chessPlayer && IsPlausibleHeroId(unit.heroId) && unit.guid != 0) {
+            units.push_back(unit);
+        }
+    }
+
+    return units;
+}
+
+bool IsBoardCellOccupied(
+    const std::vector<AutoPlayBoardUnit>& units,
+    int x,
+    int y,
+    uint32_t ignoreGuid = 0
+) {
+    for (const AutoPlayBoardUnit& unit : units) {
+        if (!unit.reserve &&
+            unit.guid != ignoreGuid &&
+            unit.grid.x == x &&
+            unit.grid.y == y) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int ScoreBoardCellForUnit(
+    const AutoPlayBoardUnit& unit,
+    int x,
+    int y,
+    float enemyCenterX,
+    float enemyCenterY,
+    const AutoPlaySnapshot& snapshot,
+    int focusGroup
+) {
+    bool frontline = IsFrontlineHero(unit.heroId) || unit.star >= 3 || unit.quality >= 4;
+    int desiredY = frontline ? 0 : 3;
+    int score = 100 - (std::abs(y - desiredY) * 24);
+
+    if (enemyCenterX >= 0.0f) {
+        score -= static_cast<int>(std::abs(static_cast<float>(x) - enemyCenterX) * 5.0f);
+    }
+
+    if (frontline && enemyCenterY >= 0.0f) {
+        score -= static_cast<int>(std::abs(static_cast<float>(y) - enemyCenterY) * 3.0f);
+    }
+
+    score += ScoreHeroForAutoPlay(
+        unit.heroId,
+        unit.star,
+        focusGroup,
+        snapshot.recommendHeroId,
+        snapshot.starUpHeroId
+    ) / 18;
+
+    if (snapshot.currentOpponentFightValue > snapshot.fightValue && frontline) {
+        score += 18;
+    }
+
+    return score;
+}
+
+AutoPlayBoardPlan BuildAutoPlayBoardPlan(
+    const AutoPlaySnapshot& snapshot,
+    const std::vector<AutoPlayBoardUnit>& selfUnits,
+    const std::vector<AutoPlayBoardUnit>& enemyUnits
+) {
+    AutoPlayBoardPlan plan{};
+    plan.selfUnits = static_cast<int>(selfUnits.size());
+    plan.enemyUnits = static_cast<int>(enemyUnits.size());
+
+    std::unordered_map<int, int> groupScore;
+
+    for (const AutoPlayBoardUnit& unit : selfUnits) {
+        HeroTableEntry hero;
+        if (!TryGetHeroTableEntry(unit.heroId, &hero)) {
+            continue;
+        }
+
+        int heroScore = ScoreHeroForAutoPlay(
+            unit.heroId,
+            unit.star,
+            0,
+            snapshot.recommendHeroId,
+            snapshot.starUpHeroId
+        );
+
+        for (int groupId : hero.groups) {
+            groupScore[groupId] += heroScore;
+        }
+    }
+
+    if (snapshot.recommendHeroId > 0) {
+        HeroTableEntry hero;
+        if (TryGetHeroTableEntry(snapshot.recommendHeroId, &hero)) {
+            for (int groupId : hero.groups) {
+                groupScore[groupId] += 220;
+            }
+        }
+    }
+
+    std::unordered_map<int, int> enemyGroupCount;
+    for (const AutoPlayBoardUnit& unit : enemyUnits) {
+        HeroTableEntry hero;
+        if (!TryGetHeroTableEntry(unit.heroId, &hero)) {
+            continue;
+        }
+
+        for (int groupId : hero.groups) {
+            enemyGroupCount[groupId] += 1;
+        }
+    }
+
+    int bestGroup = 0;
+    int bestScore = -999999;
+    for (const auto& item : groupScore) {
+        int groupId = item.first;
+        int adjusted = item.second - (enemyGroupCount[groupId] * 45);
+
+        if (adjusted > bestScore) {
+            bestGroup = groupId;
+            bestScore = adjusted;
+        }
+    }
+
+    plan.focusGroup = bestGroup;
+
+    int bestHero = snapshot.starUpHeroId > 0 ? snapshot.starUpHeroId : snapshot.recommendHeroId;
+    int bestHeroScore = bestHero > 0 ?
+        ScoreHeroForAutoPlay(bestHero, 1, bestGroup, snapshot.recommendHeroId, snapshot.starUpHeroId) :
+        -1;
+
+    for (const AutoPlayBoardUnit& unit : selfUnits) {
+        int score = ScoreHeroForAutoPlay(
+            unit.heroId,
+            unit.star,
+            bestGroup,
+            snapshot.recommendHeroId,
+            snapshot.starUpHeroId
+        );
+        plan.boardScore += score;
+
+        if (score > bestHeroScore) {
+            bestHeroScore = score;
+            bestHero = unit.heroId;
+        }
+    }
+
+    plan.targetHeroId = bestHero;
+    return plan;
+}
+
+void PublishAutoPlayBoardPlan(const AutoPlayBoardPlan& plan) {
+    FeatureState::AutoPlayFocusGroup = plan.focusGroup;
+    FeatureState::AutoPlayTargetHeroId = plan.targetHeroId;
+    FeatureState::AutoPlayBoardSelfUnits = plan.selfUnits;
+    FeatureState::AutoPlayBoardEnemyUnits = plan.enemyUnits;
+    FeatureState::AutoPlayContestedTargets = plan.contestedTargets;
+}
+
+void ApplyAutoPlayShopTargets(const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
+    if (!FeatureState::AutoPlayUseShop.load()) {
+        return;
+    }
+
+    int targetHero = plan.targetHeroId > 0 ? plan.targetHeroId : snapshot.recommendHeroId;
+    if (!IsPlausibleHeroId(targetHero)) {
+        return;
+    }
+
+    HeroAutomationState state{};
+    state.selected = true;
+    state.targetCount =
+        FeatureState::AutoPlayStrategy.load() == AutoPlayStrategyAggressive ? 9 : 6;
+    SetShopHeroTarget(targetHero, state);
+}
+
+bool IsLikelyFreeBoardCell(
+    const std::vector<AutoPlayBoardUnit>& selfUnits,
+    int x,
+    int y,
+    uint32_t ignoreGuid
+) {
+    if (x < 0 || x > 7 || y < 0 || y > 3) {
+        return false;
+    }
+
+    if (IsBoardCellOccupied(selfUnits, x, y, ignoreGuid)) {
+        return false;
+    }
+
+    if (Originals::AStarTileMap_ValidPos && !Originals::AStarTileMap_ValidPos(x, y)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool TryAutoPlaySmartFormation(
+    const AutoPlaySnapshot& snapshot,
+    const AutoPlayBoardPlan& plan,
+    const std::vector<AutoPlayBoardUnit>& selfUnits,
+    const std::vector<AutoPlayBoardUnit>& enemyUnits,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!FeatureState::AutoPlayUseFormation.load() ||
+        snapshot.fightSection ||
+        !Originals::MCLogicBattleManager_MoveHeroInBattleField ||
+        !CooldownElapsed(
+            FeatureState::LastAutoPlayDeployAttempt,
+            RuntimeConfig::AutoPlayDeployCooldownMs,
+            now
+        )) {
+        return false;
+    }
+
+    void* selfManager = GetSelfLogicBattleManager();
+    if (!selfManager || selfUnits.empty()) {
+        return false;
+    }
+
+    float enemyCenterX = -1.0f;
+    float enemyCenterY = -1.0f;
+    int enemyPositionCount = 0;
+
+    for (const AutoPlayBoardUnit& enemy : enemyUnits) {
+        if (enemy.reserve) {
+            continue;
+        }
+
+        enemyCenterX += enemy.grid.x;
+        enemyCenterY += enemy.grid.y;
+        enemyPositionCount++;
+    }
+
+    if (enemyPositionCount > 0) {
+        enemyCenterX = (enemyCenterX + 1.0f) / static_cast<float>(enemyPositionCount);
+        enemyCenterY = (enemyCenterY + 1.0f) / static_cast<float>(enemyPositionCount);
+    }
+
+    const AutoPlayBoardUnit* bestUnit = nullptr;
+    AstarInt2 bestTarget{0, 0};
+    int bestGain = 0;
+
+    for (const AutoPlayBoardUnit& unit : selfUnits) {
+        if (unit.reserve || unit.chessPlayer) {
+            continue;
+        }
+
+        int currentScore = ScoreBoardCellForUnit(
+            unit,
+            unit.grid.x,
+            unit.grid.y,
+            enemyCenterX,
+            enemyCenterY,
+            snapshot,
+            plan.focusGroup
+        );
+
+        for (int y = 0; y <= 3; ++y) {
+            for (int x = 0; x <= 7; ++x) {
+                if (!IsLikelyFreeBoardCell(selfUnits, x, y, unit.guid)) {
+                    continue;
+                }
+
+                int score = ScoreBoardCellForUnit(
+                    unit,
+                    x,
+                    y,
+                    enemyCenterX,
+                    enemyCenterY,
+                    snapshot,
+                    plan.focusGroup
+                );
+                int gain = score - currentScore;
+
+                if (gain > bestGain) {
+                    bestGain = gain;
+                    bestUnit = &unit;
+                    bestTarget = {x, y};
+                }
+            }
+        }
+    }
+
+    if (!bestUnit || bestGain < 18) {
+        return false;
+    }
+
+    Originals::MCLogicBattleManager_MoveHeroInBattleField(
+        selfManager,
+        bestUnit->guid,
+        static_cast<uint8_t>(bestTarget.x),
+        static_cast<uint8_t>(bestTarget.y),
+        true
+    );
+    FeatureState::LastAutoPlayDeployAttempt = now;
+    FeatureState::AutoPlayBoardMoves =
+        std::min(FeatureState::AutoPlayBoardMoves.load() + 1, 999999);
+    return true;
+}
+
+int ScoreAutoPlayCard(int cardId, const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
+    if (cardId <= 0) {
+        return -999999;
+    }
+
+    CardTableEntry card;
+    int score = cardId % 97;
+
+    if (TryGetCardTableEntry(cardId, &card) && !card.name.empty()) {
+        if (StringIncludesCaseInsensitive(card.name, "gold") ||
+            StringIncludesCaseInsensitive(card.name, "coin")) {
+            score += snapshot.round < 10 ? 180 : 60;
+        }
+
+        if (StringIncludesCaseInsensitive(card.name, "hero") ||
+            StringIncludesCaseInsensitive(card.name, "shop")) {
+            score += 130;
+        }
+
+        if (StringIncludesCaseInsensitive(card.name, "star") ||
+            StringIncludesCaseInsensitive(card.name, "upgrade")) {
+            score += 150;
+        }
+
+        if (StringIncludesCaseInsensitive(card.name, "bond") ||
+            StringIncludesCaseInsensitive(card.name, "relation") ||
+            StringIncludesCaseInsensitive(card.name, "synergy")) {
+            score += plan.focusGroup > 0 ? 170 : 90;
+        }
+
+        if (StringIncludesCaseInsensitive(card.name, "fight") ||
+            StringIncludesCaseInsensitive(card.name, "attack") ||
+            StringIncludesCaseInsensitive(card.name, "damage")) {
+            score += snapshot.round >= 10 ? 150 : 80;
+        }
+    }
+
+    if (snapshot.hp >= 0 && snapshot.hp <= 35) {
+        score += 120;
+    }
+
+    if (snapshot.currentOpponentFightValue > snapshot.fightValue) {
+        score += 80;
+    }
+
+    return score;
+}
+
+void ApplyAutoPlayGoGoCardChoice(
+    const AutoPlaySnapshot& snapshot,
+    const AutoPlayBoardPlan& plan
+) {
+    if (!FeatureState::AutoPlayUseGoGoCards.load() ||
+        !Originals::MCComp_GetGoGoCardComp ||
+        !Originals::MCLogicGoGoCardComp_get_m_CurrData) {
+        return;
+    }
+
+    void* goGoCardComp = Originals::MCComp_GetGoGoCardComp(snapshot.accountId);
+    if (!goGoCardComp) {
+        return;
+    }
+
+    static FieldInfo* cardListField = nullptr;
+
+    if (!cardListField) {
+        cardListField =
+            GetFieldInfoFromName("Battle", "MCLogicGoGoCardRoundData", "m_listCurrCard");
+    }
+
+    void* currentData = Originals::MCLogicGoGoCardComp_get_m_CurrData(goGoCardComp);
+    auto* cardList = currentData ?
+        GetField<MonoStructures::List<int>*>(
+            reinterpret_cast<Il2CppObject*>(currentData),
+            cardListField
+        ) :
+        nullptr;
+    const int* cards = nullptr;
+    int cardCount = 0;
+
+    if (!TryGetManagedListData(cardList, &cards, &cardCount, 16) || cardCount <= 0) {
+        return;
+    }
+
+    std::array<std::pair<int, int>, 16> scored{};
+    int scoredCount = 0;
+    for (int i = 0; cards && i < cardCount && scoredCount < static_cast<int>(scored.size()); ++i) {
+        int cardId = cards[i];
+        scored[scoredCount++] = {ScoreAutoPlayCard(cardId, plan, snapshot), cardId};
+    }
+
+    std::sort(scored.begin(), scored.begin() + scoredCount, [](const auto& lhs, const auto& rhs) {
+        return lhs.first > rhs.first;
+    });
+
+    if (scoredCount > 0 && scored[0].second > 0) {
+        FeatureState::ArenaGogoCardEnabled = true;
+        FeatureState::ArenaGogoCardSelected1 = scored[0].second;
+        FeatureState::AutoPlayBestCardId = scored[0].second;
+    }
+
+    if (scoredCount > 1 && scored[1].second > 0) {
+        FeatureState::ArenaGogoCardSelected2 = scored[1].second;
+    }
+}
+
+int ScoreAuctionRewardItem(void* rewardItem, const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
+    if (!rewardItem) {
+        return 0;
+    }
+
+    static FieldInfo* itemConfField = nullptr;
+    static FieldInfo* biddingTypeField = nullptr;
+    static FieldInfo* biddingListField = nullptr;
+    static FieldInfo* biddingChangeField = nullptr;
+
+    if (!itemConfField) {
+        itemConfField =
+            GetFieldInfoFromName("Battle", "MCLogicAuctionItemBase", "<m_ItemConf>k__BackingField");
+    }
+
+    if (!biddingTypeField) {
+        biddingTypeField = GetFieldInfoFromName("", "CData_AuctionItem_Element", "m_BiddingType");
+    }
+
+    if (!biddingListField) {
+        biddingListField = GetFieldInfoFromName("", "CData_AuctionItem_Element", "m_BiddingList");
+    }
+
+    if (!biddingChangeField) {
+        biddingChangeField =
+            GetFieldInfoFromName("", "CData_AuctionItem_Element", "m_BiddingChange");
+    }
+
+    void* itemConf = GetField<void*>(reinterpret_cast<Il2CppObject*>(rewardItem), itemConfField);
+    if (!itemConf) {
+        return 0;
+    }
+
+    int type = GetField<int>(reinterpret_cast<Il2CppObject*>(itemConf), biddingTypeField);
+    auto* biddingList = GetField<MonoStructures::Array<int>*>(
+        reinterpret_cast<Il2CppObject*>(itemConf),
+        biddingListField
+    );
+    auto* biddingChange = GetField<MonoStructures::Array<int>*>(
+        reinterpret_cast<Il2CppObject*>(itemConf),
+        biddingChangeField
+    );
+    const int* values = nullptr;
+    int valueCount = 0;
+    int score = type * 35;
+
+    if (TryGetManagedArrayData(biddingList, &values, &valueCount, 16)) {
+        for (int i = 0; values && i < valueCount; ++i) {
+            int value = values[i];
+
+            if (type == 2 && IsPlausibleHeroId(value)) {
+                score += ScoreHeroForAutoPlay(
+                    value,
+                    1,
+                    plan.focusGroup,
+                    snapshot.recommendHeroId,
+                    snapshot.starUpHeroId
+                );
+            } else if (type == 1) {
+                EquipTableEntry equip;
+                score += TryGetEquipTableEntry(value, &equip) ? 150 : 80;
+            } else {
+                score += 90;
+            }
+        }
+    }
+
+    const int* changes = nullptr;
+    int changeCount = 0;
+    if (TryGetManagedArrayData(biddingChange, &changes, &changeCount, 16)) {
+        for (int i = 0; changes && i < changeCount; ++i) {
+            if (changes[i] == 1 || changes[i] == 2) {
+                score += plan.targetHeroId > 0 ? 220 : 120;
+            } else if (changes[i] == 3 || changes[i] == 4) {
+                score += 140;
+            }
+        }
+    }
+
+    return score;
+}
+
+bool TryAutoPlayAuction(
+    const AutoPlaySnapshot& snapshot,
+    const AutoPlayBoardPlan& plan,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!FeatureState::AutoPlayUseAuction.load() ||
+        snapshot.accountId == 0 ||
+        !Originals::MCLogicBattleData_get_logicRoundMgr ||
+        !Originals::LogicRoundMgr_get_m_AuctionComp ||
+        !Originals::MCLogicAuctionComp_get_m_CurrPhase ||
+        !Originals::MCLogicAuctionComp_Bid ||
+        !CooldownElapsed(
+            FeatureState::LastAutoPlayAuctionAttempt,
+            RuntimeConfig::AutoPlayAuctionCooldownMs,
+            now
+        )) {
+        return false;
+    }
+
+    void* roundMgr = Originals::MCLogicBattleData_get_logicRoundMgr(nullptr);
+    void* auctionComp = roundMgr ? Originals::LogicRoundMgr_get_m_AuctionComp(roundMgr) : nullptr;
+    if (!auctionComp) {
+        return false;
+    }
+
+    int phase = Originals::MCLogicAuctionComp_get_m_CurrPhase(auctionComp);
+    if (phase != 3) {
+        return false;
+    }
+
+    if (Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId &&
+        Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId(
+            auctionComp,
+            snapshot.accountId
+        ) >= 0) {
+        return false;
+    }
+
+    static FieldInfo* auctionItemListField = nullptr;
+    static FieldInfo* indexField = nullptr;
+    static FieldInfo* nextBidField = nullptr;
+    static FieldInfo* activeField = nullptr;
+    static FieldInfo* rewardListField = nullptr;
+
+    if (!auctionItemListField) {
+        auctionItemListField =
+            GetFieldInfoFromName("Battle", "MCLogicAuctionComp", "auctionItemList");
+    }
+
+    if (!indexField) {
+        indexField =
+            GetFieldInfoFromName("Battle", "MCLogicAuctionSlotInfo", "<m_ItemIndex>k__BackingField");
+    }
+
+    if (!nextBidField) {
+        nextBidField =
+            GetFieldInfoFromName("Battle", "MCLogicAuctionSlotInfo", "<m_iBidPrice>k__BackingField");
+    }
+
+    if (!activeField) {
+        activeField =
+            GetFieldInfoFromName("Battle", "MCLogicAuctionSlotInfo", "<active>k__BackingField");
+    }
+
+    if (!rewardListField) {
+        rewardListField = GetFieldInfoFromName(
+            "Battle",
+            "MCLogicAuctionSlotInfo",
+            "m_RewardItemList"
+        );
+    }
+
+    auto* auctionItems = GetField<MonoStructures::List<void*>*>(
+        reinterpret_cast<Il2CppObject*>(auctionComp),
+        auctionItemListField
+    );
+    void* const* slots = nullptr;
+    int slotCount = 0;
+
+    if (!TryGetManagedListData(auctionItems, &slots, &slotCount, 16)) {
+        return false;
+    }
+
+    void* bestSlot = nullptr;
+    int bestIndex = -1;
+    int bestBid = 0;
+    int bestScore = -999999;
+
+    for (int i = 0; slots && i < slotCount; ++i) {
+        void* slot = slots[i];
+        if (!slot || !GetField<bool>(reinterpret_cast<Il2CppObject*>(slot), activeField)) {
+            continue;
+        }
+
+        int bidPrice = GetField<int>(reinterpret_cast<Il2CppObject*>(slot), nextBidField);
+        if (snapshot.coin >= 0 && bidPrice > std::max(snapshot.coin, 0)) {
+            continue;
+        }
+
+        int score = 0;
+        auto* rewardList = GetField<MonoStructures::List<void*>*>(
+            reinterpret_cast<Il2CppObject*>(slot),
+            rewardListField
+        );
+        void* const* rewards = nullptr;
+        int rewardCount = 0;
+
+        if (TryGetManagedListData(rewardList, &rewards, &rewardCount, 8)) {
+            for (int rewardIndex = 0; rewards && rewardIndex < rewardCount; ++rewardIndex) {
+                score += ScoreAuctionRewardItem(rewards[rewardIndex], plan, snapshot);
+            }
+        }
+
+        score -= bidPrice * (snapshot.round < 10 ? 4 : 2);
+        if (snapshot.hp >= 0 && snapshot.hp <= 40) {
+            score += 100;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestSlot = slot;
+            bestIndex = GetField<int>(reinterpret_cast<Il2CppObject*>(slot), indexField);
+            bestBid = bidPrice;
+        }
+    }
+
+    if (!bestSlot || bestScore < 120) {
+        return false;
+    }
+
+    Originals::MCLogicAuctionComp_Bid(
+        auctionComp,
+        bestSlot,
+        snapshot.accountId,
+        static_cast<uint32_t>(std::max(bestBid, 0))
+    );
+    FeatureState::AutoPlayBestAuctionIndex = bestIndex;
+    FeatureState::AutoPlayBestAuctionScore = bestScore;
+    FeatureState::LastAutoPlayAuctionAttempt = now;
+    return true;
+}
+
+AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
+    AutoPlaySnapshot snapshot{};
+    snapshot.accountId = selfAccountId;
+
+    if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
+        return snapshot;
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetGameRound) {
+        snapshot.round =
+            static_cast<int>(Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr));
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetGamePhase) {
+        snapshot.phase = Originals::MCLogicBattleData_ILOGIC_GetGamePhase(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetPlayerHP) {
+        snapshot.hp = Originals::MCLogicBattleData_ILOGIC_GetPlayerHP(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin) {
+        snapshot.coin =
+            Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetPlayerLevel) {
+        snapshot.level =
+            Originals::MCLogicBattleData_ILOGIC_GetPlayerLevel(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_SelfCurPopulation) {
+        snapshot.currentPopulation =
+            Originals::MCLogicBattleData_ILOGIC_SelfCurPopulation(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_SelfTotalPopulation) {
+        snapshot.totalPopulation =
+            Originals::MCLogicBattleData_ILOGIC_SelfTotalPopulation(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetSpareChessNum) {
+        snapshot.spareChess =
+            Originals::MCLogicBattleData_ILOGIC_GetSpareChessNum(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum) {
+        snapshot.battleHeroCount =
+            Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetAllHeroNum) {
+        snapshot.allHeroCount =
+            Originals::MCLogicBattleData_ILOGIC_GetAllHeroNum(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetCurRefreshShopLevel) {
+        snapshot.shopLevel =
+            Originals::MCLogicBattleData_ILOGIC_GetCurRefreshShopLevel(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetRefreshCost) {
+        snapshot.refreshCost =
+            Originals::MCLogicBattleData_ILOGIC_GetRefreshCost(nullptr, selfAccountId);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup) {
+        snapshot.recommendHeroId =
+            Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetHeroByStarUp) {
+        snapshot.starUpHeroId =
+            Originals::MCLogicBattleData_ILOGIC_GetHeroByStarUp(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_IsFightSection) {
+        snapshot.fightSection =
+            Originals::MCLogicBattleData_ILOGIC_IsFightSection(nullptr);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound) {
+        snapshot.monsterRound =
+            Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound(nullptr);
+    }
+
+    void* selfManager = GetSelfLogicBattleManager();
+    if (selfManager && Originals::MCLogicBattleManager_GetLineupWorth) {
+        snapshot.lineupWorth = Originals::MCLogicBattleManager_GetLineupWorth(selfManager);
+    }
+
+    if (selfManager && Originals::MCLogicBattleManager_CalcCurrentFightValue) {
+        snapshot.fightValue =
+            Originals::MCLogicBattleManager_CalcCurrentFightValue(selfManager);
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID) {
+        snapshot.currentOpponentId =
+            Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                nullptr,
+                selfAccountId
+            );
+    }
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
+
+        for (const auto& item : CopyDictionaryEntries(battleManagers, 16)) {
+            uint64_t accountId = item.first;
+            void* manager = item.second;
+
+            if (accountId == 0 || accountId == selfAccountId || !manager) {
+                continue;
+            }
+
+            snapshot.opponentCount++;
+
+            int opponentFightValue = Originals::MCLogicBattleManager_CalcCurrentFightValue ?
+                Originals::MCLogicBattleManager_CalcCurrentFightValue(manager) :
+                -1;
+
+            if (opponentFightValue > snapshot.strongestOpponentFightValue) {
+                snapshot.strongestOpponentFightValue = opponentFightValue;
+            }
+
+            if (accountId == snapshot.currentOpponentId) {
+                snapshot.currentOpponentFightValue = opponentFightValue;
+            }
+
+            if (Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
+                bool ownsTarget = false;
+
+                if (snapshot.recommendHeroId > 0 &&
+                    Originals::MCLogicBattleData_ILogic_HeroOwnCount(
+                        nullptr,
+                        accountId,
+                        snapshot.recommendHeroId
+                    ) > 0) {
+                    ownsTarget = true;
+                }
+
+                if (snapshot.starUpHeroId > 0 &&
+                    snapshot.starUpHeroId != snapshot.recommendHeroId &&
+                    Originals::MCLogicBattleData_ILogic_HeroOwnCount(
+                        nullptr,
+                        accountId,
+                        snapshot.starUpHeroId
+                    ) > 0) {
+                    ownsTarget = true;
+                }
+
+                if (ownsTarget) {
+                    snapshot.contestedTargetOwners++;
+                }
+            }
+        }
+    }
+
+    FeatureState::AutoPlayOpponentCount = snapshot.opponentCount;
+    FeatureState::AutoPlayCurrentOpponentId = snapshot.currentOpponentId;
+    FeatureState::AutoPlayStrongestOpponentFightValue =
+        std::max(snapshot.strongestOpponentFightValue, 0);
+    FeatureState::AutoPlayContestedTargets = snapshot.contestedTargetOwners;
+
+    return snapshot;
+}
+
+int UpdateAutoPlayLearning(const AutoPlaySnapshot& snapshot) {
+    int pressure = std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100);
+
+    if (snapshot.accountId == 0 || snapshot.round <= 0) {
+        FeatureState::AutoPlayPressure = pressure;
+        return pressure;
+    }
+
+    int lastRound = FeatureState::AutoPlayLastRound.load();
+    int lastHp = FeatureState::AutoPlayLastHp.load();
+
+    if (lastRound != snapshot.round) {
+        if (lastRound > 0 && lastHp >= 0 && snapshot.hp >= 0) {
+            int hpDelta = lastHp - snapshot.hp;
+            pressure += hpDelta > 0 ? std::clamp(10 + hpDelta, 10, 35) : -4;
+        }
+
+        if (snapshot.hp >= 0 && snapshot.hp <= 30) {
+            pressure += 20;
+        }
+
+        if (snapshot.round >= 15) {
+            pressure += 8;
+        }
+
+        if (snapshot.currentOpponentFightValue > 0 &&
+            snapshot.fightValue > 0 &&
+            snapshot.currentOpponentFightValue > snapshot.fightValue) {
+            pressure += 10;
+        }
+
+        if (snapshot.strongestOpponentFightValue > 0 &&
+            snapshot.fightValue > 0 &&
+            snapshot.strongestOpponentFightValue > snapshot.fightValue + 1000) {
+            pressure += 8;
+        }
+
+        if (snapshot.coin >= 50 && snapshot.hp >= 50 && snapshot.round < 12) {
+            pressure -= 8;
+        }
+
+        FeatureState::AutoPlayLastRound = snapshot.round;
+        FeatureState::AutoPlayLastHp = snapshot.hp;
+        FeatureState::AutoPlayLearnedRounds =
+            std::min(FeatureState::AutoPlayLearnedRounds.load() + 1, 999999);
+    } else if (snapshot.hp >= 0) {
+        FeatureState::AutoPlayLastHp = snapshot.hp;
+    }
+
+    pressure = std::clamp(pressure, 0, 100);
+    FeatureState::AutoPlayPressure = pressure;
+    return pressure;
+}
+
+int SelectAutoPlayStrategy(const AutoPlaySnapshot& snapshot, int pressure) {
+    int strategy = ClampAutoPlayStrategy(FeatureState::AutoPlayStrategy.load());
+
+    if (FeatureState::AutoPlayAdaptive.load()) {
+        if (pressure >= 55 ||
+            (snapshot.hp >= 0 && snapshot.hp <= 35) ||
+            (snapshot.currentOpponentFightValue > 0 &&
+             snapshot.fightValue > 0 &&
+             snapshot.currentOpponentFightValue > snapshot.fightValue) ||
+            snapshot.round >= 16) {
+            strategy = AutoPlayStrategyAggressive;
+        } else if (pressure <= 20 &&
+                   snapshot.round > 0 &&
+                   snapshot.round < 10 &&
+                   snapshot.coin >= 50 &&
+                   (snapshot.hp < 0 || snapshot.hp >= 60)) {
+            strategy = AutoPlayStrategyEconomy;
+        } else {
+            strategy = AutoPlayStrategyBalanced;
+        }
+    }
+
+    int previousStrategy = ClampAutoPlayStrategy(FeatureState::AutoPlayStrategy.load());
+    if (strategy != previousStrategy) {
+        FeatureState::AutoPlayStrategyChanges =
+            std::min(FeatureState::AutoPlayStrategyChanges.load() + 1, 999999);
+    }
+
+    FeatureState::AutoPlayStrategy = strategy;
+    return strategy;
+}
+
+void ApplyAutoPlayPolicy(const AutoPlaySnapshot& snapshot, int strategy) {
+    int reserve = std::clamp(FeatureState::AutoPlayMinReserveGold.load(), 0, 999999);
+    int targetGold = 80;
+    int recommendationTarget = 6;
+    float timeScale = 2.0f;
+
+    if (strategy == AutoPlayStrategyEconomy) {
+        reserve = std::max(reserve, 40);
+        targetGold = 80;
+        recommendationTarget = 6;
+        timeScale = 1.5f;
+    } else if (strategy == AutoPlayStrategyAggressive) {
+        reserve = std::min(reserve, 5);
+        targetGold = 999999;
+        recommendationTarget = 9;
+        timeScale = 3.0f;
+    } else {
+        reserve = std::max(reserve, 20);
+        targetGold = 120;
+        recommendationTarget = snapshot.round >= 10 ? 9 : 6;
+        timeScale = 2.0f;
+    }
+
+    if (FeatureState::AutoPlayUseShop.load()) {
+        FeatureState::ShopBuyFreeHero = true;
+        FeatureState::ShopBuySelectedHero = true;
+        FeatureState::ShopBuyRecommendLineup = true;
+        FeatureState::ShopRefresh = true;
+        FeatureState::ShopStopRefreshAtFreeHero = true;
+        FeatureState::ShopStopRefreshAtSelectedHero = true;
+        FeatureState::ShopStopRefreshAtRecommendLineup = true;
+        FeatureState::ShopKeepGold = true;
+        FeatureState::ShopKeepGoldAt = reserve;
+        FeatureState::ShopRecommendTargetCount = recommendationTarget;
+    }
+
+    if (FeatureState::AutoPlayUseArenaAssist.load()) {
+        FeatureState::ArenaForceActiveSynergy = true;
+        FeatureState::ArenaNoShopLock = true;
+        FeatureState::ArenaUnlimitedHeroPool = true;
+        FeatureState::ArenaPassiveGold = FeatureState::AutoPlayUseEconomy.load();
+        FeatureState::ArenaGoldTarget = targetGold;
+        FeatureState::ArenaFreeEconomy =
+            FeatureState::AutoPlayUseEconomy.load() &&
+            strategy != AutoPlayStrategyEconomy;
+        FeatureState::ArenaForceLevel99 =
+            FeatureState::AutoPlayUseEconomy.load() &&
+            (strategy == AutoPlayStrategyAggressive ||
+             snapshot.round >= 8 ||
+             (snapshot.hp >= 0 && snapshot.hp <= 50));
+        FeatureState::ArenaAllEnemyHpOne =
+            strategy == AutoPlayStrategyAggressive ||
+            (snapshot.hp >= 0 && snapshot.hp <= 35);
+    }
+
+    if (FeatureState::AutoPlayUseCombat.load()) {
+        FeatureState::CombatPreventHpLoss = true;
+        FeatureState::CombatBoostAttackRatio = true;
+        FeatureState::CombatAttackRatioPercent =
+            strategy == AutoPlayStrategyAggressive ? 10000 : 5000;
+        FeatureState::CombatFightValue =
+            strategy == AutoPlayStrategyAggressive ? 999999999 : 500000000;
+        FeatureState::CombatForceWin =
+            strategy == AutoPlayStrategyAggressive ||
+            snapshot.round >= 8 ||
+            (snapshot.hp >= 0 && snapshot.hp <= 60);
+        FeatureState::CombatCrippleEnemies =
+            strategy == AutoPlayStrategyAggressive ||
+            (snapshot.hp >= 0 && snapshot.hp <= 45);
+        FeatureState::CombatEnemyAttackRatioPercent =
+            strategy == AutoPlayStrategyAggressive ? 0 : 1;
+    }
+
+    if (FeatureState::AutoPlayUseSpeedHack.load()) {
+        FeatureState::ArenaSpeedHack = true;
+        FeatureState::ArenaTimeScale = timeScale;
+    }
+}
+
+void StopAutoPlayRuntime(uint64_t selfAccountId) {
+    void* selfManager =
+        selfAccountId != 0 ? GetBattleManagerByAccountId(selfAccountId) : GetSelfLogicBattleManager();
+
+    if (selfManager && Originals::MCLogicBattleManager_StopAI) {
+        Originals::MCLogicBattleManager_StopAI(selfManager);
+    }
+
+    if (FeatureState::AutoPlayUseSpeedHack.load()) {
+        FeatureState::ArenaSpeedHack = false;
+        FeatureState::ArenaTimeScale = 1.0f;
+        ApplyArenaSpeedHack(0);
+    }
+
+    FeatureState::AutoPlayWasRunning = false;
+    FeatureState::AutoPlayLastAiStartAccountId = 0;
+}
+
+void RunBuiltInAutoPlayAI(
+    uint64_t selfAccountId,
+    const AutoPlaySnapshot& snapshot,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!FeatureState::AutoPlayUseBuiltInAI.load()) {
+        return;
+    }
+
+    void* selfManager = GetSelfLogicBattleManager();
+    if (!selfManager) {
+        return;
+    }
+
+    if (Originals::MCLogicBattleManager_StartAI &&
+        (FeatureState::AutoPlayLastAiStartAccountId.load() != selfAccountId ||
+         CooldownElapsed(
+             FeatureState::LastAutoPlayAiStartAttempt,
+             RuntimeConfig::AutoPlayAiStartCooldownMs,
+             now
+         ))) {
+        int difficulty = std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
+        FeatureState::AutoPlayAiDifficulty = difficulty;
+        Originals::MCLogicBattleManager_StartAI(selfManager, difficulty);
+        FeatureState::AutoPlayLastAiStartAccountId = selfAccountId;
+        FeatureState::LastAutoPlayAiStartAttempt = now;
+    }
+
+    if (!snapshot.fightSection &&
+        Originals::MCLogicBattleManager_TryAutoDeploy &&
+        CooldownElapsed(
+            FeatureState::LastAutoPlayDeployAttempt,
+            RuntimeConfig::AutoPlayDeployCooldownMs,
+            now
+        )) {
+        Originals::MCLogicBattleManager_TryAutoDeploy(selfManager);
+        FeatureState::LastAutoPlayDeployAttempt = now;
+    }
+}
+
+void TryAutoPlayLevelUp(
+    const AutoPlaySnapshot& snapshot,
+    std::chrono::steady_clock::time_point now
+) {
+    if (!FeatureState::AutoPlayUseEconomy.load() ||
+        FeatureState::ArenaForceLevel99.load() ||
+        snapshot.fightSection ||
+        snapshot.accountId == 0 ||
+        snapshot.level <= 0 ||
+        snapshot.coin < 0 ||
+        !Originals::MCLogicBattleManager_OnPlayerLvlUp ||
+        !Originals::MCLogicBattleData_ILOGIC_GetUpgradeCost ||
+        !Originals::MCLogicBattleData_ILOGIC_CanUpgrade ||
+        !CooldownElapsed(
+            FeatureState::LastAutoPlayLevelAttempt,
+            RuntimeConfig::AutoPlayLevelCooldownMs,
+            now
+        )) {
+        return;
+    }
+
+    int targetLevel = std::clamp(FeatureState::AutoPlayTargetLevel.load(), 1, 99);
+    FeatureState::AutoPlayTargetLevel = targetLevel;
+
+    if (snapshot.level >= targetLevel) {
+        return;
+    }
+
+    int upgradeCost =
+        Originals::MCLogicBattleData_ILOGIC_GetUpgradeCost(nullptr, snapshot.accountId);
+
+    if (upgradeCost < 0 || snapshot.coin < upgradeCost) {
+        return;
+    }
+
+    if (!Originals::MCLogicBattleData_ILOGIC_CanUpgrade(
+            nullptr,
+            snapshot.accountId,
+            snapshot.coin
+        )) {
+        return;
+    }
+
+    void* selfManager = GetSelfLogicBattleManager();
+    if (!selfManager) {
+        return;
+    }
+
+    Originals::MCLogicBattleManager_OnPlayerLvlUp(selfManager);
+    FeatureState::LastAutoPlayLevelAttempt = now;
+}
+
+void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point now) {
+    if (!FeatureState::AutoPlayEnabled.load()) {
+        if (FeatureState::AutoPlayWasRunning.load()) {
+            StopAutoPlayRuntime(selfAccountId);
+        }
+        return;
+    }
+
+    if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
+        return;
+    }
+
+    AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
+    int pressure = UpdateAutoPlayLearning(snapshot);
+    int strategy = SelectAutoPlayStrategy(snapshot, pressure);
+    std::vector<AutoPlayBoardUnit> selfUnits = CollectAutoPlayBoardUnits(GetSelfLogicBattleManager());
+    std::vector<AutoPlayBoardUnit> enemyUnits;
+
+    if (snapshot.currentOpponentId != 0) {
+        enemyUnits = CollectAutoPlayBoardUnits(
+            GetBattleManagerByAccountId(snapshot.currentOpponentId)
+        );
+    }
+
+    if (enemyUnits.empty() && Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
+        for (const auto& item : CopyDictionaryEntries(battleManagers, 16)) {
+            if (item.first == 0 || item.first == selfAccountId || !item.second) {
+                continue;
+            }
+
+            std::vector<AutoPlayBoardUnit> units = CollectAutoPlayBoardUnits(item.second);
+            enemyUnits.insert(enemyUnits.end(), units.begin(), units.end());
+        }
+    }
+
+    AutoPlayBoardPlan plan = BuildAutoPlayBoardPlan(snapshot, selfUnits, enemyUnits);
+    plan.contestedTargets = snapshot.contestedTargetOwners;
+    PublishAutoPlayBoardPlan(plan);
+
+    ApplyAutoPlayPolicy(snapshot, strategy);
+    ApplyAutoPlayShopTargets(plan, snapshot);
+    ApplyAutoPlayGoGoCardChoice(snapshot, plan);
+    TryAutoPlayAuction(snapshot, plan, now);
+    TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
+    RunBuiltInAutoPlayAI(selfAccountId, snapshot, now);
+    TryAutoPlayLevelUp(snapshot, now);
+    FeatureState::AutoPlayWasRunning = true;
+}
+
 void RunShopAutomation(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -4151,6 +5820,10 @@ void TickFeatures() {
     EnsureTableDataLoaded();
     auto now = std::chrono::steady_clock::now();
 
+    if (IntervalElapsed(FeatureState::LastAutoPlayTick, RuntimeConfig::AutoPlayTickMs, now)) {
+        RunAutoPlay(selfAccountId, now);
+    }
+
     if (IntervalElapsed(FeatureState::LastArenaTick, RuntimeConfig::ArenaTickMs, now)) {
         ApplyArenaState(selfAccountId);
     }
@@ -4332,7 +6005,7 @@ float ParseConfigFloat(const std::string& value, float fallback) {
 }
 
 void ClampConfigurableState() {
-    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 6);
+    UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 7);
     UiState::ThemeIndex =
         std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
     UiState::FontIndex = std::clamp(UiState::FontIndex.load(), 0, 1);
@@ -4373,6 +6046,16 @@ void ClampConfigurableState() {
     FeatureState::ArenaSkipTargetRound =
         std::clamp(FeatureState::ArenaSkipTargetRound.load(), 1, 99);
     FeatureState::ArenaTimeScale = ClampArenaTimeScale(FeatureState::ArenaTimeScale.load());
+    FeatureState::AutoPlayAiDifficulty =
+        std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
+    FeatureState::AutoPlayMinReserveGold =
+        std::clamp(FeatureState::AutoPlayMinReserveGold.load(), 0, 999999);
+    FeatureState::AutoPlayTargetLevel =
+        std::clamp(FeatureState::AutoPlayTargetLevel.load(), 1, 99);
+    FeatureState::AutoPlayPressure =
+        std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100);
+    FeatureState::AutoPlayStrategy =
+        ClampAutoPlayStrategy(FeatureState::AutoPlayStrategy.load());
 
     {
         std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
@@ -4414,6 +6097,41 @@ void ResetVisualSettings() {
 }
 
 void ResetFeatureSettings() {
+    uint64_t selfAccountId = IsIl2CppRuntimeReady() ? GetSelfAccountId() : 0;
+    StopAutoPlayRuntime(selfAccountId);
+    FeatureState::AutoPlayEnabled = false;
+    FeatureState::AutoPlayAdaptive = true;
+    FeatureState::AutoPlayUseBuiltInAI = true;
+    FeatureState::AutoPlayUseShop = true;
+    FeatureState::AutoPlayUseEconomy = true;
+    FeatureState::AutoPlayUseCombat = true;
+    FeatureState::AutoPlayUseArenaAssist = true;
+    FeatureState::AutoPlayUseSpeedHack = false;
+    FeatureState::AutoPlayUseFormation = true;
+    FeatureState::AutoPlayUseAuction = true;
+    FeatureState::AutoPlayUseGoGoCards = true;
+    FeatureState::AutoPlayAiDifficulty = 3;
+    FeatureState::AutoPlayMinReserveGold = 20;
+    FeatureState::AutoPlayTargetLevel = 9;
+    FeatureState::AutoPlayPressure = 25;
+    FeatureState::AutoPlayStrategy = AutoPlayStrategyBalanced;
+    FeatureState::AutoPlayLearnedRounds = 0;
+    FeatureState::AutoPlayStrategyChanges = 0;
+    FeatureState::AutoPlayLastRound = 0;
+    FeatureState::AutoPlayLastHp = -1;
+    FeatureState::AutoPlayLastAiStartAccountId = 0;
+    FeatureState::AutoPlayFocusGroup = 0;
+    FeatureState::AutoPlayTargetHeroId = 0;
+    FeatureState::AutoPlayBestCardId = 0;
+    FeatureState::AutoPlayBestAuctionIndex = -1;
+    FeatureState::AutoPlayBestAuctionScore = 0;
+    FeatureState::AutoPlayBoardSelfUnits = 0;
+    FeatureState::AutoPlayBoardEnemyUnits = 0;
+    FeatureState::AutoPlayBoardMoves = 0;
+    FeatureState::AutoPlayOpponentCount = 0;
+    FeatureState::AutoPlayContestedTargets = 0;
+    FeatureState::AutoPlayStrongestOpponentFightValue = 0;
+    FeatureState::AutoPlayCurrentOpponentId = 0;
     FeatureState::CombatInvisibleScout = false;
     FeatureState::CombatForceWin = false;
     FeatureState::CombatPreventHpLoss = false;
@@ -4647,6 +6365,22 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     else if (key == "itemSpacingX") UiState::ItemSpacingX = ParseConfigFloat(value, UiState::ItemSpacingX);
     else if (key == "itemSpacingY") UiState::ItemSpacingY = ParseConfigFloat(value, UiState::ItemSpacingY);
     else if (key == "indentSpacing") UiState::IndentSpacing = ParseConfigFloat(value, UiState::IndentSpacing);
+    else if (key == "autoPlayEnabled") FeatureState::AutoPlayEnabled = ParseConfigBool(value, FeatureState::AutoPlayEnabled);
+    else if (key == "autoPlayAdaptive") FeatureState::AutoPlayAdaptive = ParseConfigBool(value, FeatureState::AutoPlayAdaptive);
+    else if (key == "autoPlayUseBuiltInAI") FeatureState::AutoPlayUseBuiltInAI = ParseConfigBool(value, FeatureState::AutoPlayUseBuiltInAI);
+    else if (key == "autoPlayUseShop") FeatureState::AutoPlayUseShop = ParseConfigBool(value, FeatureState::AutoPlayUseShop);
+    else if (key == "autoPlayUseEconomy") FeatureState::AutoPlayUseEconomy = ParseConfigBool(value, FeatureState::AutoPlayUseEconomy);
+    else if (key == "autoPlayUseCombat") FeatureState::AutoPlayUseCombat = ParseConfigBool(value, FeatureState::AutoPlayUseCombat);
+    else if (key == "autoPlayUseArenaAssist") FeatureState::AutoPlayUseArenaAssist = ParseConfigBool(value, FeatureState::AutoPlayUseArenaAssist);
+    else if (key == "autoPlayUseSpeedHack") FeatureState::AutoPlayUseSpeedHack = ParseConfigBool(value, FeatureState::AutoPlayUseSpeedHack);
+    else if (key == "autoPlayUseFormation") FeatureState::AutoPlayUseFormation = ParseConfigBool(value, FeatureState::AutoPlayUseFormation);
+    else if (key == "autoPlayUseAuction") FeatureState::AutoPlayUseAuction = ParseConfigBool(value, FeatureState::AutoPlayUseAuction);
+    else if (key == "autoPlayUseGoGoCards") FeatureState::AutoPlayUseGoGoCards = ParseConfigBool(value, FeatureState::AutoPlayUseGoGoCards);
+    else if (key == "autoPlayAiDifficulty") FeatureState::AutoPlayAiDifficulty = ParseConfigInt(value, FeatureState::AutoPlayAiDifficulty);
+    else if (key == "autoPlayMinReserveGold") FeatureState::AutoPlayMinReserveGold = ParseConfigInt(value, FeatureState::AutoPlayMinReserveGold);
+    else if (key == "autoPlayTargetLevel") FeatureState::AutoPlayTargetLevel = ParseConfigInt(value, FeatureState::AutoPlayTargetLevel);
+    else if (key == "autoPlayPressure") FeatureState::AutoPlayPressure = ParseConfigInt(value, FeatureState::AutoPlayPressure);
+    else if (key == "autoPlayStrategy") FeatureState::AutoPlayStrategy = ParseConfigInt(value, FeatureState::AutoPlayStrategy);
     else if (key == "combatInvisibleScout") FeatureState::CombatInvisibleScout = ParseConfigBool(value, FeatureState::CombatInvisibleScout);
     else if (key == "combatForceWin") FeatureState::CombatForceWin = ParseConfigBool(value, FeatureState::CombatForceWin);
     else if (key == "combatPreventHpLoss") FeatureState::CombatPreventHpLoss = ParseConfigBool(value, FeatureState::CombatPreventHpLoss);
@@ -4734,6 +6468,22 @@ bool SaveConfigToFile(const std::string& path) {
     WriteConfigFloat(file, "itemSpacingX", UiState::ItemSpacingX);
     WriteConfigFloat(file, "itemSpacingY", UiState::ItemSpacingY);
     WriteConfigFloat(file, "indentSpacing", UiState::IndentSpacing);
+    WriteConfigBool(file, "autoPlayEnabled", FeatureState::AutoPlayEnabled);
+    WriteConfigBool(file, "autoPlayAdaptive", FeatureState::AutoPlayAdaptive);
+    WriteConfigBool(file, "autoPlayUseBuiltInAI", FeatureState::AutoPlayUseBuiltInAI);
+    WriteConfigBool(file, "autoPlayUseShop", FeatureState::AutoPlayUseShop);
+    WriteConfigBool(file, "autoPlayUseEconomy", FeatureState::AutoPlayUseEconomy);
+    WriteConfigBool(file, "autoPlayUseCombat", FeatureState::AutoPlayUseCombat);
+    WriteConfigBool(file, "autoPlayUseArenaAssist", FeatureState::AutoPlayUseArenaAssist);
+    WriteConfigBool(file, "autoPlayUseSpeedHack", FeatureState::AutoPlayUseSpeedHack);
+    WriteConfigBool(file, "autoPlayUseFormation", FeatureState::AutoPlayUseFormation);
+    WriteConfigBool(file, "autoPlayUseAuction", FeatureState::AutoPlayUseAuction);
+    WriteConfigBool(file, "autoPlayUseGoGoCards", FeatureState::AutoPlayUseGoGoCards);
+    WriteConfigInt(file, "autoPlayAiDifficulty", FeatureState::AutoPlayAiDifficulty);
+    WriteConfigInt(file, "autoPlayMinReserveGold", FeatureState::AutoPlayMinReserveGold);
+    WriteConfigInt(file, "autoPlayTargetLevel", FeatureState::AutoPlayTargetLevel);
+    WriteConfigInt(file, "autoPlayPressure", FeatureState::AutoPlayPressure);
+    WriteConfigInt(file, "autoPlayStrategy", FeatureState::AutoPlayStrategy);
     WriteConfigBool(file, "combatInvisibleScout", FeatureState::CombatInvisibleScout);
     WriteConfigBool(file, "combatForceWin", FeatureState::CombatForceWin);
     WriteConfigBool(file, "combatPreventHpLoss", FeatureState::CombatPreventHpLoss);
@@ -5206,6 +6956,7 @@ bool HasArenaGoldBindings();
 bool HasArenaRoundSkipBindings();
 bool HasArenaSpeedHackBindings();
 bool HasBattleTestBindings();
+bool HasAutoPlayBindings();
 std::string GetBattlePlayerName(uint64_t accountId);
 
 struct PlayerInfoRow {
@@ -5384,6 +7135,7 @@ void DrawRuntimeStatus() {
         DrawStatusRow("Arena gold", HasArenaGoldBindings());
         DrawStatusRow("Arena round skip", HasArenaRoundSkipBindings());
         DrawStatusRow("Arena speedhack", HasArenaSpeedHackBindings());
+        DrawStatusRow("Auto-play controller", HasAutoPlayBindings());
         DrawStatusRow("Battle tests", HasBattleTestBindings());
         DrawStatusRow("Spectator hook", Originals::MCShowSpectatorComp_SetSpectate);
         DrawStatusRow(
@@ -5581,6 +7333,29 @@ bool HasBattleTestBindings() {
         Originals::MCLogicBattleManager_get_m_bDefendFaild;
 }
 
+bool HasAutoPlayBindings() {
+    return IsIl2CppRuntimeReady() &&
+        Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
+        Originals::MCLogicBattleData_ILOGIC_GetPlayerHP &&
+        Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin &&
+        Originals::MCLogicBattleData_ILOGIC_GetPlayerLevel &&
+        Originals::MCLogicBattleManager_StartAI &&
+        Originals::MCLogicBattleManager_TryAutoDeploy &&
+        Originals::MCLogicBattleManager_OnPlayerLvlUp &&
+        Originals::MCLogicBattleManager_CalcCurrentFightValue &&
+        Originals::MCLogicBattleManager_MoveHeroInBattleField &&
+        Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr &&
+        Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID &&
+        Originals::MCLogicBattleData_ILOGIC_GetUpgradeCost &&
+        Originals::MCLogicBattleData_ILOGIC_CanUpgrade &&
+        HasArenaGoldBindings() &&
+        HasCombatPowerBindings() &&
+        Originals::MCLogicBattleData_ILOGIC_GetShopItemData &&
+        Originals::MCLogicBattleData_ILogic_HeroOwnCount &&
+        HasShopSelectBinding() &&
+        HasShopRecommendLineupBindings();
+}
+
 void DrawGgcInfo() {
     ImGui::SeparatorText("GGC");
 
@@ -5715,6 +7490,135 @@ void DrawCombatTab() {
     );
 }
 
+void DrawAutoPlayTab() {
+    if (!HasAutoPlayBindings()) {
+        DrawWaitingText("Waiting for auto-play controller bindings");
+    }
+
+    DrawAtomicCheckbox("Auto-play", FeatureState::AutoPlayEnabled);
+    DrawAtomicCheckbox("Adaptive strategy", FeatureState::AutoPlayAdaptive);
+    DrawAtomicCheckbox("Use built-in battle AI", FeatureState::AutoPlayUseBuiltInAI);
+    DrawAtomicCheckbox("Manage shop", FeatureState::AutoPlayUseShop);
+    DrawAtomicCheckbox("Manage economy and level", FeatureState::AutoPlayUseEconomy);
+    DrawAtomicCheckbox("Manage combat power", FeatureState::AutoPlayUseCombat);
+    DrawAtomicCheckbox("Use arena assists", FeatureState::AutoPlayUseArenaAssist);
+    DrawAtomicCheckbox("Use SpeedHack", FeatureState::AutoPlayUseSpeedHack);
+    DrawAtomicCheckbox("Use smart formation", FeatureState::AutoPlayUseFormation);
+    DrawAtomicCheckbox("Use auction scoring", FeatureState::AutoPlayUseAuction);
+    DrawAtomicCheckbox("Use GogoCard scoring", FeatureState::AutoPlayUseGoGoCards);
+
+    ImGui::SeparatorText("Policy");
+    ImGui::SetNextItemWidth(120.0f);
+    DrawAtomicInputInt("AI difficulty", FeatureState::AutoPlayAiDifficulty);
+    FeatureState::AutoPlayAiDifficulty =
+        std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
+
+    ImGui::SetNextItemWidth(120.0f);
+    DrawAtomicInputInt("Minimum reserve gold", FeatureState::AutoPlayMinReserveGold);
+    FeatureState::AutoPlayMinReserveGold =
+        std::clamp(FeatureState::AutoPlayMinReserveGold.load(), 0, 999999);
+
+    ImGui::SetNextItemWidth(120.0f);
+    DrawAtomicInputInt("Target level", FeatureState::AutoPlayTargetLevel);
+    FeatureState::AutoPlayTargetLevel =
+        std::clamp(FeatureState::AutoPlayTargetLevel.load(), 1, 99);
+
+    const char* strategies[] = {
+        "Economy",
+        "Balanced",
+        "Aggressive"
+    };
+
+    ImGui::BeginDisabled(FeatureState::AutoPlayAdaptive.load());
+    ImGui::SetNextItemWidth(180.0f);
+    if (DrawAtomicCombo(
+            "Manual strategy",
+            FeatureState::AutoPlayStrategy,
+            strategies,
+            IM_ARRAYSIZE(strategies)
+        )) {
+        FeatureState::AutoPlayStrategy =
+            ClampAutoPlayStrategy(FeatureState::AutoPlayStrategy.load());
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Runtime");
+    uint64_t selfAccountId = IsIl2CppRuntimeReady() ? GetSelfAccountId() : 0;
+    AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
+    float pressure = static_cast<float>(
+        std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100)
+    ) / 100.0f;
+
+    ImGui::Text("Strategy: %s", AutoPlayStrategyName(FeatureState::AutoPlayStrategy.load()));
+    ImGui::Text(
+        "Learned rounds: %d  Strategy changes: %d",
+        FeatureState::AutoPlayLearnedRounds.load(),
+        FeatureState::AutoPlayStrategyChanges.load()
+    );
+    ImGui::ProgressBar(pressure, ImVec2(-1.0f, 0.0f));
+
+    if (ImGui::BeginTable(
+        "##AutoPlaySnapshotTable",
+        2,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingStretchProp
+    )) {
+        ImGui::TableSetupColumn("Signal");
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableHeadersRow();
+        DrawValueRow("Round", snapshot.round > 0 ? FormatInt(snapshot.round) : "Waiting");
+        DrawValueRow("Phase", snapshot.phase >= 0 ? FormatInt(snapshot.phase) : "Waiting");
+        DrawValueRow("HP", snapshot.hp >= 0 ? FormatInt(snapshot.hp) : "Waiting");
+        DrawValueRow("Gold", snapshot.coin >= 0 ? FormatInt(snapshot.coin) : "Waiting");
+        DrawValueRow("Level", snapshot.level >= 0 ? FormatInt(snapshot.level) : "Waiting");
+        DrawValueRow(
+            "Population",
+            snapshot.currentPopulation >= 0 && snapshot.totalPopulation >= 0 ?
+                FormatInt(snapshot.currentPopulation) + "/" + FormatInt(snapshot.totalPopulation) :
+                "Waiting"
+        );
+        DrawValueRow(
+            "Lineup worth",
+            snapshot.lineupWorth >= 0 ? FormatInt(snapshot.lineupWorth) : "Waiting"
+        );
+        DrawValueRow(
+            "Fight value",
+            snapshot.fightValue >= 0 ? FormatInt(snapshot.fightValue) : "Waiting"
+        );
+        DrawValueRow("Recommendation", FormatHeroLabel(snapshot.recommendHeroId));
+        DrawValueRow("Star-up", FormatHeroLabel(snapshot.starUpHeroId));
+        DrawValueRow("Current opponent", FormatUInt64(snapshot.currentOpponentId));
+        DrawValueRow(
+            "Opponent fight value",
+            snapshot.currentOpponentFightValue >= 0 ?
+                FormatInt(snapshot.currentOpponentFightValue) :
+                "Waiting"
+        );
+        DrawValueRow(
+            "Strongest opponent",
+            snapshot.strongestOpponentFightValue >= 0 ?
+                FormatInt(snapshot.strongestOpponentFightValue) :
+                "Waiting"
+        );
+        DrawValueRow("Opponent count", FormatInt(FeatureState::AutoPlayOpponentCount.load()));
+        DrawValueRow("Contested targets", FormatInt(FeatureState::AutoPlayContestedTargets.load()));
+        DrawValueRow("Focus synergy", FormatInt(FeatureState::AutoPlayFocusGroup.load()));
+        DrawValueRow("Target hero", FormatHeroLabel(FeatureState::AutoPlayTargetHeroId.load()));
+        DrawValueRow("Best GogoCard", FormatInt(FeatureState::AutoPlayBestCardId.load()));
+        DrawValueRow("Auction index", FormatInt(FeatureState::AutoPlayBestAuctionIndex.load()));
+        DrawValueRow("Auction score", FormatInt(FeatureState::AutoPlayBestAuctionScore.load()));
+        DrawValueRow(
+            "Board units",
+            FormatInt(FeatureState::AutoPlayBoardSelfUnits.load()) +
+                "/" +
+                FormatInt(FeatureState::AutoPlayBoardEnemyUnits.load())
+        );
+        DrawValueRow("Board moves", FormatInt(FeatureState::AutoPlayBoardMoves.load()));
+        ImGui::EndTable();
+    }
+}
+
 void DrawArenaBattlePowerControls() {
     ImGui::SeparatorText("Battle Power");
 
@@ -5816,7 +7720,7 @@ void DrawSettingsTab() {
             }
 
             ImGui::Spacing();
-            ImGui::TextUnformatted("Saved state includes visual settings, window settings, and Combat, Shop, and Arena controls.");
+            ImGui::TextUnformatted("Saved state includes visual settings, window settings, and Auto-Play, Combat, Shop, and Arena controls.");
 
             ImGui::EndTabItem();
         }
@@ -6006,6 +7910,12 @@ void DrawTestBindingRows() {
     DrawStatusRow("Player rank", Originals::MCLogicBattleData_ILOGIC_GetRank);
     DrawStatusRow("Player level", Originals::MCLogicBattleData_ILOGIC_GetPlayerLevel);
     DrawStatusRow("Population", Originals::MCLogicBattleData_ILOGIC_SelfCurPopulation);
+    DrawStatusRow("Auto-play AI", Originals::MCLogicBattleManager_StartAI);
+    DrawStatusRow("Auto deploy", Originals::MCLogicBattleManager_TryAutoDeploy);
+    DrawStatusRow("Auto level up", Originals::MCLogicBattleManager_OnPlayerLvlUp);
+    DrawStatusRow("Lineup scoring", Originals::MCLogicBattleManager_GetLineupWorth);
+    DrawStatusRow("Smart formation", Originals::MCLogicBattleManager_MoveHeroInBattleField);
+    DrawStatusRow("Auction scoring", Originals::MCLogicAuctionComp_Bid);
     DrawStatusRow("Shop diagnostics", Originals::MCLogicBattleData_ILOGIC_GetShopStarLv);
     DrawStatusRow("Hero counts", Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum);
     DrawStatusRow("Result history", Originals::MCLogicBattleData_ILOGIC_GetBattleResultHistory);
@@ -8410,6 +10320,7 @@ void DrawMainMenu() {
     static const MainMenuTab tabs[] = {
         {"Info", DrawInfoTab},
         {"Combat", DrawCombatTab},
+        {"Auto-Play", DrawAutoPlayTab},
         {"Shop", DrawShopTab},
         {"Arena", DrawArenaTab},
         {"Appearance", DrawAppearanceTab},

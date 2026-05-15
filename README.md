@@ -58,7 +58,8 @@ The default supported target is:
 - Build system: `ndk-build`
 - C++ standard: `c++26`
 - Primary branch: `master`
-- Current overlay tabs: Info, Combat, Appearance, Settings, Shop, Arena, and Test
+- Current overlay tabs: Info, Combat, Auto-Play, Shop, Arena, Appearance,
+  Settings, and Test
 
 ## Features
 
@@ -75,6 +76,32 @@ The default supported target is:
 
 - Invisible Scout toggle.
 
+### Auto-Play
+
+- Binary-side controller that reads the current round, phase, HP, gold, level,
+  population, lineup worth, fight value, Recommendation Lineup target, star-up
+  target, and current opponent.
+- Adaptive strategy pressure model that shifts between Economy, Balanced, and
+  Aggressive based on round progression, HP loss, gold state, own fight value,
+  current opponent fight value, and strongest observed opponent.
+- Opponent-aware scan across battle managers to count opponents, detect target
+  contesting, track the current opponent, and compare the local board against
+  the strongest board.
+- Smart formation scorer that reads live managed chess units from
+  `LogicHeroContainer.m_ChessList`, evaluates hero ID, star, grid position,
+  tank/role metadata, synergy groups, and enemy centroid, then performs bounded
+  one-move-per-cooldown battlefield repositioning.
+- Shop target selection that promotes the current best hero or star-up target
+  into selected shop targets while preserving existing buy/refresh throttles.
+- GogoCard scoring that prefers resource, EXP/economy, hero/shop, star-up,
+  synergy, equipment, and combat cards according to round, HP pressure, focus
+  synergy, and opponent strength.
+- Auction scoring that reads auction phase, slot state, bid price, reward item
+  data, hero/equipment rewards, and special upgrade effects before placing a
+  bounded bid on the highest-value option.
+- Optional controls for built-in battle AI, shop, economy, combat power, arena
+  assists, SpeedHack, smart formation, auction scoring, and GogoCard scoring.
+
 ### Appearance
 
 - Theme selector with ImGui Dark, Catppuccin Mocha, and additional palettes
@@ -87,7 +114,7 @@ The default supported target is:
 
 - Menu size, optional fixed position, mobile-friendly tab navigation, and window interaction controls.
 - Font scale, opacity, rounding, border, padding, spacing, scrollbar, and indentation controls.
-- Save and load for visual settings plus Combat, Shop, and Arena controls.
+- Save and load for visual settings plus Auto-Play, Combat, Shop, and Arena controls.
 - Default config path under the running game package, resolved as `/data/data/<game-package>/files/mcgg_config.ini`.
 
 ### Shop
@@ -148,8 +175,9 @@ At a high level, the project contains:
 - Project-owned configuration persistence for overlay and feature state.
 - Atomic primitive runtime state with dedicated mutex domains for IL2CPP
   caches, feature collections, and UI/config strings.
-- Snapshot helpers for hero, equipment, GogoCard, and selected shop target
-  data used by the overlay and throttled feature ticks.
+- Snapshot helpers for hero, equipment, GogoCard, selected shop target,
+  opponent, board-unit, auction, and strategy data used by the overlay and
+  throttled feature ticks.
 - Local reference artifacts used for method, field, and type signature validation.
 
 The project keeps most feature logic in `jni/Main.cpp` to make native entry points, runtime state, and retry behavior easy to inspect. Broader refactors should preserve the existing binding lifecycle unless the refactor explicitly changes that design.
@@ -162,6 +190,12 @@ managed reference pointers, and feature counters are stored as `std::atomic`
 values. Code that reads complex collections should use the existing snapshot or
 access helpers and should not hold `FeatureMutex` while calling managed IL2CPP
 APIs.
+
+Auto-Play uses the same bounded tick model as the other runtime features. It
+gathers local snapshots first, scores strategy/formation/shop/card/auction
+options from local data, publishes only compact counters and selected targets
+under `FeatureMutex`, and avoids holding project locks while calling managed
+IL2CPP APIs.
 
 ## Requirements
 

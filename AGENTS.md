@@ -10,9 +10,9 @@ event, collection, and string layouts are kept in
 
 `jni/Main.cpp` contains the process gate, setup thread, IL2CPP helpers, feature
 binding resolver, runtime caches, Dobby hooks, ImGui rendering, and feature
-logic. It also owns the Info, Combat, Appearance, Settings, Shop, Arena, and
-Test overlay tabs. Keep feature work in this file unless the user explicitly
-requests a multi-file refactor.
+logic. It also owns the Info, Combat, Auto-Play, Shop, Arena, Appearance,
+Settings, and Test overlay tabs. Keep feature work in this file unless the user
+explicitly requests a multi-file refactor.
 
 `dump/dump.cs` is the IL2CPP signature reference. Use it before changing native
 method pointers, hook signatures, value-type layouts, or field offsets.
@@ -86,6 +86,16 @@ keep scans bounded by the existing runtime limits. Do not add unbounded scans or
 immediate retry loops to the shop hot path unless the task explicitly changes
 that design.
 
+Auto-Play automation is intentionally snapshot-based and throttled on a separate
+250 ms tick. Preserve the bounded built-in AI startup, deployment/formation,
+level-up, and auction cooldowns. The controller should read runtime state through
+`ReadAutoPlaySnapshot()`, collect board units through
+`CollectAutoPlayBoardUnits()`, score strategy and formation with
+`BuildAutoPlayBoardPlan()`, and publish selected shop targets through the
+existing target helpers. Keep opponent scans bounded to the battle manager
+dictionary limit, keep battlefield movement to one chosen action per cooldown,
+and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
+
 ## Testing Guidelines
 
 There is no dedicated unit test framework in this repository. For native changes,
@@ -102,6 +112,18 @@ the target remains `arm64-v8a`, Unity `2019.4.22f1`, and native C++ mode
 When changing Recommendation Lineup automation, verify the related
 `MCLogicBattleData` and `MCBattleBridge` signatures against `dump/dump.cs` and
 keep the overlay in a `Waiting for ...` state while runtime data is unavailable.
+
+When changing Auto-Play automation, verify the related
+`MCLogicBattleManager.StartAI`, `StopAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
+`GetLineupWorth`, `CalcCurrentFightValue`,
+`MoveHeroInBattleField(UInt32, Byte, Byte, Boolean)`,
+`MCLogicBattleData.ILOGIC_GetAllBattleMgr`,
+`MCLogicBattleData.ILOGIC_GetCurrentOpponentAccountID`,
+`LogicRoundMgr.get_m_AuctionComp`,
+`MCLogicAuctionComp.Bid(MCLogicAuctionSlotInfo, UInt64, UInt32)`, and
+`MCLogicGoGoCardComp.get_m_CurrData` signatures against `dump/dump.cs`. Keep
+the overlay in a `Waiting for ...` state while required runtime data is
+unavailable.
 
 When changing Arena Skip Round automation, verify
 `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, and
@@ -137,21 +159,26 @@ Keep changes scoped. Do not modify vendored directories such as
 `jni/Il2CppVersions/`, `jni/imgui/`, or `jni/xDL/` unless explicitly requested.
 Do not revert unrelated local changes in the working tree.
 
-Current user-facing feature areas are Info, Combat, Appearance, Settings, Shop,
-Arena, and Test. If a feature binding is missing at runtime, the overlay should
-show a `Waiting for ...` state rather than failing silently. Shop currently
-includes free-hero buying, selected target buying, Recommendation Lineup buying,
-auto-refresh pause conditions, keep-gold reserve, and target counts. Combat
-includes Invisible Scout. Arena includes hero/item/card granting, Battle Power
-controls for force-win, HP-loss prevention, attack-ratio boosting, fight-value
-boosting, and enemy-board crippling, active synergy forcing, level/population
-forcing, enemy HP pressure, passive gold, free economy, unlimited hero pool,
-shop-lock bypass helpers, Skip Round, and SpeedHack. Use the Runtime Status and
-Test tabs when checking binding
+Current user-facing feature areas are Info, Combat, Auto-Play, Shop, Arena,
+Appearance, Settings, and Test. If a feature binding is missing at runtime, the
+overlay should show a `Waiting for ...` state rather than failing silently.
+Auto-Play includes adaptive strategy pressure, built-in AI coordination,
+opponent-aware board analysis, smart formation moves, selected shop target
+promotion, GogoCard scoring, auction scoring, economy decisions, and optional
+coordination of Combat and Arena assists. Shop currently includes free-hero
+buying, selected target buying, Recommendation Lineup buying, auto-refresh
+pause conditions, keep-gold reserve, and target counts. Combat includes
+Invisible Scout. Arena includes hero/item/card granting, Battle Power controls
+for force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting,
+and enemy-board crippling, active synergy forcing, level/population forcing,
+enemy HP pressure, passive gold, free economy, unlimited hero pool, shop-lock
+bypass helpers, Skip Round, and SpeedHack. Use the Runtime Status and Test tabs
+when checking binding
 readiness, managed references, round state, round-manager state, timeScale
 binding readiness, player economy/rank/shop state, battle manager fields, battle
 bridge state, shop panel state, behavior API state, Recommendation Lineup state,
-or opponent prediction logic. Test
+Auto-Play state, auction state, GogoCard state, board formation state, or
+opponent prediction logic. Test
 diagnostics should stay read-only unless the task explicitly requests an action.
 In the Test prediction table, `Will fight` is the local player's opponent
 probability and `Current enemy` is the observed opponent for that row. Only the
