@@ -96,8 +96,8 @@ level-up, and auction cooldowns. The controller should read runtime state throug
 existing target helpers. Keep opponent scans bounded to the battle manager
 dictionary limit, keep battlefield movement to one chosen action per cooldown,
 keep shop, auction, passive-gold, free-economy, and level-up decisions aligned
-with the shared gold plan, and do not hold `FeatureMutex` while calling managed
-IL2CPP APIs.
+with the shared gold plan, keep SpeedHack as an explicit Arena-only control, and
+do not hold `FeatureMutex` while calling managed IL2CPP APIs.
 
 ## Testing Guidelines
 
@@ -166,10 +166,10 @@ Current user-facing feature areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. If a feature binding is missing at runtime, the
 overlay should show a `Waiting for ...` state rather than failing silently.
 Auto-Play includes adaptive strategy pressure, built-in AI coordination,
-opponent-aware board analysis, smart formation moves, selected shop target
-promotion, GogoCard scoring, auction scoring, gold-interest economy decisions,
-and optional coordination of Combat and Arena assists. Shop currently includes
-free-hero buying, selected target buying, Recommendation Lineup buying,
+opponent-aware board analysis, advanced role-aware formation moves, selected
+shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
+decisions, and optional coordination of Combat and Arena assists. Shop currently
+includes free-hero buying, selected target buying, Recommendation Lineup buying,
 auto-refresh pause conditions, keep-gold reserve, and target counts. Combat includes
 Invisible Scout. Arena includes hero/item/card granting, Battle Power controls
 for force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting,

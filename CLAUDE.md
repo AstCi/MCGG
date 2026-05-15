@@ -39,10 +39,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Recommendation Lineup, star-up target, all battle managers, current opponent,
   live board unit positions, hero table metadata, GogoCard choices, and auction
   slots. It chooses Economy/Balanced/Aggressive pressure, publishes selected
-  shop targets, scores smart formation moves, scores GogoCards, scores auction
-  bids, protects 10-gold interest breakpoints through a shared reserve/spend
-  budget plan, and can coordinate existing shop/economy/combat/arena assist
-  controls.
+  shop targets, scores advanced role-aware formation moves using enemy column
+  threat and ally cover, scores GogoCards, scores auction bids, protects 10-gold
+  interest breakpoints through a shared reserve/spend budget plan, and can
+  coordinate existing shop/economy/combat/arena assist controls. It does not
+  control Arena SpeedHack.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
 - **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, font scale, style tuning, and save/load configuration, including Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, and Recommendation Lineup target counts.
@@ -82,7 +83,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   table/target helpers. Keep opponent scans bounded to the battle manager
   dictionary limit, keep board placement to one move per cooldown, keep shop,
   auction, passive-gold, free-economy, and level-up decisions on the shared
-  gold plan, and never hold `FeatureMutex` while calling managed IL2CPP APIs.
+  gold plan, keep SpeedHack as a manual Arena-only control, and never hold
+  `FeatureMutex` while calling managed IL2CPP APIs.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,

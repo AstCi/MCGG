@@ -92,9 +92,10 @@ Target default yang didukung:
 - Scan semua battle manager untuk menghitung opponent, mendeteksi perebutan
   target, melacak opponent saat ini, dan membandingkan board lokal dengan board
   terkuat.
-- Smart formation scorer yang membaca unit chess managed dari
+- Advanced formation scorer yang membaca unit chess managed dari
   `LogicHeroContainer.m_ChessList`, mengevaluasi hero ID, star, grid position,
-  metadata tank/role, synergy group, dan centroid enemy, lalu melakukan
+  metadata tank/carry role, synergy group, centroid enemy, threat kolom enemy,
+  cover frontline ally, proteksi backline, dan crowding kolom, lalu melakukan
   reposition battlefield terbatas satu langkah per cooldown.
 - Pemilihan target shop yang mempromosikan hero terbaik saat ini atau target
   star-up ke selected shop target sambil tetap memakai throttle buy/refresh
@@ -106,7 +107,7 @@ Target default yang didukung:
   item, reward hero/equipment, dan special upgrade effect sebelum menawar opsi
   bernilai tertinggi secara terbatas.
 - Kontrol opsional untuk built-in battle AI, shop, economy, combat power, arena
-  assist, SpeedHack, smart formation, auction scoring, dan GogoCard scoring.
+  assist, smart formation, auction scoring, dan GogoCard scoring.
 
 ### Appearance
 

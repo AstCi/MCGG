@@ -91,10 +91,11 @@ The default supported target is:
 - Opponent-aware scan across battle managers to count opponents, detect target
   contesting, track the current opponent, and compare the local board against
   the strongest board.
-- Smart formation scorer that reads live managed chess units from
+- Advanced formation scorer that reads live managed chess units from
   `LogicHeroContainer.m_ChessList`, evaluates hero ID, star, grid position,
-  tank/role metadata, synergy groups, and enemy centroid, then performs bounded
-  one-move-per-cooldown battlefield repositioning.
+  tank/carry role metadata, synergy groups, enemy centroid, enemy column threat,
+  ally frontline cover, backline protection, and column crowding, then performs
+  bounded one-move-per-cooldown battlefield repositioning.
 - Shop target selection that promotes the current best hero or star-up target
   into selected shop targets while preserving existing buy/refresh throttles.
 - GogoCard scoring that prefers resource, EXP/economy, hero/shop, star-up,
@@ -104,7 +105,7 @@ The default supported target is:
   data, hero/equipment rewards, and special upgrade effects before placing a
   bounded bid on the highest-value option.
 - Optional controls for built-in battle AI, shop, economy, combat power, arena
-  assists, SpeedHack, smart formation, auction scoring, and GogoCard scoring.
+  assists, smart formation, auction scoring, and GogoCard scoring.
 
 ### Appearance
 

@@ -65,6 +65,8 @@ git lfs pull
   unbounded searches or long lock holds. Keep gold-interest decisions centralized
   in the Auto-Play gold plan so shop spending, auction bids, passive gold,
   free-economy assists, and level-up actions share the same reserve logic.
+  Auto-Play should not enable or disable Arena SpeedHack; SpeedHack remains an
+  explicit Arena control.
 - Auto-Play depends on dump-backed bindings for
   `MCLogicBattleManager.StartAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
   `GetLineupWorth`, `CalcCurrentFightValue`,
@@ -92,10 +94,10 @@ git lfs pull
 
 Current user-facing overlay areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. Auto-Play includes adaptive strategy pressure,
-opponent-aware board analysis, smart formation moves, selected shop target
-promotion, GogoCard scoring, auction scoring, gold-interest economy decisions,
-and optional coordination of Combat and Arena assists. Shop currently includes
-free-hero buying, manual target buying, Recommendation Lineup buying,
+opponent-aware board analysis, advanced role-aware formation moves, selected
+shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
+decisions, and optional coordination of Combat and Arena assists. Shop currently
+includes free-hero buying, manual target buying, Recommendation Lineup buying,
 auto-refresh pause conditions, keep-gold reserve, and target counts. Combat
 includes Invisible Scout. Arena includes hero/item/card granting, Battle Power controls for
 force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting, and

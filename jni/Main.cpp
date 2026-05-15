@@ -194,7 +194,6 @@ namespace FeatureState {
     std::atomic<bool> AutoPlayUseEconomy{true};
     std::atomic<bool> AutoPlayUseCombat{true};
     std::atomic<bool> AutoPlayUseArenaAssist{true};
-    std::atomic<bool> AutoPlayUseSpeedHack{false};
     std::atomic<bool> AutoPlayUseFormation{true};
     std::atomic<bool> AutoPlayUseAuction{true};
     std::atomic<bool> AutoPlayUseGoGoCards{true};
@@ -217,6 +216,10 @@ namespace FeatureState {
     std::atomic<int> AutoPlayBoardSelfUnits{0};
     std::atomic<int> AutoPlayBoardEnemyUnits{0};
     std::atomic<int> AutoPlayBoardMoves{0};
+    std::atomic<int> AutoPlayLastMoveHeroId{0};
+    std::atomic<int> AutoPlayLastMoveGain{0};
+    std::atomic<int> AutoPlayLastMoveX{-1};
+    std::atomic<int> AutoPlayLastMoveY{-1};
     std::atomic<int> AutoPlayOpponentCount{0};
     std::atomic<int> AutoPlayContestedTargets{0};
     std::atomic<int> AutoPlayStrongestOpponentFightValue{0};
@@ -4311,6 +4314,16 @@ struct AutoPlayBoardPlan {
     int boardScore = 0;
 };
 
+struct AutoPlayFormationStats {
+    std::array<int, 8> enemyColumnThreat{};
+    std::array<int, 8> allyColumnCount{};
+    std::array<int, 8> allyFrontlineCount{};
+    std::array<int, 8> allyBacklineCount{};
+    float enemyCenterX = -1.0f;
+    float enemyCenterY = -1.0f;
+    int enemyPositionCount = 0;
+};
+
 const char* AutoPlayStrategyName(int strategy) {
     switch (strategy) {
         case AutoPlayStrategyEconomy:
@@ -4400,6 +4413,14 @@ bool IsFrontlineHero(int heroId) {
         hero.heroType == 1 ||
         hero.attackType == 1 ||
         StringIncludesCaseInsensitive(hero.name, "tank");
+}
+
+bool IsAutoPlayFrontlineUnit(const AutoPlayBoardUnit& unit) {
+    return IsFrontlineHero(unit.heroId) || unit.star >= 3 || unit.quality >= 4;
+}
+
+bool IsAutoPlayCarryUnit(const AutoPlayBoardUnit& unit) {
+    return !IsAutoPlayFrontlineUnit(unit) && (unit.star >= 2 || unit.quality >= 3);
 }
 
 std::vector<AutoPlayBoardUnit> CollectAutoPlayBoardUnits(void* battleManager) {
@@ -4526,34 +4547,141 @@ bool IsBoardCellOccupied(
     return false;
 }
 
+bool IsValidAutoPlayBoardCell(int x, int y) {
+    return x >= 0 && x <= 7 && y >= 0 && y <= 3;
+}
+
+int AutoPlayColumnValue(const std::array<int, 8>& values, int x) {
+    if (x < 0 || x >= static_cast<int>(values.size())) {
+        return 0;
+    }
+
+    return values[static_cast<size_t>(x)];
+}
+
+int AutoPlayNearbyColumnValue(const std::array<int, 8>& values, int x) {
+    return AutoPlayColumnValue(values, x - 1) +
+        AutoPlayColumnValue(values, x) +
+        AutoPlayColumnValue(values, x + 1);
+}
+
+AutoPlayFormationStats BuildAutoPlayFormationStats(
+    const std::vector<AutoPlayBoardUnit>& selfUnits,
+    const std::vector<AutoPlayBoardUnit>& enemyUnits
+) {
+    AutoPlayFormationStats stats{};
+
+    for (const AutoPlayBoardUnit& unit : selfUnits) {
+        if (unit.reserve || unit.chessPlayer || !IsValidAutoPlayBoardCell(unit.grid.x, unit.grid.y)) {
+            continue;
+        }
+
+        int x = unit.grid.x;
+        stats.allyColumnCount[static_cast<size_t>(x)]++;
+        if (IsAutoPlayFrontlineUnit(unit) || unit.grid.y <= 1) {
+            stats.allyFrontlineCount[static_cast<size_t>(x)]++;
+        } else {
+            stats.allyBacklineCount[static_cast<size_t>(x)]++;
+        }
+    }
+
+    for (const AutoPlayBoardUnit& enemy : enemyUnits) {
+        if (enemy.reserve || !IsValidAutoPlayBoardCell(enemy.grid.x, enemy.grid.y)) {
+            continue;
+        }
+
+        int x = enemy.grid.x;
+        int threat = 8 + (std::max(enemy.star, 1) * 3) + (std::max(enemy.quality, 0) * 2);
+        if (IsAutoPlayFrontlineUnit(enemy)) {
+            threat += 6;
+        }
+
+        stats.enemyColumnThreat[static_cast<size_t>(x)] += threat;
+        if (x > 0) {
+            stats.enemyColumnThreat[static_cast<size_t>(x - 1)] += threat / 2;
+        }
+        if (x < 7) {
+            stats.enemyColumnThreat[static_cast<size_t>(x + 1)] += threat / 2;
+        }
+
+        stats.enemyCenterX += enemy.grid.x;
+        stats.enemyCenterY += enemy.grid.y;
+        stats.enemyPositionCount++;
+    }
+
+    if (stats.enemyPositionCount > 0) {
+        stats.enemyCenterX =
+            (stats.enemyCenterX + 1.0f) / static_cast<float>(stats.enemyPositionCount);
+        stats.enemyCenterY =
+            (stats.enemyCenterY + 1.0f) / static_cast<float>(stats.enemyPositionCount);
+    }
+
+    return stats;
+}
+
 int ScoreBoardCellForUnit(
     const AutoPlayBoardUnit& unit,
     int x,
     int y,
-    float enemyCenterX,
-    float enemyCenterY,
+    const AutoPlayFormationStats& stats,
     const AutoPlaySnapshot& snapshot,
-    int focusGroup
+    const AutoPlayBoardPlan& plan
 ) {
-    bool frontline = IsFrontlineHero(unit.heroId) || unit.star >= 3 || unit.quality >= 4;
-    int desiredY = frontline ? 0 : 3;
-    int score = 100 - (std::abs(y - desiredY) * 24);
+    bool frontline = IsAutoPlayFrontlineUnit(unit);
+    bool carry = IsAutoPlayCarryUnit(unit);
+    int desiredY = frontline ? 0 : (carry ? 3 : 2);
+    int score = 140 - (std::abs(y - desiredY) * (frontline ? 28 : 24));
 
-    if (enemyCenterX >= 0.0f) {
-        score -= static_cast<int>(std::abs(static_cast<float>(x) - enemyCenterX) * 5.0f);
+    int columnThreat = AutoPlayColumnValue(stats.enemyColumnThreat, x);
+    int nearbyThreat = AutoPlayNearbyColumnValue(stats.enemyColumnThreat, x);
+    int allyColumnCount = AutoPlayColumnValue(stats.allyColumnCount, x);
+    if (!unit.reserve && IsValidAutoPlayBoardCell(unit.grid.x, unit.grid.y) && unit.grid.x == x) {
+        allyColumnCount = std::max(allyColumnCount - 1, 0);
+    }
+    int postMoveColumnCount = allyColumnCount + 1;
+
+    if (stats.enemyCenterX >= 0.0f) {
+        float distanceFromEnemyCenter = std::abs(static_cast<float>(x) - stats.enemyCenterX);
+        if (frontline) {
+            score -= static_cast<int>(distanceFromEnemyCenter * 4.0f);
+            score += columnThreat * 2;
+            score += nearbyThreat;
+        } else {
+            score += static_cast<int>(distanceFromEnemyCenter * (carry ? 4.0f : 2.0f));
+            score -= columnThreat * (carry ? 3 : 2);
+            score -= nearbyThreat;
+        }
     }
 
-    if (frontline && enemyCenterY >= 0.0f) {
-        score -= static_cast<int>(std::abs(static_cast<float>(y) - enemyCenterY) * 3.0f);
+    if (frontline && stats.enemyCenterY >= 0.0f) {
+        score -= static_cast<int>(std::abs(static_cast<float>(y) - stats.enemyCenterY) * 3.0f);
+    }
+
+    if (frontline) {
+        int protectedBackline = AutoPlayNearbyColumnValue(stats.allyBacklineCount, x);
+        score += protectedBackline * 9;
+        score -= std::max(postMoveColumnCount - 2, 0) * 12;
+    } else {
+        int nearbyCover = AutoPlayNearbyColumnValue(stats.allyFrontlineCount, x);
+        score += nearbyCover * (carry ? 12 : 8);
+        score -= std::max(postMoveColumnCount - 1, 0) * (carry ? 16 : 10);
+
+        if (nearbyCover == 0 && stats.enemyPositionCount > 0) {
+            score -= carry ? 28 : 16;
+        }
     }
 
     score += ScoreHeroForAutoPlay(
         unit.heroId,
         unit.star,
-        focusGroup,
+        plan.focusGroup,
         snapshot.recommendHeroId,
         snapshot.starUpHeroId
     ) / 18;
+
+    if (unit.heroId == plan.targetHeroId) {
+        score += carry ? 24 : 12;
+    }
 
     if (snapshot.currentOpponentFightValue > snapshot.fightValue && frontline) {
         score += 18;
@@ -4721,31 +4849,14 @@ bool TryAutoPlaySmartFormation(
         return false;
     }
 
-    float enemyCenterX = -1.0f;
-    float enemyCenterY = -1.0f;
-    int enemyPositionCount = 0;
-
-    for (const AutoPlayBoardUnit& enemy : enemyUnits) {
-        if (enemy.reserve) {
-            continue;
-        }
-
-        enemyCenterX += enemy.grid.x;
-        enemyCenterY += enemy.grid.y;
-        enemyPositionCount++;
-    }
-
-    if (enemyPositionCount > 0) {
-        enemyCenterX = (enemyCenterX + 1.0f) / static_cast<float>(enemyPositionCount);
-        enemyCenterY = (enemyCenterY + 1.0f) / static_cast<float>(enemyPositionCount);
-    }
-
+    AutoPlayFormationStats formationStats = BuildAutoPlayFormationStats(selfUnits, enemyUnits);
     const AutoPlayBoardUnit* bestUnit = nullptr;
     AstarInt2 bestTarget{0, 0};
     int bestGain = 0;
+    int bestScore = -999999;
 
     for (const AutoPlayBoardUnit& unit : selfUnits) {
-        if (unit.reserve || unit.chessPlayer) {
+        if (unit.reserve || unit.chessPlayer || !IsValidAutoPlayBoardCell(unit.grid.x, unit.grid.y)) {
             continue;
         }
 
@@ -4753,10 +4864,9 @@ bool TryAutoPlaySmartFormation(
             unit,
             unit.grid.x,
             unit.grid.y,
-            enemyCenterX,
-            enemyCenterY,
+            formationStats,
             snapshot,
-            plan.focusGroup
+            plan
         );
 
         for (int y = 0; y <= 3; ++y) {
@@ -4769,15 +4879,15 @@ bool TryAutoPlaySmartFormation(
                     unit,
                     x,
                     y,
-                    enemyCenterX,
-                    enemyCenterY,
+                    formationStats,
                     snapshot,
-                    plan.focusGroup
+                    plan
                 );
                 int gain = score - currentScore;
 
-                if (gain > bestGain) {
+                if (gain > bestGain || (gain == bestGain && score > bestScore)) {
                     bestGain = gain;
+                    bestScore = score;
                     bestUnit = &unit;
                     bestTarget = {x, y};
                 }
@@ -4799,6 +4909,10 @@ bool TryAutoPlaySmartFormation(
     FeatureState::LastAutoPlayDeployAttempt = now;
     FeatureState::AutoPlayBoardMoves =
         std::min(FeatureState::AutoPlayBoardMoves.load() + 1, 999999);
+    FeatureState::AutoPlayLastMoveHeroId = bestUnit->heroId;
+    FeatureState::AutoPlayLastMoveGain = bestGain;
+    FeatureState::AutoPlayLastMoveX = bestTarget.x;
+    FeatureState::AutoPlayLastMoveY = bestTarget.y;
     return true;
 }
 
@@ -5570,15 +5684,6 @@ void ApplyAutoPlayPolicy(
     int reserve = goldPlan.reserveGold;
     int targetGold = goldPlan.passiveTargetGold;
     int recommendationTarget = goldPlan.recommendationTarget;
-    float timeScale = 2.0f;
-
-    if (strategy == AutoPlayStrategyEconomy) {
-        timeScale = 1.5f;
-    } else if (strategy == AutoPlayStrategyAggressive) {
-        timeScale = 3.0f;
-    } else {
-        timeScale = 2.0f;
-    }
 
     if (FeatureState::AutoPlayUseShop.load()) {
         FeatureState::ShopBuyFreeHero = true;
@@ -5627,11 +5732,6 @@ void ApplyAutoPlayPolicy(
         FeatureState::CombatEnemyAttackRatioPercent =
             strategy == AutoPlayStrategyAggressive ? 0 : 1;
     }
-
-    if (FeatureState::AutoPlayUseSpeedHack.load()) {
-        FeatureState::ArenaSpeedHack = true;
-        FeatureState::ArenaTimeScale = timeScale;
-    }
 }
 
 void StopAutoPlayRuntime(uint64_t selfAccountId) {
@@ -5640,12 +5740,6 @@ void StopAutoPlayRuntime(uint64_t selfAccountId) {
 
     if (selfManager && Originals::MCLogicBattleManager_StopAI) {
         Originals::MCLogicBattleManager_StopAI(selfManager);
-    }
-
-    if (FeatureState::AutoPlayUseSpeedHack.load()) {
-        FeatureState::ArenaSpeedHack = false;
-        FeatureState::ArenaTimeScale = 1.0f;
-        ApplyArenaSpeedHack(0);
     }
 
     FeatureState::AutoPlayWasRunning = false;
@@ -6319,7 +6413,6 @@ void ResetFeatureSettings() {
     FeatureState::AutoPlayUseEconomy = true;
     FeatureState::AutoPlayUseCombat = true;
     FeatureState::AutoPlayUseArenaAssist = true;
-    FeatureState::AutoPlayUseSpeedHack = false;
     FeatureState::AutoPlayUseFormation = true;
     FeatureState::AutoPlayUseAuction = true;
     FeatureState::AutoPlayUseGoGoCards = true;
@@ -6341,6 +6434,10 @@ void ResetFeatureSettings() {
     FeatureState::AutoPlayBoardSelfUnits = 0;
     FeatureState::AutoPlayBoardEnemyUnits = 0;
     FeatureState::AutoPlayBoardMoves = 0;
+    FeatureState::AutoPlayLastMoveHeroId = 0;
+    FeatureState::AutoPlayLastMoveGain = 0;
+    FeatureState::AutoPlayLastMoveX = -1;
+    FeatureState::AutoPlayLastMoveY = -1;
     FeatureState::AutoPlayOpponentCount = 0;
     FeatureState::AutoPlayContestedTargets = 0;
     FeatureState::AutoPlayStrongestOpponentFightValue = 0;
@@ -6590,7 +6687,6 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     else if (key == "autoPlayUseEconomy") FeatureState::AutoPlayUseEconomy = ParseConfigBool(value, FeatureState::AutoPlayUseEconomy);
     else if (key == "autoPlayUseCombat") FeatureState::AutoPlayUseCombat = ParseConfigBool(value, FeatureState::AutoPlayUseCombat);
     else if (key == "autoPlayUseArenaAssist") FeatureState::AutoPlayUseArenaAssist = ParseConfigBool(value, FeatureState::AutoPlayUseArenaAssist);
-    else if (key == "autoPlayUseSpeedHack") FeatureState::AutoPlayUseSpeedHack = ParseConfigBool(value, FeatureState::AutoPlayUseSpeedHack);
     else if (key == "autoPlayUseFormation") FeatureState::AutoPlayUseFormation = ParseConfigBool(value, FeatureState::AutoPlayUseFormation);
     else if (key == "autoPlayUseAuction") FeatureState::AutoPlayUseAuction = ParseConfigBool(value, FeatureState::AutoPlayUseAuction);
     else if (key == "autoPlayUseGoGoCards") FeatureState::AutoPlayUseGoGoCards = ParseConfigBool(value, FeatureState::AutoPlayUseGoGoCards);
@@ -6693,7 +6789,6 @@ bool SaveConfigToFile(const std::string& path) {
     WriteConfigBool(file, "autoPlayUseEconomy", FeatureState::AutoPlayUseEconomy);
     WriteConfigBool(file, "autoPlayUseCombat", FeatureState::AutoPlayUseCombat);
     WriteConfigBool(file, "autoPlayUseArenaAssist", FeatureState::AutoPlayUseArenaAssist);
-    WriteConfigBool(file, "autoPlayUseSpeedHack", FeatureState::AutoPlayUseSpeedHack);
     WriteConfigBool(file, "autoPlayUseFormation", FeatureState::AutoPlayUseFormation);
     WriteConfigBool(file, "autoPlayUseAuction", FeatureState::AutoPlayUseAuction);
     WriteConfigBool(file, "autoPlayUseGoGoCards", FeatureState::AutoPlayUseGoGoCards);
@@ -7720,7 +7815,6 @@ void DrawAutoPlayTab() {
     DrawAtomicCheckbox("Manage economy and level", FeatureState::AutoPlayUseEconomy);
     DrawAtomicCheckbox("Manage combat power", FeatureState::AutoPlayUseCombat);
     DrawAtomicCheckbox("Use arena assists", FeatureState::AutoPlayUseArenaAssist);
-    DrawAtomicCheckbox("Use SpeedHack", FeatureState::AutoPlayUseSpeedHack);
     DrawAtomicCheckbox("Use smart formation", FeatureState::AutoPlayUseFormation);
     DrawAtomicCheckbox("Use auction scoring", FeatureState::AutoPlayUseAuction);
     DrawAtomicCheckbox("Use GogoCard scoring", FeatureState::AutoPlayUseGoGoCards);
@@ -7857,6 +7951,17 @@ void DrawAutoPlayTab() {
                 FormatInt(FeatureState::AutoPlayBoardEnemyUnits.load())
         );
         DrawValueRow("Board moves", FormatInt(FeatureState::AutoPlayBoardMoves.load()));
+        DrawValueRow("Last moved hero", FormatHeroLabel(FeatureState::AutoPlayLastMoveHeroId.load()));
+        DrawValueRow("Last move gain", FormatInt(FeatureState::AutoPlayLastMoveGain.load()));
+        DrawValueRow(
+            "Last move cell",
+            FeatureState::AutoPlayLastMoveX.load() >= 0 &&
+                    FeatureState::AutoPlayLastMoveY.load() >= 0 ?
+                FormatInt(FeatureState::AutoPlayLastMoveX.load()) +
+                    "," +
+                    FormatInt(FeatureState::AutoPlayLastMoveY.load()) :
+                "Waiting"
+        );
         ImGui::EndTable();
     }
 }
