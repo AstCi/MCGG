@@ -405,6 +405,9 @@ APP_STL := c++_static
 APP_OPTIM := release
 APP_THIN_ARCHIVE := false
 APP_PIE := true
+APP_CFLAGS += -fstack-protector-strong -D_FORTIFY_SOURCE=2
+APP_CPPFLAGS += -fvisibility-inlines-hidden
+APP_LDFLAGS += -Wl,-z,relro -Wl,-z,now -Wl,--as-needed
 ```
 
 The active C++ language mode is configured in `jni/Android.mk`:
@@ -415,6 +418,10 @@ The active C++ language mode is configured in `jni/Android.mk`:
 
 Default native C flags optimize for size with `-Oz` and define `NDEBUG`.
 Debug-oriented NDK builds add `-O0` when `NDK_DEBUG=1`.
+The app-wide flags also keep conservative runtime behavior with
+`-fno-strict-aliasing`, `-fno-strict-overflow`,
+`-fno-delete-null-pointer-checks`, and `-funwind-tables` for stability and
+post-crash diagnostics.
 
 Unity compatibility defines are configured in `jni/Android.mk`:
 

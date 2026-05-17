@@ -72,7 +72,10 @@ Builds the native `main` module and outputs `libs/arm64-v8a/libmain.so`.
 The current build uses ABI `arm64-v8a`, platform `android-21`, STL
 `c++_static`, optimization `release`, thin archives disabled, PIE enabled, and
 C++ mode `c++26`. `jni/Android.mk` optimizes native sources with `-Oz` by
-default and adds `-O0` when `NDK_DEBUG=1`.
+default and adds `-O0` when `NDK_DEBUG=1`. `jni/Application.mk` adds app-wide
+hardening and stability flags: stack protector, `_FORTIFY_SOURCE=2`,
+no-strict-aliasing/overflow assumptions, preserved null checks, unwind tables,
+hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
 
 `.github/workflows/build.yml` is the CI release workflow. It builds with Android
 NDK `29.0.14206865`, packages the generated `libs/` output with

@@ -42,6 +42,10 @@ git lfs pull
 - Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
   intentionally changes.
+- Keep `jni/Application.mk` app-wide stability flags aligned with the current
+  release profile: stack protector, fortify, conservative alias/overflow/null
+  check behavior, unwind tables, hidden inline visibility, RELRO, immediate
+  binding, and `--as-needed`.
 - When using internet, video, or guide research for game context, record durable
   mechanics rather than seasonal tier claims. Current public references describe
   MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
@@ -239,6 +243,9 @@ The expected output is:
 ```text
 libs/arm64-v8a/libmain.so
 ```
+
+Native build submissions should preserve the app-wide stability flags in
+`jni/Application.mk` unless the task explicitly changes the release profile.
 
 Documentation-only changes do not require a native build, but mention that in
 the pull request. Inspect the Markdown diff and run `git diff --check` before

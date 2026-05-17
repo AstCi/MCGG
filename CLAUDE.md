@@ -16,6 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run `git diff --check` for native or mixed code changes.
 - For documentation-only edits, inspect the Markdown diff before finishing.
 - The GitHub Actions release workflow is `.github/workflows/build.yml`; it builds with Android NDK `29.0.14206865`, packages `libs/`, and publishes release notes that include commit descriptions.
+- `jni/Application.mk` carries app-wide stability flags for stack protection,
+  fortify checks, conservative alias/overflow/null-check behavior, unwind
+  tables, hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
 
 ## Code Architecture & Standards
 
@@ -75,6 +78,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Unity Version**: `2019.4.33f1` (Refer to `UNITY_` macros in `jni/Android.mk`)
 - **C++ Standard**: C++26 (defined in `jni/Android.mk`)
 - **NDK App Settings**: `APP_OPTIM := release`, `APP_THIN_ARCHIVE := false`, `APP_PIE := true`
+- **NDK App Flags**: `-fstack-protector-strong`, `_FORTIFY_SOURCE=2`,
+  `-fno-strict-aliasing`, `-fno-strict-overflow`,
+  `-fno-delete-null-pointer-checks`, `-funwind-tables`,
+  `-fvisibility-inlines-hidden`, `-Wl,-z,relro`, `-Wl,-z,now`, and
+  `-Wl,--as-needed`
 - **Native C Flags**: `-Oz` and `-DNDEBUG` by default; `NDK_DEBUG=1` adds `-O0`
 
 ### Runtime Audit Focus

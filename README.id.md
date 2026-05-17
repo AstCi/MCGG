@@ -410,6 +410,9 @@ APP_STL := c++_static
 APP_OPTIM := release
 APP_THIN_ARCHIVE := false
 APP_PIE := true
+APP_CFLAGS += -fstack-protector-strong -D_FORTIFY_SOURCE=2
+APP_CPPFLAGS += -fvisibility-inlines-hidden
+APP_LDFLAGS += -Wl,-z,relro -Wl,-z,now -Wl,--as-needed
 ```
 
 Mode bahasa C++ aktif dikonfigurasi di `jni/Android.mk`:
@@ -421,6 +424,10 @@ Mode bahasa C++ aktif dikonfigurasi di `jni/Android.mk`:
 Flag C native default mengoptimalkan ukuran dengan `-Oz` dan mendefinisikan
 `NDEBUG`. Build NDK yang berorientasi debug menambahkan `-O0` saat
 `NDK_DEBUG=1`.
+Flag app-wide juga menjaga perilaku runtime konservatif dengan
+`-fno-strict-aliasing`, `-fno-strict-overflow`,
+`-fno-delete-null-pointer-checks`, dan `-funwind-tables` untuk stabilitas dan
+diagnostik setelah crash.
 
 Unity compatibility defines dikonfigurasi di `jni/Android.mk`:
 
