@@ -19,6 +19,8 @@ The current boot order is process gate, detached setup thread, early
 thread attach, `UnityEngine.Input.GetTouch` hook, and lazy render-thread ImGui
 initialization. The render hook can exist before IL2CPP is ready, so any
 frame-time managed work must stay behind readiness and thread-attach checks.
+Startup waits belong in the detached setup thread, not the library constructor,
+so process loading is not blocked by hook delays.
 
 `dump/dump.cs` is the IL2CPP signature reference. Use it before changing native
 method pointers, hook signatures, value-type layouts, or field offsets.

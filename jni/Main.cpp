@@ -11778,7 +11778,7 @@ namespace Hooks {
 
 // Waits for game libraries, resolves IL2CPP APIs, and installs hooks.
 void SetupThread() {
-    sleep(5);
+    sleep(8);
 
     void* swapBuffers = nullptr;
 
@@ -11841,13 +11841,9 @@ void SetupThread() {
 // Starts hook setup when this shared library is loaded in the target process.
 __attribute__((constructor))
 void InitLibrary() {
-    sleep(1);
-
     if (!IsUnityMoontonProcess()) {
         return;
     }
-
-    sleep(2);
 
     std::thread(SetupThread).detach();
 }

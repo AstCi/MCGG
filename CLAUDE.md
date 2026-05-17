@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Code Architecture & Standards
 
 ### High-Level Architecture
-- **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → setup thread → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
+- **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → detached setup thread with startup waits → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Field misses use a short retry backoff so hot feature paths do not rescan missing metadata every frame.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
 - **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
@@ -80,6 +80,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Runtime Audit Focus
 
 - The render hook is installed before `liblogic.so` and IL2CPP are ready. Keep managed calls behind `IsIl2CppRuntimeReady()` and render-thread attach checks.
+- Keep startup sleeps in the detached setup thread, not the constructor, so the
+  loader thread is not blocked before Unity continues startup.
 - Runtime method matching is dump-guided but still name, parameter-count, and parameter-name-shape based. Treat overload-sensitive bindings as unsafe until checked in `dump/dump.cs`.
 - Table cache loading publishes only after hero, equipment, and GogoCard data are all present. Dependent UI should keep `Waiting for ...` states while any table is missing.
 - Table cache loading should be deferred until a table-backed tab or active

@@ -457,9 +457,10 @@ dengan notes hasil generate terbaru sebelum asset diunggah ulang memakai
 Pada saat load dan selama frame presentation, `jni/Main.cpp` menjalankan urutan berikut:
 
 1. Constructor mengonfirmasi command line process berisi `:UnityKillsMe`.
-2. Setup thread detached dimulai setelah process gate.
-3. Setup thread me-resolve dan melakukan hook `eglSwapBuffers` terlebih dahulu,
-   sehingga rendering menjadi frame loop jangka panjang.
+2. Setup thread detached dimulai setelah process gate tanpa sleep di constructor.
+3. Setup thread menangani startup wait, lalu me-resolve dan melakukan hook
+   `eglSwapBuffers` terlebih dahulu, sehingga rendering menjadi frame loop
+   jangka panjang.
 4. Setup thread menunggu `liblogic.so`, me-resolve export API IL2CPP Unity
    `2019.4.33f1` dari deklarasi API bundled, lalu attach ke IL2CPP domain.
 5. Setup thread me-resolve dan melakukan hook `UnityEngine.Input.GetTouch` saat
@@ -498,6 +499,9 @@ area yang rawan bug berikut:
 - Render hook dipasang sebelum `liblogic.so` dan IL2CPP siap. Kode frame-time
   harus tahan terhadap runtime managed yang belum siap dan tidak boleh memanggil
   API IL2CPP kecuali `AttachRenderIl2CppThread()` berhasil.
+- Startup wait harus tetap berada di setup thread detached, bukan constructor,
+  agar loading native library tidak memblokir startup Unity lebih lama dari yang
+  diperlukan.
 - Pekerjaan render-frame memiliki budget. Retry binding dan loading tabel boleh
   menunda tick automation berikutnya ke frame selanjutnya, tetapi tick tersebut
   tetap retryable.
@@ -536,6 +540,8 @@ area yang rawan bug berikut:
   `eglSwapBuffers` lebih awal, tunggu `liblogic.so`, resolve export IL2CPP,
   attach setup thread, hook `GetTouch`, lalu inisialisasi overlay di render
   thread.
+- Jaga pekerjaan constructor tetap non-blocking: process gate, jalankan setup
+  thread, lalu return.
 - Gunakan tab Runtime Status dan Test saat memvalidasi binding baru atau menelusuri runtime state yang terlambat tersedia.
 - Untuk perubahan Arena Skip Round, verifikasi
   `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, dan

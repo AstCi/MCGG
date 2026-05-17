@@ -450,9 +450,10 @@ notes before the asset is uploaded with `--clobber`.
 At load time and during frame presentation, `jni/Main.cpp` performs the following sequence:
 
 1. The constructor confirms the process command line contains `:UnityKillsMe`.
-2. A detached setup thread starts after the process gate.
-3. The setup thread resolves and hooks `eglSwapBuffers` first, so rendering can
-   become the long-lived frame loop.
+2. A detached setup thread starts after the process gate without sleeping in the
+   constructor.
+3. The setup thread owns startup waits, then resolves and hooks
+   `eglSwapBuffers` first, so rendering can become the long-lived frame loop.
 4. The setup thread waits for `liblogic.so`, resolves Unity `2019.4.33f1`
    IL2CPP API exports from the bundled API declarations, and attaches to the
    IL2CPP domain.
@@ -491,6 +492,8 @@ the following bug-prone areas:
 - The render hook is installed before `liblogic.so` and IL2CPP are ready.
   Frame-time code must tolerate a non-ready managed runtime and should not call
   IL2CPP APIs unless `AttachRenderIl2CppThread()` succeeded.
+- Startup waits should remain in the detached setup thread, not the constructor,
+  so loading the native library does not block Unity startup longer than needed.
 - Render-frame work is budgeted. Binding retries and table loads may defer later
   automation ticks to the next frame, but those ticks remain retryable.
 - Method lookup deliberately caches only successful method vectors as reusable
@@ -524,6 +527,7 @@ the following bug-prone areas:
 - Preserve the current boot order: process gate, setup thread, early
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `GetTouch` hook, then render-thread overlay initialization.
+- Keep constructor work non-blocking: process gate, launch setup thread, return.
 - Use the Runtime Status and Test tabs when validating new bindings or investigating delayed runtime state.
 - For Arena Skip Round changes, verify `MCLogicBattleData.get_logicRoundMgr`,
   `LogicRoundMgr.SetRound(UInt32)`, and `LogicRoundMgr.NextRound(Boolean)`

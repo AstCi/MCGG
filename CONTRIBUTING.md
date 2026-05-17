@@ -51,6 +51,9 @@ git lfs pull
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `UnityEngine.Input.GetTouch` hook, then lazy render-thread
   ImGui initialization.
+- Keep startup waits inside the detached setup thread. The library constructor
+  should only gate the process and launch setup so it does not freeze process
+  loading.
 - The render hook can run before IL2CPP is ready. Frame-time managed work must
   stay behind readiness checks and successful render-thread IL2CPP attachment.
 - Keep frame-time managed work within the feature frame budget. If a frame is
