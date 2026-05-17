@@ -236,6 +236,9 @@ At a high level, the project contains:
 - Project-owned configuration persistence for overlay and feature state.
 - Atomic primitive runtime state with dedicated mutex domains for IL2CPP
   caches, feature collections, and UI/config strings.
+- Offset-backed typed helpers for regular instance field reads and non-pointer
+  writes, with raw IL2CPP fallbacks and static fields kept on static IL2CPP
+  accessors.
 - Snapshot helpers for hero, equipment, GogoCard, selected shop target,
   opponent, board-unit, auction, and strategy data used by the overlay and
   throttled feature ticks.
@@ -287,6 +290,11 @@ The current runtime cadence is intentionally split by responsibility:
 Field metadata misses are also retried with a short backoff. This keeps late
 Unity metadata retryable without letting missing field lookups rescan every
 feature tick.
+
+Typed regular instance field access resolves `il2cpp_field_get_offset` and
+copies directly from the managed object when the offset is valid. Static fields,
+unresolved offsets, and managed-object pointer writes keep using the IL2CPP
+accessor path so fallback and write-barrier behavior stay intact.
 
 ## Requirements
 
@@ -529,6 +537,9 @@ the following bug-prone areas:
 
 - Keep native changes focused and easy to review.
 - Validate class names, method names, parameter counts, return types, and field layouts against local reference artifacts before adding IL2CPP calls.
+- Use the shared typed field helpers for regular instance fields so hot paths
+  benefit from offset access, and keep raw IL2CPP/static helpers for static
+  fields or runtime-managed setter behavior.
 - Keep feature runtime code in `jni/Main.cpp` unless a refactor is explicitly requested.
 - Use clear local sections and concise comments around risky IL2CPP calls.
 - Preserve the current boot order: process gate, setup thread, early

@@ -109,6 +109,12 @@ Frame-time feature work is guarded by a small render budget; when a frame is
 already busy, lower-priority ticks should defer to the next frame instead of
 stacking managed calls into one render pass.
 
+Typed regular instance field helpers should prefer resolved
+`il2cpp_field_get_offset` access and bounded direct copies for hot reads and
+non-pointer writes. Keep IL2CPP raw get/set fallbacks available, leave static
+fields on the IL2CPP static APIs, and avoid bypassing IL2CPP write barriers for
+managed-object pointer writes.
+
 Shared state is split across `RuntimeMutex::CacheMutex`,
 `RuntimeMutex::FeatureMutex`, and `RuntimeMutex::UiMutex`. Primitive feature
 flags, counters, and managed reference pointers use `std::atomic`. Guard direct
@@ -166,7 +172,10 @@ ndk-build -C jni
 
 When changing IL2CPP calls, verify signatures against `dump/dump.cs` and confirm
 the target remains `arm64-v8a`, Unity `2019.4.33f1`, and native C++ mode
-`c++26`.
+`c++26`. For regular instance field helper changes, verify
+`il2cpp_field_get_offset` availability for the target Unity API and preserve
+the raw IL2CPP fallback path for unresolved, static, or barrier-sensitive
+fields.
 
 When changing Recommendation Lineup automation, verify the related
 `MCLogicBattleData` and `MCBattleBridge` signatures against `dump/dump.cs` and

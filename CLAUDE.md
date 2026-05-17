@@ -28,6 +28,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
 - **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
+- **Field Access**: Typed regular instance field reads and non-pointer writes
+  use resolved `il2cpp_field_get_offset` values for direct bounded copies on
+  hot paths. Raw IL2CPP get/set fallbacks remain for unresolved offsets, static
+  fields stay on static IL2CPP APIs, and managed-object pointer writes should
+  preserve IL2CPP write barriers.
 - **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
@@ -91,6 +96,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Keep startup sleeps in the detached setup thread, not the constructor, so the
   loader thread is not blocked before Unity continues startup.
 - Runtime method matching is dump-guided but still name, parameter-count, and parameter-name-shape based. Treat overload-sensitive bindings as unsafe until checked in `dump/dump.cs`.
+- Regular instance field helper work should keep offset-based direct access
+  limited to validated field offsets and retain IL2CPP fallback behavior for
+  unresolved metadata or barrier-sensitive writes.
 - Table cache loading publishes only after hero, equipment, and GogoCard data are all present. Dependent UI should keep `Waiting for ...` states while any table is missing.
 - Table cache loading should be deferred until a table-backed tab or active
   automation needs it, and long Shop/Arena table views should render visible
@@ -115,6 +123,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Pointers**: Prefer `void*` for managed objects unless a specific structure from `Structures.hpp` is required.
 - **Single-file feature work**: Keep feature runtime changes in `jni/Main.cpp` unless explicitly asked to split files.
 - **Retry behavior**: Do not permanently cache failed IL2CPP method or field lookups. Missing bindings should retry, field miss retries should stay throttled, and user-facing controls should show `Waiting for ...` states where practical.
+- **Field helpers**: Prefer the shared typed `GetField`/`SetField` helpers for
+  regular instance fields so hot paths use offset access automatically. Use raw
+  IL2CPP/static helpers for static fields or cases that need runtime-managed
+  setter behavior.
 - **HUD diagnostics**: Keep the next-enemy HUD as lightweight foreground text near the bottom center. Reuse throttled prediction/current-opponent data and avoid rebuilding prediction tables every render frame.
 - **Test diagnostics**: Keep Test additions read-only unless explicitly requested otherwise, and verify class names, method names, parameter counts, return types, and fields against `dump/dump.cs`.
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.

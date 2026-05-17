@@ -38,6 +38,10 @@ git lfs pull
 - Keep source changes focused on the requested feature or fix.
 - Use `dump/dump.cs` to verify IL2CPP class names, method signatures, return
   types, and fields before changing native calls.
+- Regular instance field helpers should use resolved field offsets for hot
+  typed reads and non-pointer writes, while retaining raw IL2CPP fallbacks.
+  Keep static fields on the IL2CPP static APIs and preserve write barriers for
+  managed-object pointer writes.
 - Keep the default target `arm64-v8a`.
 - Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
@@ -186,6 +190,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
   key-value Settings file format.
 - Keep retryable IL2CPP field misses throttled instead of permanently failed or
   repeatedly rescanned from hot feature paths.
+- Keep offset-based field access bounded and fallback-capable. A missing or
+  invalid offset should degrade to the IL2CPP raw access path, not to a
+  one-shot failure.
 - Keep runtime cadence split by responsibility: 100 ms for Shop and Arena,
   250 ms for Combat and Auto-Play, and 500 ms for opponent prediction history
   and the next-enemy HUD refresh.
@@ -206,6 +213,9 @@ Use this checklist when looking for hidden bugs or logic flaws:
 - Confirm every new IL2CPP method pointer, hook signature, value type, and field
   read against `dump/dump.cs`, especially overloaded methods where runtime
   resolution only checks method name, parameter count, and parameter-name shape.
+- Confirm regular instance field offset use against the target Unity API. Static
+  fields and managed-object pointer writes should continue through IL2CPP APIs
+  when runtime setter behavior matters.
 - Keep early-frame paths safe when `eglSwapBuffers` is hooked but IL2CPP is not
   ready or the render thread has not attached.
 - Confirm render-frame budget checks still let delayed work retry on later

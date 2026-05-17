@@ -17,6 +17,7 @@
 #include <cmath>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -175,6 +176,7 @@ namespace RuntimeConfig {
     constexpr int MaxManagedListItems = 2048;
     constexpr int MaxManagedStringChars = 4096;
     constexpr int MaxOpponentHistoryRounds = 32;
+    constexpr size_t MaxInstanceFieldOffsetBytes = 1024 * 1024;
 }
 
 namespace RuntimeMutex {
@@ -958,7 +960,49 @@ FieldInfo* GetFieldInfoFromName(
     return nullptr;
 }
 
-// Reads an instance field by metadata into a caller-provided buffer.
+bool ResolveInstanceFieldAddress(Il2CppObject* instance, FieldInfo* field, void** address) {
+    if (!instance || !field || !address || !il2cpp_field_get_offset) {
+        return false;
+    }
+
+    size_t offset = il2cpp_field_get_offset(field);
+    if (offset == static_cast<size_t>(-1) || offset > RuntimeConfig::MaxInstanceFieldOffsetBytes) {
+        return false;
+    }
+
+    *address = reinterpret_cast<uint8_t*>(instance) + offset;
+    return true;
+}
+
+bool ReadInstanceFieldByOffset(Il2CppObject* instance, FieldInfo* field, void* outValue, size_t valueSize) {
+    if (!IsIl2CppRuntimeReady() || !outValue || valueSize == 0) {
+        return false;
+    }
+
+    void* address = nullptr;
+    if (!ResolveInstanceFieldAddress(instance, field, &address)) {
+        return false;
+    }
+
+    memcpy(outValue, address, valueSize);
+    return true;
+}
+
+bool WriteInstanceFieldByOffset(Il2CppObject* instance, FieldInfo* field, const void* value, size_t valueSize) {
+    if (!IsIl2CppRuntimeReady() || !value || valueSize == 0) {
+        return false;
+    }
+
+    void* address = nullptr;
+    if (!ResolveInstanceFieldAddress(instance, field, &address)) {
+        return false;
+    }
+
+    memcpy(address, value, valueSize);
+    return true;
+}
+
+// Reads an instance field by metadata into a caller-provided buffer through IL2CPP.
 bool GetFieldRaw(Il2CppObject* instance, FieldInfo* field, void* outValue) {
     if (!IsIl2CppRuntimeReady() || !instance || !field || !outValue || !il2cpp_field_get_value) {
         return false;
@@ -1054,11 +1098,13 @@ bool SetStaticFieldRaw(
     );
 }
 
-// Reads a typed instance field by metadata.
+// Reads a typed instance field by metadata, preferring direct offset access.
 template <typename T>
 T GetField(Il2CppObject* instance, FieldInfo* field) {
     T value{};
-    GetFieldRaw(instance, field, &value);
+    if (!ReadInstanceFieldByOffset(instance, field, &value, sizeof(T))) {
+        GetFieldRaw(instance, field, &value);
+    }
     return value;
 }
 
@@ -1071,7 +1117,10 @@ T GetField(
     const char* fieldName
 ) {
     T value{};
-    GetFieldRaw(instance, ns, className, fieldName, &value);
+    FieldInfo* field = GetFieldInfoFromName(ns, className, fieldName);
+    if (!ReadInstanceFieldByOffset(instance, field, &value, sizeof(T))) {
+        GetFieldRaw(instance, field, &value);
+    }
     return value;
 }
 
@@ -1095,9 +1144,15 @@ T GetStaticField(
     return value;
 }
 
-// Writes a typed instance field by metadata.
+// Writes a typed instance field by metadata, preserving IL2CPP barriers for pointer fields.
 template <typename T>
 bool SetField(Il2CppObject* instance, FieldInfo* field, const T& value) {
+    if constexpr (!std::is_pointer_v<T>) {
+        if (WriteInstanceFieldByOffset(instance, field, &value, sizeof(T))) {
+            return true;
+        }
+    }
+
     return SetFieldRaw(instance, field, &value);
 }
 
@@ -1110,7 +1165,7 @@ bool SetField(
     const char* fieldName,
     const T& value
 ) {
-    return SetFieldRaw(instance, ns, className, fieldName, &value);
+    return SetField(instance, GetFieldInfoFromName(ns, className, fieldName), value);
 }
 
 // Writes a typed static field by metadata.

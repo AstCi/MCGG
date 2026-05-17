@@ -241,6 +241,9 @@ Secara umum, proyek ini berisi:
 - Persistence konfigurasi milik proyek untuk overlay dan feature state.
 - State runtime primitive yang bersifat atomic dengan domain mutex terpisah
   untuk cache IL2CPP, koleksi fitur, dan string UI/config.
+- Helper typed berbasis offset untuk read field instance reguler dan write
+  non-pointer, dengan fallback raw IL2CPP dan field static tetap memakai
+  accessor static IL2CPP.
 - Helper snapshot untuk data hero, equipment, GogoCard, selected target shop,
   opponent, unit board, auction, dan strategi yang dipakai overlay serta tick
   fitur yang di-throttle.
@@ -292,6 +295,11 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 Miss metadata field juga dicoba ulang dengan backoff singkat. Ini menjaga
 metadata Unity yang terlambat tetap retryable tanpa membiarkan lookup field yang
 hilang melakukan scan ulang pada setiap tick fitur.
+
+Akses typed untuk field instance reguler me-resolve `il2cpp_field_get_offset`
+dan melakukan copy langsung dari managed object saat offset valid. Field static,
+offset yang belum valid, dan write pointer managed object tetap memakai path
+accessor IL2CPP agar fallback dan write barrier runtime tetap terjaga.
 
 ## Kebutuhan
 
@@ -541,6 +549,9 @@ area yang rawan bug berikut:
 
 - Jaga perubahan native tetap fokus dan mudah di-review.
 - Validasi class name, method name, jumlah parameter, return type, dan field layout terhadap local reference artifacts sebelum menambahkan IL2CPP call.
+- Gunakan helper typed field bersama untuk field instance reguler agar hot path
+  memakai akses offset, dan pertahankan helper raw IL2CPP/static untuk field
+  static atau setter yang membutuhkan behavior runtime-managed.
 - Pertahankan runtime code fitur di `jni/Main.cpp` kecuali refactor memang diminta secara eksplisit.
 - Gunakan section lokal yang jelas dan komentar singkat di sekitar IL2CPP call yang berisiko.
 - Pertahankan urutan boot saat ini: process gate, setup thread, hook
