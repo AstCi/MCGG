@@ -191,6 +191,11 @@ namespace RuntimeState {
 }
 
 void TickOpponentPredictionHistory(uint64_t selfAccountId);
+bool RefreshCachedOpponentPredictionRows(
+    uint64_t selfAccountId,
+    std::chrono::steady_clock::time_point now,
+    bool force = false
+);
 void RefreshGgcInfo(bool force);
 void RefreshInfoPlayerRows(bool force);
 void RefreshNextEnemyHudText(uint64_t selfAccountId);
@@ -6606,6 +6611,18 @@ void TickFeatures() {
         FeatureState::CachedGameRound = 0;
     }
 
+    bool predictionRowsRebuilt = false;
+    if (activeMainTab == MainTabTest || UiState::ShowNextEnemyHud.load()) {
+        predictionRowsRebuilt = RefreshCachedOpponentPredictionRows(selfAccountId, now);
+        if (predictionRowsRebuilt) {
+            FeatureState::LastOpponentPredictionTick = now;
+        }
+
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
+    }
+
     if (UiState::ShowNextEnemyHud.load()) {
         RefreshNextEnemyHudText(selfAccountId);
         if (FrameBudgetExceeded(frameStart)) {
@@ -6643,7 +6660,9 @@ void TickFeatures() {
             RuntimeConfig::OpponentPredictionTickMs,
             now
         )) {
-        TickOpponentPredictionHistory(selfAccountId);
+        if (!predictionRowsRebuilt) {
+            TickOpponentPredictionHistory(selfAccountId);
+        }
     }
 }
 
@@ -9724,7 +9743,11 @@ struct OpponentHistoryEntry {
 namespace PredictionCache {
     std::unordered_map<uint64_t, CurrentOpponentObservation> CurrentRoundOpponents;
     std::unordered_map<uint64_t, std::vector<OpponentHistoryEntry>> OpponentHistory;
+    std::vector<OpponentPredictionRow> CachedRows;
+    std::chrono::steady_clock::time_point LastRowsRefresh{};
     uint64_t HistorySelfAccountId = 0;
+    uint64_t CachedRowsSelfAccountId = 0;
+    bool CachedRowsReady = false;
 }
 
 std::vector<PredictionPlayer> CollectPredictionPlayers(uint64_t selfAccountId) {
@@ -9903,6 +9926,45 @@ int CountRealPlayerOpponentHistory(uint64_t accountId) {
     }
 
     return count;
+}
+
+// Builds the recent real-player cycle so the predictor can avoid stale repeats.
+std::vector<uint64_t> BuildRecentOpponentCycle(uint64_t accountId, size_t maxOpponents) {
+    std::vector<uint64_t> cycle;
+    if (accountId == 0 || maxOpponents == 0) {
+        return cycle;
+    }
+
+    auto found = PredictionCache::OpponentHistory.find(accountId);
+    if (found == PredictionCache::OpponentHistory.end()) {
+        return cycle;
+    }
+
+    cycle.reserve(maxOpponents);
+    const std::vector<OpponentHistoryEntry>& history = found->second;
+
+    for (auto it = history.rbegin(); it != history.rend(); ++it) {
+        uint64_t opponentId = it->opponentId;
+        if (opponentId == 0 || opponentId == accountId || it->mirror) {
+            continue;
+        }
+
+        if (std::find(cycle.begin(), cycle.end(), opponentId) != cycle.end()) {
+            continue;
+        }
+
+        cycle.push_back(opponentId);
+        if (cycle.size() >= maxOpponents) {
+            break;
+        }
+    }
+
+    return cycle;
+}
+
+// Reports whether an account already appears in a bounded recent opponent set.
+bool ContainsAccountId(const std::vector<uint64_t>& accounts, uint64_t accountId) {
+    return std::find(accounts.begin(), accounts.end(), accountId) != accounts.end();
 }
 
 uint64_t PredictHistoryQueueOpponent(
@@ -10230,6 +10292,10 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         GetInvaderAccountOrder(invasionManager, aliveAccounts);
     const std::vector<uint64_t>& patternAccounts =
         invaderOrderedAccounts.empty() ? aliveAccounts : invaderOrderedAccounts;
+    size_t aliveOpponentCount =
+        aliveAccounts.empty() ? 0 : static_cast<size_t>(aliveAccounts.size() - 1);
+    std::vector<uint64_t> recentCycleOpponents =
+        BuildRecentOpponentCycle(selfAccountId, aliveOpponentCount);
     int realPlayerHistoryCount = CountRealPlayerOpponentHistory(selfAccountId);
     uint64_t historyQueueOpponent =
         PredictHistoryQueueOpponent(selfAccountId, patternAccounts);
@@ -10287,6 +10353,7 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         }
 
         double weight = 100.0;
+        int sourceVotes = 0;
         uint64_t candidatePair = GetCurrentPairFromInvasion(
             invasionManager,
             playerIt->accountId
@@ -10294,6 +10361,7 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
 
         if (candidatePair == selfAccountId) {
             weight *= 5.0;
+            sourceVotes += 2;
         } else if (candidatePair != 0) {
             weight *= 0.03;
         }
@@ -10306,6 +10374,7 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
 
         if (candidateCurrentOpponent == selfAccountId) {
             weight *= candidateObservation && candidateObservation->mirror ? 2.5 : 4.0;
+            sourceVotes += 2;
         } else if (candidateCurrentOpponent != 0) {
             weight *= candidateObservation && candidateObservation->inferred ? 0.15 : 0.08;
         }
@@ -10333,13 +10402,22 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
 
         if (historyQueueOpponent != 0) {
             weight *= row.accountId == historyQueueOpponent ? 4.2 : 0.68;
+            if (row.accountId == historyQueueOpponent) {
+                ++sourceVotes;
+            }
         }
 
         if (invaderOrderOpponent != 0 &&
             invaderOrderOpponent != historyQueueOpponent) {
             weight *= row.accountId == invaderOrderOpponent ? 3.4 : 0.74;
+            if (row.accountId == invaderOrderOpponent) {
+                ++sourceVotes;
+            }
         } else if (historyQueueOpponent == 0 && roundRobinOpponent != 0) {
             weight *= row.accountId == roundRobinOpponent ? 2.2 : 0.86;
+            if (row.accountId == roundRobinOpponent) {
+                ++sourceVotes;
+            }
         }
 
         int recentSelfMeetings = std::max(
@@ -10353,6 +10431,17 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         );
         row.recentMeetings = recentSelfMeetings;
 
+        bool inRecentCycle = ContainsAccountId(recentCycleOpponents, row.accountId);
+        if (!recentCycleOpponents.empty() &&
+            recentCycleOpponents.size() < aliveOpponentCount) {
+            weight *= inRecentCycle ? 0.58 : 1.85;
+            if (!inRecentCycle) {
+                ++sourceVotes;
+            }
+        } else if (inRecentCycle && recentSelfMeetings > 0) {
+            weight *= 0.82;
+        }
+
         if (recentSelfScore >= 1.60) {
             weight *= 0.38;
         } else if (recentSelfScore >= 0.85) {
@@ -10361,6 +10450,10 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
             weight *= 0.78;
         } else {
             weight *= 1.15;
+        }
+
+        if (sourceVotes >= 2) {
+            weight *= 1.0 + (std::min(sourceVotes, 5) * 0.16);
         }
 
         row.weight = std::max(weight, 0.0);
@@ -10405,6 +10498,67 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
     return rows;
 }
 
+// Keeps prediction display order stable while cached rows are reused across frames.
+void SortOpponentPredictionRows(std::vector<OpponentPredictionRow>& rows) {
+    std::sort(
+        rows.begin(),
+        rows.end(),
+        [](const OpponentPredictionRow& left, const OpponentPredictionRow& right) {
+            if (left.percent != right.percent) {
+                return left.percent > right.percent;
+            }
+
+            if (left.name != right.name) {
+                return left.name < right.name;
+            }
+
+            return left.accountId < right.accountId;
+        }
+    );
+}
+
+// Rebuilds the expensive prediction table only on the throttled feature tick.
+bool RefreshCachedOpponentPredictionRows(
+    uint64_t selfAccountId,
+    std::chrono::steady_clock::time_point now,
+    bool force
+) {
+    bool accountChanged = PredictionCache::CachedRowsSelfAccountId != selfAccountId;
+
+    if (accountChanged) {
+        PredictionCache::CachedRows.clear();
+        PredictionCache::CachedRowsReady = false;
+        PredictionCache::CachedRowsSelfAccountId = selfAccountId;
+        PredictionCache::LastRowsRefresh = {};
+    }
+
+    if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        PredictionCache::CachedRows.clear();
+        PredictionCache::CachedRowsReady = false;
+        PredictionCache::LastRowsRefresh = now;
+        return false;
+    }
+
+    if (!force &&
+        PredictionCache::CachedRowsReady &&
+        now - PredictionCache::LastRowsRefresh <
+            std::chrono::milliseconds(RuntimeConfig::OpponentPredictionTickMs)) {
+        return false;
+    }
+
+    PredictionCache::CachedRows = BuildOpponentPredictions(selfAccountId);
+    SortOpponentPredictionRows(PredictionCache::CachedRows);
+    PredictionCache::CachedRowsReady = true;
+    PredictionCache::CachedRowsSelfAccountId = selfAccountId;
+    PredictionCache::LastRowsRefresh = now;
+    return true;
+}
+
+// Returns the last tick-built prediction rows without touching managed state.
+const std::vector<OpponentPredictionRow>& GetCachedOpponentPredictionRows() {
+    return PredictionCache::CachedRows;
+}
+
 std::string BuildNextEnemyHudText(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
         return "Next enemy: Waiting";
@@ -10440,7 +10594,7 @@ std::string BuildNextEnemyHudText(uint64_t selfAccountId) {
         return "Next enemy: Waiting";
     }
 
-    std::vector<OpponentPredictionRow> rows = BuildOpponentPredictions(selfAccountId);
+    const std::vector<OpponentPredictionRow>& rows = GetCachedOpponentPredictionRows();
     auto best = std::max_element(
         rows.begin(),
         rows.end(),
@@ -10515,23 +10669,13 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
         return;
     }
 
-    std::vector<OpponentPredictionRow> rows = BuildOpponentPredictions(selfAccountId);
+    (void)selfAccountId;
 
-    std::sort(
-        rows.begin(),
-        rows.end(),
-        [](const OpponentPredictionRow& left, const OpponentPredictionRow& right) {
-            if (left.percent != right.percent) {
-                return left.percent > right.percent;
-            }
-
-            if (left.name != right.name) {
-                return left.name < right.name;
-            }
-
-            return left.accountId < right.accountId;
-        }
-    );
+    const std::vector<OpponentPredictionRow>& rows = GetCachedOpponentPredictionRows();
+    if (!PredictionCache::CachedRowsReady) {
+        DrawWaitingText("Waiting for prediction refresh");
+        return;
+    }
 
     if (rows.empty()) {
         ImGui::TextUnformatted("No players found");

@@ -43,6 +43,11 @@ of volatile meta instructions. Current public context checked on 2026-05-17:
 - Public video and guide material is useful for observing UI flow, economy,
   shop refreshes, board placement, Commander/Card choices, and common meta
   vocabulary, but seasonal lineups and tier claims are not stable native facts.
+- Public positioning and scouting guides emphasize adapting to the opponents'
+  boards, while older Magic Chess pairing discussion describes a turn-like
+  opponent order where recent opponents are deprioritized until the cycle
+  advances. Treat that as a prediction heuristic only; live runtime pair data,
+  invader-order reads, and local opponent history remain stronger evidence.
 
 Engineering takeaway: prefer documenting stable runtime surfaces such as battle
 managers, player economy, shop panel state, round manager state, Commander and
@@ -155,6 +160,11 @@ and GogoCard lists should render through clipping or another visible-row pattern
 so scrolling a loaded table does not process every row every frame. Table cache
 loading should run only when a table-backed tab or active automation actually
 needs the data.
+
+Opponent prediction should not rebuild managed prediction rows from the draw
+path. Reuse the 500 ms prediction tick, keep live current-opponent observations
+highest priority, then combine invader order, recent opponent cycle learning,
+round-robin fallback, and per-player history as weaker signals.
 
 Auto-Play temporarily owns selected Shop, Arena, and Combat assists through its
 policy backup while enabled. If a change touches those assist toggles, preserve

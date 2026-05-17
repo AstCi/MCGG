@@ -48,6 +48,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   merging, deploying, and repositioning MLBB-inspired heroes while managing
   gold, level, population, HP, equipment, synergies, Commander skills, Go Go
   Cards, auctions, and round supplies.
+- Public positioning/scouting guides and video posts reinforce that opponent
+  board reads matter, while older Magic Chess pairing discussion points to a
+  rotating opponent order that deprioritizes recent opponents. Use that only as
+  a heuristic beneath live runtime pair observations and dump-backed invader
+  reads.
 - The Google Play listing was updated on 2026-01-09 and references live content
   such as Alice, Battle Night, GO1 event content, and Layla seasonal cosmetics.
   Treat those as current public context, not stable binding assumptions.
@@ -105,6 +110,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   rows with `ImGuiListClipper` rather than walking every row each frame.
 - Auto-Play owns selected Shop, Arena, and Combat assist settings through a backup while it is active; preserve capture/restore semantics.
 - Opponent prediction may display exact data and weighted guesses together. Only the exact local current opponent should be forced to `100%`.
+- Opponent prediction rows should be built on the throttled 500 ms feature tick,
+  not inside the ImGui draw path. Weight live current-opponent data first, then
+  invader order, recent-cycle learning, round-robin fallback, and history.
 - SpeedHack changes global Unity time scale and must reset to `1.0x` when disabled, when battle state is unavailable, or when feature state resets.
 - Repository-wide documentation work should update the top-level Markdown files only: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md`, and `README.id.md`. Leave `goal.md` and submodule Markdown untouched.
 
@@ -128,6 +136,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   IL2CPP/static helpers for static fields or cases that need runtime-managed
   setter behavior.
 - **HUD diagnostics**: Keep the next-enemy HUD as lightweight foreground text near the bottom center. Reuse throttled prediction/current-opponent data and avoid rebuilding prediction tables every render frame.
+- **Outside comments**: Keep external boundary functions, hooks, and top-level
+  runtime helpers documented with concise comments that explain their contract
+  or safety boundary, not line-by-line narration.
 - **Test diagnostics**: Keep Test additions read-only unless explicitly requested otherwise, and verify class names, method names, parameter counts, return types, and fields against `dump/dump.cs`.
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.
 - **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Wait for non-delayed, non-spectate, operable shop panel state before buy or refresh UI calls. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.

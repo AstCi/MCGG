@@ -220,6 +220,13 @@ they are backed by `dump/dump.cs` and live runtime verification.
 
 Feature bindings are resolved against local reference artifacts and runtime IL2CPP metadata. Missing methods and fields are retried periodically instead of being permanently cached as unavailable. When a binding is not ready, the overlay reports a `Waiting for ...` state.
 
+Opponent prediction combines runtime sources before public heuristics. Live
+current-opponent observations and reverse pair reads remain strongest, followed
+by dump-backed invader ordering, learned recent-opponent cycles, round-robin
+fallback, and bounded history weights. Prediction rows are cached on the 500 ms
+feature cadence so the Test tab and next-enemy HUD do not rebuild managed state
+every render frame.
+
 ## Architecture
 
 MCGG is organized around a small native runtime layer that coordinates Unity, IL2CPP, rendering, input forwarding, and feature binding.
@@ -286,6 +293,8 @@ The current runtime cadence is intentionally split by responsibility:
 - Auto-Play smart formation cooldown: 1000 ms.
 - Opponent prediction history tick: 500 ms.
 - Next-enemy HUD text refresh: 500 ms while the HUD is enabled.
+- Cached opponent prediction row refresh: 500 ms while the Test tab or
+  next-enemy HUD needs prediction data.
 
 Field metadata misses are also retried with a short backoff. This keeps late
 Unity metadata retryable without letting missing field lookups rescan every
@@ -556,6 +565,8 @@ the following bug-prone areas:
   `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
   `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, and
   `prevRealPlayerEnemy` before falling back to heuristic ordering.
+- Public scouting and positioning guides support recent-cycle and board-read
+  heuristics, but they should not override exact runtime current-opponent data.
 - Keep Test diagnostics read-only unless a task explicitly requests an action,
   and verify each added binding against `dump/dump.cs`.
 - Keep the main overlay accessible on mobile displays while preserving the

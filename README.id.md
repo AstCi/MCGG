@@ -225,6 +225,13 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 
 Feature binding di-resolve terhadap local reference artifacts dan metadata IL2CPP runtime. Method dan field yang belum tersedia akan dicoba ulang secara periodik, bukan langsung disimpan permanen sebagai unavailable. Jika binding belum siap, overlay akan menampilkan status `Waiting for ...`.
 
+Prediksi opponent menggabungkan sumber runtime sebelum heuristik publik.
+Observasi current-opponent live dan reverse pair tetap paling kuat, lalu urutan
+invader berbasis dump, pembelajaran siklus opponent terbaru, fallback
+round-robin, dan bobot riwayat yang dibatasi. Row prediksi di-cache pada cadence
+500 ms agar tab Test dan HUD next-enemy tidak membangun ulang state managed pada
+setiap render frame.
+
 ## Arsitektur
 
 MCGG disusun sebagai native runtime layer kecil yang mengoordinasikan Unity, IL2CPP, rendering, input forwarding, dan feature binding.
@@ -291,6 +298,8 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 - Cooldown smart formation Auto-Play: 1000 ms.
 - Tick riwayat prediksi opponent: 500 ms.
 - Refresh teks HUD next-enemy: 500 ms saat HUD aktif.
+- Refresh cache row prediksi opponent: 500 ms saat tab Test atau HUD next-enemy
+  membutuhkan data prediksi.
 
 Miss metadata field juga dicoba ulang dengan backoff singkat. Ini menjaga
 metadata Unity yang terlambat tetap retryable tanpa membiarkan lookup field yang
@@ -572,6 +581,9 @@ area yang rawan bug berikut:
   seperti `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
   `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, dan
   `prevRealPlayerEnemy` sebelum fallback ke urutan heuristik.
+- Guide publik tentang scouting dan positioning mendukung heuristik siklus
+  terbaru dan board-read, tetapi tidak boleh mengalahkan data runtime exact
+  current-opponent.
 - Pertahankan diagnostik Test sebagai read-only kecuali task secara eksplisit
   meminta aksi, dan verifikasi setiap binding tambahan terhadap `dump/dump.cs`.
 - Jaga overlay utama tetap mudah diakses pada display mobile sambil

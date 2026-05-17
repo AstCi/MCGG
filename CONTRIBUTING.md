@@ -55,6 +55,10 @@ git lfs pull
   MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
   skills, Go Go Cards, economy/interest decisions, synergies, equipment,
   auctions, board placement, and round-specific supplies.
+- Prediction research should treat public scouting and positioning advice as
+  weak heuristics. Runtime current-opponent data, invader order, recent-cycle
+  learning, and local history should drive predictions before any generic
+  internet or video-derived assumption.
 - Preserve the current startup order: process gate, setup thread, early
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `UnityEngine.Input.GetTouch` hook, then lazy render-thread
@@ -202,6 +206,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
 - Keep table cache loading demand-driven. Unrelated tabs should not repeatedly
   perform heavy table scans, and long Shop/Arena table views should use visible
   row clipping.
+- Keep opponent prediction table rows cached on the 500 ms prediction cadence.
+  Drawing the Test tab or next-enemy HUD should reuse cached rows instead of
+  rebuilding managed prediction state every render frame.
 
 ## Runtime Audit Checklist
 
@@ -220,6 +227,9 @@ Use this checklist when looking for hidden bugs or logic flaws:
   ready or the render thread has not attached.
 - Confirm render-frame budget checks still let delayed work retry on later
   frames and do not turn retryable runtime state into a one-shot failure.
+- Confirm prediction changes preserve the source priority: exact live pair,
+  reverse live pair, invader-order read, recent-cycle queue, round-robin
+  fallback, and only then generic history weighting.
 - Keep method misses retryable and field misses backed off rather than
   permanently cached as unavailable.
 - Treat table caches as all-or-nothing for heroes, equipment, and GogoCards.
