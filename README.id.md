@@ -147,8 +147,12 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
   item, reward hero/equipment, dan special upgrade effect sebelum menawar opsi
   bernilai tertinggi secara terbatas.
 - Startup built-in AI bersifat stateful dan memakai cooldown: `StartAI` tidak
-  dipanggil terus-menerus untuk account yang sama, dan `StopAI` dipanggil saat
-  Auto-Play dimatikan atau snapshot battle live belum dapat dipakai.
+  dipanggil terus-menerus untuk account yang sama, refresh dengan interval
+  panjang dapat memulai ulang state AI internal yang terlepas, dan `StopAI`
+  dipanggil saat Auto-Play dimatikan atau snapshot battle live belum dapat
+  dipakai.
+- Built-in deploy dan smart formation memakai cooldown terpisah sehingga
+  movement board tidak dapat menahan `TryAutoDeploy`.
 - Kontrol opsional untuk built-in battle AI, shop, economy, combat power, arena
   assist, smart formation, auction scoring, dan GogoCard scoring.
 
@@ -213,6 +217,9 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Readout runtime bertab untuk kesiapan binding, round state, identitas player,
   rank, ekonomi, state shop, field battle manager, state battle bridge, state
   panel shop, state behavior API, dan seluruh manager entry.
+- Kesiapan diagnostik shop digabung dari reader diagnostik shop inti; setiap
+  row shop tetap menampilkan `Waiting` saat reader khusus row tersebut belum
+  tersedia.
 
 Feature binding di-resolve terhadap local reference artifacts dan metadata IL2CPP runtime. Method dan field yang belum tersedia akan dicoba ulang secara periodik, bukan langsung disimpan permanen sebagai unavailable. Jika binding belum siap, overlay akan menampilkan status `Waiting for ...`.
 
@@ -252,7 +259,9 @@ Auto-Play memakai model tick terbatas yang sama dengan fitur runtime lain. Fitur
 ini mengumpulkan snapshot lokal terlebih dahulu, membangun satu gold-interest
 plan, menilai opsi strategy/formation/shop/card/auction dari data lokal, hanya
 mem-publish counter ringkas dan selected target di bawah `FeatureMutex`, dan
-menghindari lock proyek saat memanggil API IL2CPP managed.
+menghindari lock proyek saat memanggil API IL2CPP managed. Built-in deploy dan
+smart formation memakai cooldown terpisah di dalam tick 250 ms, dan `StartAI`
+tetap stateful dengan hanya refresh interval panjang untuk recovery.
 
 Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 
@@ -264,6 +273,10 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 - Tick automation Shop: 100 ms.
 - Tick Combat power: 250 ms.
 - Tick Auto-Play: 250 ms.
+- Retry start AI Auto-Play: 2000 ms.
+- Refresh AI Auto-Play: 8000 ms.
+- Cooldown built-in deploy Auto-Play: 750 ms.
+- Cooldown smart formation Auto-Play: 1000 ms.
 - Tick riwayat prediksi opponent: 500 ms.
 - Refresh teks HUD next-enemy: 500 ms saat HUD aktif.
 
@@ -454,7 +467,9 @@ Pada saat load dan selama frame presentation, `jni/Main.cpp` menjalankan urutan 
 10. Diagnostik Info, Shop, Arena, Auto-Play, HUD Settings, dan Test hanya
     me-refresh data runtime yang dibutuhkan.
 11. Auto-Play, Arena, Shop, Combat, dan riwayat opponent berjalan pada tick
-    bounded masing-masing, bukan pada setiap render pass.
+    bounded masing-masing, bukan pada setiap render pass; Auto-Play menjaga
+    cooldown built-in deploy, smart formation, refresh AI, level-up, dan auction
+    tetap independen.
 12. Input touch Unity diteruskan ke input mouse ImGui melalui path hook
     `GetTouch`.
 
@@ -620,6 +635,8 @@ Saat menelusuri masalah penggunaan terus-menerus, verifikasi:
 
 - Binding shop select dan shop automation sudah siap.
 - Panel shop refresh sudah siap saat auto-refresh aktif.
+- Diagnostik shop siap saat minimal satu reader diagnostik shop inti tersedia;
+  nilai shop individual yang belum punya reader tetap menampilkan `Waiting`.
 - Panel shop operable: tidak delay, tidak dalam state refresh spectate, dan
   diterima oleh `UIPanelBattleHeroShop.CanOperate(Boolean)`.
 - Binding Recommendation Lineup sudah siap saat recommendation buying atau pause-refresh aktif.

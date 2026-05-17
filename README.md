@@ -144,8 +144,11 @@ they are backed by `dump/dump.cs` and live runtime verification.
   data, hero/equipment rewards, and special upgrade effects before placing a
   bounded bid on the highest-value option.
 - Built-in AI startup is stateful and cooldown-gated: `StartAI` is not replayed
-  continuously for the same account, and `StopAI` is called when Auto-Play is
-  disabled or the live battle snapshot is no longer actionable.
+  continuously for the same account, a long-gated refresh can restart dropped
+  internal AI state, and `StopAI` is called when Auto-Play is disabled or the
+  live battle snapshot is no longer actionable.
+- Built-in deployment and smart formation use separate cooldown clocks so board
+  movement cannot starve `TryAutoDeploy`.
 - Optional controls for built-in battle AI, shop, economy, combat power, arena
   assists, smart formation, auction scoring, and GogoCard scoring.
 
@@ -209,6 +212,9 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Tabbed runtime readouts for binding readiness, round state, player identity,
   rank, economy, shop state, battle manager fields, battle bridge state, shop
   panel state, behavior API state, and all manager entries.
+- Shop diagnostic readiness is grouped across core shop diagnostic readers; each
+  individual shop row still reports `Waiting` when its specific reader is not
+  available.
 
 Feature bindings are resolved against local reference artifacts and runtime IL2CPP metadata. Missing methods and fields are retried periodically instead of being permanently cached as unavailable. When a binding is not ready, the overlay reports a `Waiting for ...` state.
 
@@ -248,7 +254,9 @@ Auto-Play uses the same bounded tick model as the other runtime features. It
 gathers local snapshots first, builds one gold-interest plan, scores
 strategy/formation/shop/card/auction options from local data, publishes only
 compact counters and selected targets under `FeatureMutex`, and avoids holding
-project locks while calling managed IL2CPP APIs.
+project locks while calling managed IL2CPP APIs. Built-in deploy and smart
+formation use separate cooldowns inside the 250 ms tick, and `StartAI` remains
+stateful with only a long refresh interval for recovery.
 
 The current runtime cadence is intentionally split by responsibility:
 
@@ -260,6 +268,10 @@ The current runtime cadence is intentionally split by responsibility:
 - Shop automation tick: 100 ms.
 - Combat power tick: 250 ms.
 - Auto-Play tick: 250 ms.
+- Auto-Play AI start retry: 2000 ms.
+- Auto-Play AI refresh: 8000 ms.
+- Auto-Play built-in deploy cooldown: 750 ms.
+- Auto-Play smart formation cooldown: 1000 ms.
 - Opponent prediction history tick: 500 ms.
 - Next-enemy HUD text refresh: 500 ms while the HUD is enabled.
 
@@ -449,7 +461,9 @@ At load time and during frame presentation, `jni/Main.cpp` performs the followin
 10. Active Info, Shop, Arena, Auto-Play, Settings HUD, and Test diagnostics
     refresh only the runtime data they need.
 11. Auto-Play, Arena, Shop, Combat, and opponent-history work run on their own
-    bounded ticks rather than in every render pass.
+    bounded ticks rather than in every render pass; Auto-Play keeps built-in
+    deploy, smart formation, AI refresh, level-up, and auction cooldowns
+    independent.
 12. Unity touch input is forwarded into ImGui mouse input through the hooked
     `GetTouch` path.
 
@@ -605,6 +619,8 @@ When investigating continuous-use issues, verify:
 
 - Shop select and shop automation bindings are ready.
 - Shop refresh panel is ready when auto-refresh is enabled.
+- Shop diagnostics are ready when at least one core shop diagnostic reader is
+  available; missing individual shop values should still show `Waiting`.
 - The shop panel is operable: not delayed, not in spectate refresh state, and
   accepted by `UIPanelBattleHeroShop.CanOperate(Boolean)`.
 - Recommendation Lineup bindings are ready when recommendation buying or pause-refresh is enabled.

@@ -55,9 +55,9 @@ git lfs pull
   stay behind readiness checks and successful render-thread IL2CPP attachment.
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, player economy/rank/shop state, battle manager
-  fields, battle bridge state, shop panel state, behavior API state, Auto-Play
-  state, auction state, GogoCard state, board formation state, and opponent
-  prediction behavior after feature changes.
+  fields, battle bridge state, shop panel state, shop diagnostic reader
+  readiness, behavior API state, Auto-Play state, auction state, GogoCard state,
+  board formation state, and opponent prediction behavior after feature changes.
 - In the Test prediction table, `Will fight` is the local player's opponent
   probability. Only the exact local current opponent should be forced to
   `100%`; other rows should stay weighted even when their `Current enemy`
@@ -79,8 +79,11 @@ git lfs pull
   in the Auto-Play gold plan so shop spending, auction bids, passive gold,
   free-economy assists, and level-up actions share the same reserve logic.
   Built-in AI startup should be stateful so `StartAI` is not replayed
-  continuously for the same account. Auto-Play should not enable or disable
-  Arena SpeedHack; SpeedHack remains an explicit Arena control.
+  continuously for the same account, with only a long-gated refresh to recover
+  dropped internal AI state. Keep built-in deployment and smart formation on
+  separate cooldowns so formation movement cannot starve `TryAutoDeploy`.
+  Auto-Play should not enable or disable Arena SpeedHack; SpeedHack remains an
+  explicit Arena control.
 - Auto-Play depends on dump-backed bindings for
   `MCLogicBattleManager.StartAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
   `GetLineupWorth`, `CalcCurrentFightValue`,
@@ -132,6 +135,8 @@ Test diagnostics are split into tabbed sections for prediction, bindings, round
 state, player data, battle managers, battle bridge, shop UI, behavior API, and
 all-manager views. New user-facing controls should report delayed runtime
 dependencies with a clear `Waiting for ...` state where practical.
+Shop diagnostics use grouped readiness over core shop diagnostic readers; each
+individual row should still show `Waiting` while its specific reader is missing.
 
 ## Threading and Shared State
 
@@ -174,6 +179,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
 - Keep runtime cadence split by responsibility: 100 ms for Shop and Arena,
   250 ms for Combat and Auto-Play, and 500 ms for opponent prediction history
   and the next-enemy HUD refresh.
+- Preserve Auto-Play's sub-cooldowns inside that 250 ms tick: stateful
+  `StartAI`, long-gated AI refresh, built-in deploy, separate smart formation,
+  level-up, and auction actions should not share one retry clock.
 
 ## Runtime Audit Checklist
 
@@ -194,6 +202,8 @@ Use this checklist when looking for hidden bugs or logic flaws:
   unavailable.
 - Keep shop buy and refresh actions gated on the live shop panel being
   non-delayed, non-spectate, and accepted by `CanOperate(Boolean)`.
+- Keep shop diagnostics tied to grouped reader readiness instead of a single
+  shop stat binding, and keep per-value Test rows individually retryable.
 - Preserve Auto-Play policy backup and restore behavior for Shop, Arena, and
   Combat assist toggles.
 - Keep opponent prediction exactness narrow: only the local player's exact

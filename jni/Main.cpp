@@ -164,7 +164,9 @@ namespace RuntimeConfig {
     constexpr int RecommendLineupCheckMs = 500;
     constexpr int ArenaSkipCooldownMs = 750;
     constexpr int AutoPlayAiStartCooldownMs = 2000;
+    constexpr int AutoPlayAiRefreshMs = 8000;
     constexpr int AutoPlayDeployCooldownMs = 750;
+    constexpr int AutoPlayFormationCooldownMs = 1000;
     constexpr int AutoPlayLevelCooldownMs = 900;
     constexpr int AutoPlayAuctionCooldownMs = 750;
     constexpr int MaxShopTargetChecks = 256;
@@ -325,6 +327,7 @@ namespace FeatureState {
     std::chrono::steady_clock::time_point LastArenaSkipAttempt{};
     std::chrono::steady_clock::time_point LastAutoPlayAiStartAttempt{};
     std::chrono::steady_clock::time_point LastAutoPlayDeployAttempt{};
+    std::chrono::steady_clock::time_point LastAutoPlayFormationAttempt{};
     std::chrono::steady_clock::time_point LastAutoPlayLevelAttempt{};
     std::chrono::steady_clock::time_point LastAutoPlayAuctionAttempt{};
     std::atomic<bool> CachedShopHasWorthwhileTarget{false};
@@ -3252,6 +3255,11 @@ void ClearTableDataCacheUnlocked() {
     FeatureState::LastShopWorthCheck = {};
     FeatureState::LastRecommendLineupCheck = {};
     FeatureState::LastArenaSkipAttempt = {};
+    FeatureState::LastAutoPlayAiStartAttempt = {};
+    FeatureState::LastAutoPlayDeployAttempt = {};
+    FeatureState::LastAutoPlayFormationAttempt = {};
+    FeatureState::LastAutoPlayLevelAttempt = {};
+    FeatureState::LastAutoPlayAuctionAttempt = {};
     FeatureState::ArenaLastSkipSourceRound = 0;
     FeatureState::ArenaLastSkipTargetRound = 0;
     FeatureState::CachedGameRound = 0;
@@ -5131,8 +5139,8 @@ bool TryAutoPlaySmartFormation(
         snapshot.fightSection ||
         !Originals::MCLogicBattleManager_MoveHeroInBattleField ||
         !CooldownElapsed(
-            FeatureState::LastAutoPlayDeployAttempt,
-            RuntimeConfig::AutoPlayDeployCooldownMs,
+            FeatureState::LastAutoPlayFormationAttempt,
+            RuntimeConfig::AutoPlayFormationCooldownMs,
             now
         )) {
         return false;
@@ -5200,7 +5208,7 @@ bool TryAutoPlaySmartFormation(
         static_cast<uint8_t>(bestTarget.y),
         true
     );
-    FeatureState::LastAutoPlayDeployAttempt = now;
+    FeatureState::LastAutoPlayFormationAttempt = now;
     FeatureState::AutoPlayBoardMoves =
         std::min(FeatureState::AutoPlayBoardMoves.load() + 1, 999999);
     FeatureState::AutoPlayLastMoveHeroId = bestUnit->heroId;
@@ -6071,17 +6079,25 @@ void RunBuiltInAutoPlayAI(
         return;
     }
 
-    bool needsStart =
-        !FeatureState::AutoPlayBuiltInAiRunning.load() ||
-        FeatureState::AutoPlayLastAiStartAccountId.load() != selfAccountId;
+    uint64_t lastAiAccountId = FeatureState::AutoPlayLastAiStartAccountId.load();
+    bool aiRunningForAccount =
+        FeatureState::AutoPlayBuiltInAiRunning.load() &&
+        lastAiAccountId == selfAccountId;
+    bool needsStart = !aiRunningForAccount;
+    bool startCooldownElapsed = CooldownElapsed(
+        FeatureState::LastAutoPlayAiStartAttempt,
+        RuntimeConfig::AutoPlayAiStartCooldownMs,
+        now
+    );
+    bool refreshCooldownElapsed = CooldownElapsed(
+        FeatureState::LastAutoPlayAiStartAttempt,
+        RuntimeConfig::AutoPlayAiRefreshMs,
+        now
+    );
 
     if (Originals::MCLogicBattleManager_StartAI &&
-        needsStart &&
-        CooldownElapsed(
-            FeatureState::LastAutoPlayAiStartAttempt,
-            RuntimeConfig::AutoPlayAiStartCooldownMs,
-            now
-        )) {
+        ((needsStart && startCooldownElapsed) ||
+         (!needsStart && refreshCooldownElapsed))) {
         int difficulty = std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
         FeatureState::AutoPlayAiDifficulty = difficulty;
         Originals::MCLogicBattleManager_StartAI(selfManager, difficulty);
@@ -6218,8 +6234,8 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     ApplyAutoPlayShopTargets(plan, snapshot);
     ApplyAutoPlayGoGoCardChoice(snapshot, plan);
     TryAutoPlayAuction(snapshot, plan, goldPlan, now);
-    TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
     RunBuiltInAutoPlayAI(selfAccountId, snapshot, now);
+    TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
     TryAutoPlayLevelUp(snapshot, goldPlan, now);
     FeatureState::AutoPlayWasRunning = true;
 }
@@ -6802,6 +6818,11 @@ void ResetFeatureSettings() {
     FeatureState::AutoPlayLastHp = -1;
     FeatureState::AutoPlayBuiltInAiRunning = false;
     FeatureState::AutoPlayLastAiStartAccountId = 0;
+    FeatureState::LastAutoPlayAiStartAttempt = {};
+    FeatureState::LastAutoPlayDeployAttempt = {};
+    FeatureState::LastAutoPlayFormationAttempt = {};
+    FeatureState::LastAutoPlayLevelAttempt = {};
+    FeatureState::LastAutoPlayAuctionAttempt = {};
     FeatureState::AutoPlayFocusGroup = 0;
     FeatureState::AutoPlayTargetHeroId = 0;
     FeatureState::AutoPlayBestCardId = 0;
@@ -7658,6 +7679,7 @@ bool HasShopSelectBinding();
 bool HasShopAutomationBindings();
 bool HasShopRefreshBindings();
 bool HasShopRecommendLineupBindings();
+bool HasShopDiagnosticBindings();
 bool HasCombatPowerBindings();
 bool HasArenaHeroBindings();
 bool HasArenaItemBindings();
@@ -7885,6 +7907,7 @@ void DrawRuntimeStatus() {
         DrawStatusRow("Shop automation", HasShopAutomationBindings());
         DrawStatusRow("Recommend lineup", HasShopRecommendLineupBindings());
         DrawStatusRow("Shop refresh panel", HasShopRefreshBindings());
+        DrawStatusRow("Shop diagnostics", HasShopDiagnosticBindings());
         DrawStatusRow("Battle power", HasCombatPowerBindings());
         DrawStatusRow("Arena heroes", HasArenaHeroBindings());
         DrawStatusRow("Arena items", HasArenaItemBindings());
@@ -8034,6 +8057,18 @@ bool HasShopRecommendLineupBindings() {
         (Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup ||
          (FeatureState::BattleBridge &&
           Originals::MCBattleBridge_IsHeroInRecommendLineup));
+}
+
+bool HasShopDiagnosticBindings() {
+    return IsIl2CppRuntimeReady() &&
+        (Originals::MCLogicBattleData_ILOGIC_GetShopIsForbid ||
+         Originals::MCLogicBattleData_ILOGIC_IsRefreshFree ||
+         Originals::MCLogicBattleData_ILOGIC_GetShopStarLv ||
+         Originals::MCLogicBattleData_ILOGIC_GetShopRuleBuyTimes ||
+         Originals::MCLogicBattleData_GetFreeFreshShopCount ||
+         Originals::MCLogicBattleData_ILOGIC_GetCurRefreshShopLevel ||
+         Originals::MCLogicBattleData_ILOGIC_GetHeroItemCount ||
+         Originals::MCLogicBattleData_ILOGIC_GetHeroSlotDict_Count);
 }
 
 bool HasCombatPowerBindings() {
@@ -8692,7 +8727,7 @@ void DrawTestBindingRows() {
     DrawStatusRow("Lineup scoring", Originals::MCLogicBattleManager_GetLineupWorth);
     DrawStatusRow("Smart formation", Originals::MCLogicBattleManager_MoveHeroInBattleField);
     DrawStatusRow("Auction scoring", Originals::MCLogicAuctionComp_Bid);
-    DrawStatusRow("Shop diagnostics", Originals::MCLogicBattleData_ILOGIC_GetShopStarLv);
+    DrawStatusRow("Shop diagnostics", HasShopDiagnosticBindings());
     DrawStatusRow("Hero counts", Originals::MCLogicBattleData_ILOGIC_GetBattleHeroNum);
     DrawStatusRow("Result history", Originals::MCLogicBattleData_ILOGIC_GetBattleResultHistory);
     DrawStatusRow(

@@ -23,9 +23,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → setup thread → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Field misses use a short retry backoff so hot feature paths do not rescan missing metadata every frame.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, deployment/formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
+- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
-- **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
+- **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects.
@@ -59,7 +59,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   threat and ally cover, scores GogoCards, scores auction bids, protects 10-gold
   interest breakpoints through a shared reserve/spend budget plan, and can
   coordinate existing shop/economy/combat/arena assist controls. It does not
-  control Arena SpeedHack.
+  control Arena SpeedHack. Built-in deploy and smart formation use separate
+  cooldown clocks, and `StartAI` may be refreshed only on a long interval to
+  recover if the game drops its internal AI state.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
 - **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, and save/load configuration, including Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and shop-panel operability gates before buy/refresh UI actions.
@@ -110,8 +112,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   table/target helpers. Keep opponent scans bounded to the battle manager
   dictionary limit, keep board placement to one move per cooldown, keep shop,
   auction, passive-gold, free-economy, and level-up decisions on the shared
-  gold plan, keep built-in AI startup stateful, keep SpeedHack as a manual
-  Arena-only control, and never hold `FeatureMutex` while calling managed IL2CPP APIs.
+  gold plan, keep built-in AI startup stateful with only a long-gated refresh,
+  keep built-in deploy and smart formation cooldowns separate, keep SpeedHack
+  as a manual Arena-only control, and never hold `FeatureMutex` while calling
+  managed IL2CPP APIs.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,

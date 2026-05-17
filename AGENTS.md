@@ -128,11 +128,13 @@ level-up, and auction cooldowns. The controller should read runtime state throug
 `CollectAutoPlayBoardUnits()`, score strategy and formation with
 `BuildAutoPlayBoardPlan()`, and publish selected shop targets through the
 existing target helpers. Keep opponent scans bounded to the battle manager
-dictionary limit, keep battlefield movement to one chosen action per cooldown,
+dictionary limit, keep built-in deploy and smart formation on separate cooldowns,
+keep battlefield movement to one chosen action per formation cooldown,
 keep shop, auction, passive-gold, free-economy, and level-up decisions aligned
 with the shared gold plan, keep built-in AI startup stateful instead of replaying
-`StartAI` on every cooldown, keep SpeedHack as an explicit Arena-only control,
-and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
+`StartAI` on every tick, allow only a long-gated `StartAI` refresh to recover
+from dropped internal AI state, keep SpeedHack as an explicit Arena-only
+control, and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
 
 Auto-Play temporarily owns selected Shop, Arena, and Combat assists through its
 policy backup while enabled. If a change touches those assist toggles, preserve
@@ -226,10 +228,13 @@ bypass helpers, Skip Round, and SpeedHack. Use the Runtime Status and Test tabs
 when checking binding
 readiness, managed references, round state, round-manager state, timeScale
 binding readiness, player economy/rank/shop state, battle manager fields, battle
-bridge state, shop panel state, behavior API state, Recommendation Lineup state,
-Auto-Play state, auction state, GogoCard state, board formation state, or
-opponent prediction logic. Test
+bridge state, shop panel state, shop diagnostic reader readiness, behavior API
+state, Recommendation Lineup state, Auto-Play state, auction state, GogoCard
+state, board formation state, or opponent prediction logic. Test
 diagnostics should stay read-only unless the task explicitly requests an action.
+Shop diagnostics are considered available when at least one core shop diagnostic
+reader has resolved; individual Test rows should keep showing `Waiting` for
+missing readers.
 In the Test prediction table, `Will fight` is the local player's opponent
 probability and `Current enemy` is the observed opponent for that row. Only the
 exact local current opponent should be forced to `100%`; do not mark every row
@@ -250,5 +255,6 @@ Settings config should default to the running game package directory as
 
 Known audit hotspots are early-render readiness, dump-backed signature drift,
 table cache all-or-nothing publication, shop panel operability before buy or
-refresh, Auto-Play policy ownership of assist toggles, exact-opponent-only
+refresh, grouped shop diagnostic readiness, Auto-Play policy ownership of assist
+toggles, separate Auto-Play deploy/formation cooldowns, exact-opponent-only
 `100%` prediction rows, and Unity timeScale reset paths.
