@@ -53,6 +53,9 @@ git lfs pull
   ImGui initialization.
 - The render hook can run before IL2CPP is ready. Frame-time managed work must
   stay behind readiness checks and successful render-thread IL2CPP attachment.
+- Keep frame-time managed work within the feature frame budget. If a frame is
+  already busy, defer noncritical ticks to the next frame instead of stacking
+  every automation path into one render pass.
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, player economy/rank/shop state, battle manager
   fields, battle bridge state, shop panel state, shop diagnostic reader
@@ -182,6 +185,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
 - Preserve Auto-Play's sub-cooldowns inside that 250 ms tick: stateful
   `StartAI`, long-gated AI refresh, built-in deploy, separate smart formation,
   level-up, and auction actions should not share one retry clock.
+- Keep table cache loading demand-driven. Unrelated tabs should not repeatedly
+  perform heavy table scans, and long Shop/Arena table views should use visible
+  row clipping.
 
 ## Runtime Audit Checklist
 
@@ -195,6 +201,8 @@ Use this checklist when looking for hidden bugs or logic flaws:
   resolution only checks method name, parameter count, and parameter-name shape.
 - Keep early-frame paths safe when `eglSwapBuffers` is hooked but IL2CPP is not
   ready or the render thread has not attached.
+- Confirm render-frame budget checks still let delayed work retry on later
+  frames and do not turn retryable runtime state into a one-shot failure.
 - Keep method misses retryable and field misses backed off rather than
   permanently cached as unavailable.
 - Treat table caches as all-or-nothing for heroes, equipment, and GogoCards.
@@ -204,6 +212,8 @@ Use this checklist when looking for hidden bugs or logic flaws:
   non-delayed, non-spectate, and accepted by `CanOperate(Boolean)`.
 - Keep shop diagnostics tied to grouped reader readiness instead of a single
   shop stat binding, and keep per-value Test rows individually retryable.
+- Keep long table UIs clipped and demand-load table caches only for table-backed
+  tabs or active automation that consumes table metadata.
 - Preserve Auto-Play policy backup and restore behavior for Shop, Arena, and
   Combat assist toggles.
 - Keep opponent prediction exactness narrow: only the local player's exact

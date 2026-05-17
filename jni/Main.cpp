@@ -157,6 +157,7 @@ namespace RuntimeConfig {
     constexpr int CombatTickMs = 250;
     constexpr int AutoPlayTickMs = 250;
     constexpr int OpponentPredictionTickMs = 500;
+    constexpr int FeatureFrameBudgetMs = 12;
     constexpr int ShopActionCooldownMs = 350;
     constexpr int ShopRepeatBuyCooldownMs = 1500;
     constexpr int ShopRefreshCooldownMs = 650;
@@ -1348,6 +1349,13 @@ bool CooldownElapsed(
 ) {
     return lastRun.time_since_epoch().count() == 0 ||
         now - lastRun >= std::chrono::milliseconds(intervalMs);
+}
+
+bool FrameBudgetExceeded(
+    const std::chrono::steady_clock::time_point& frameStart,
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()
+) {
+    return now - frameStart >= std::chrono::milliseconds(RuntimeConfig::FeatureFrameBudgetMs);
 }
 
 bool HasIl2CppDomainApi() {
@@ -3276,6 +3284,18 @@ void ClearTableDataCacheUnlocked() {
 void ClearTableDataCache() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     ClearTableDataCacheUnlocked();
+}
+
+bool ShouldLoadTableDataForFrame(int activeMainTab) {
+    if (FeatureState::TableDataLoaded.load()) {
+        return false;
+    }
+
+    return activeMainTab == MainTabAutoPlay ||
+        activeMainTab == MainTabShop ||
+        activeMainTab == MainTabArena ||
+        activeMainTab == MainTabTest ||
+        FeatureState::AutoPlayEnabled.load();
 }
 
 bool IsBattleActive(uint64_t selfAccountId) {
@@ -6477,15 +6497,33 @@ void TickFeatures() {
         return;
     }
 
+    auto frameStart = std::chrono::steady_clock::now();
+    auto now = frameStart;
+    int activeMainTab =
+        std::clamp(UiState::MainTabIndex.load(), 0, static_cast<int>(MainTabTest));
+
     RetryFeatureBindingsIfNeeded();
+    if (FrameBudgetExceeded(frameStart)) {
+        return;
+    }
+
     RefreshManagedReferences();
+    if (FrameBudgetExceeded(frameStart)) {
+        return;
+    }
 
     uint64_t selfAccountId = GetSelfAccountId();
     RefreshTableDataForMatch(selfAccountId);
-    EnsureTableDataLoaded();
-    auto now = std::chrono::steady_clock::now();
-    int activeMainTab =
-        std::clamp(UiState::MainTabIndex.load(), 0, static_cast<int>(MainTabTest));
+    if (FrameBudgetExceeded(frameStart)) {
+        return;
+    }
+
+    if (ShouldLoadTableDataForFrame(activeMainTab)) {
+        EnsureTableDataLoaded();
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
+    }
 
     if (selfAccountId == 0) {
         PublishAutoPlaySnapshotTelemetry(AutoPlaySnapshot{}, false);
@@ -6515,18 +6553,30 @@ void TickFeatures() {
 
     if (UiState::ShowNextEnemyHud.load()) {
         RefreshNextEnemyHudText(selfAccountId);
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
     }
 
     if (IntervalElapsed(FeatureState::LastAutoPlayTick, RuntimeConfig::AutoPlayTickMs, now)) {
         RunAutoPlay(selfAccountId, now);
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
     }
 
     if (IntervalElapsed(FeatureState::LastArenaTick, RuntimeConfig::ArenaTickMs, now)) {
         ApplyArenaState(selfAccountId);
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
     }
 
     if (IntervalElapsed(FeatureState::LastShopTick, RuntimeConfig::ShopTickMs, now)) {
         RunShopAutomation(selfAccountId);
+        if (FrameBudgetExceeded(frameStart)) {
+            return;
+        }
     }
 
     if (IntervalElapsed(FeatureState::LastCombatTick, RuntimeConfig::CombatTickMs, now)) {
@@ -10794,37 +10844,42 @@ void DrawShopTab() {
                 ImGui::TableSetupColumn("Track", ImGuiTableColumnFlags_WidthFixed, 80.0f);
                 ImGui::TableHeadersRow();
 
-                for (const HeroTableEntry& hero : heroes) {
-                    auto targetIt = shopTargets.find(hero.id);
-                    HeroAutomationState state =
-                        targetIt != shopTargets.end() ?
-                            targetIt->second :
-                            HeroAutomationState{};
-                    state.targetCount = std::clamp(state.targetCount, 1, 99);
-                    HeroAutomationState originalState = state;
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(heroes.size()));
+                while (clipper.Step()) {
+                    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                        const HeroTableEntry& hero = heroes[row];
+                        auto targetIt = shopTargets.find(hero.id);
+                        HeroAutomationState state =
+                            targetIt != shopTargets.end() ?
+                                targetIt->second :
+                                HeroAutomationState{};
+                        state.targetCount = std::clamp(state.targetCount, 1, 99);
+                        HeroAutomationState originalState = state;
 
-                    ImGui::PushID(hero.id);
-                    ImGui::TableNextRow();
+                        ImGui::PushID(hero.id);
+                        ImGui::TableNextRow();
 
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(hero.name.c_str());
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(hero.name.c_str());
 
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("%d", hero.quality);
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%d", hero.quality);
 
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::SetNextItemWidth(-1.0f);
-                    ImGui::InputInt("##target", &state.targetCount);
-                    state.targetCount = std::clamp(state.targetCount, 1, 99);
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::SetNextItemWidth(-1.0f);
+                        ImGui::InputInt("##target", &state.targetCount);
+                        state.targetCount = std::clamp(state.targetCount, 1, 99);
 
-                    ImGui::TableSetColumnIndex(3);
-                    ImGui::Checkbox("##selected", &state.selected);
-                    ImGui::PopID();
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Checkbox("##selected", &state.selected);
+                        ImGui::PopID();
 
-                    if (state.selected != originalState.selected ||
-                        state.targetCount != originalState.targetCount) {
-                        SetShopHeroTarget(hero.id, state);
-                        shopTargets[hero.id] = state;
+                        if (state.selected != originalState.selected ||
+                            state.targetCount != originalState.targetCount) {
+                            SetShopHeroTarget(hero.id, state);
+                            shopTargets[hero.id] = state;
+                        }
                     }
                 }
 
@@ -10879,20 +10934,25 @@ void DrawArenaTab() {
                 ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
-                for (const HeroTableEntry& hero : heroes) {
-                    ImGui::PushID(hero.id);
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(hero.name.c_str());
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("%d", hero.quality);
-                    ImGui::TableSetColumnIndex(2);
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(heroes.size()));
+                while (clipper.Step()) {
+                    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                        const HeroTableEntry& hero = heroes[row];
+                        ImGui::PushID(hero.id);
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(hero.name.c_str());
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%d", hero.quality);
+                        ImGui::TableSetColumnIndex(2);
 
-                    if (ImGui::Button("Spawn", ImVec2(-1.0f, 0.0f))) {
-                        GiveHero(hero.id, FeatureState::ArenaHeroStar.load());
+                        if (ImGui::Button("Spawn", ImVec2(-1.0f, 0.0f))) {
+                            GiveHero(hero.id, FeatureState::ArenaHeroStar.load());
+                        }
+
+                        ImGui::PopID();
                     }
-
-                    ImGui::PopID();
                 }
 
                 ImGui::EndTable();
@@ -10936,18 +10996,23 @@ void DrawArenaTab() {
                 ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
-                for (const EquipTableEntry& equip : equips) {
-                    ImGui::PushID(equip.id);
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(equip.name.c_str());
-                    ImGui::TableSetColumnIndex(1);
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(equips.size()));
+                while (clipper.Step()) {
+                    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                        const EquipTableEntry& equip = equips[row];
+                        ImGui::PushID(equip.id);
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(equip.name.c_str());
+                        ImGui::TableSetColumnIndex(1);
 
-                    if (ImGui::Button("Grant", ImVec2(-1.0f, 0.0f))) {
-                        GiveEquip(equip.id);
+                        if (ImGui::Button("Grant", ImVec2(-1.0f, 0.0f))) {
+                            GiveEquip(equip.id);
+                        }
+
+                        ImGui::PopID();
                     }
-
-                    ImGui::PopID();
                 }
 
                 ImGui::EndTable();
@@ -11004,35 +11069,40 @@ void DrawArenaTab() {
                 ImGui::TableSetupColumn("Card 2", ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
-                for (const CardTableEntry& card : cards) {
-                    int selectedCard1 = FeatureState::ArenaGogoCardSelected1.load();
-                    int selectedCard2 = FeatureState::ArenaGogoCardSelected2.load();
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(cards.size()));
+                while (clipper.Step()) {
+                    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                        const CardTableEntry& card = cards[row];
+                        int selectedCard1 = FeatureState::ArenaGogoCardSelected1.load();
+                        int selectedCard2 = FeatureState::ArenaGogoCardSelected2.load();
 
-                    ImGui::PushID(card.id);
-                    ImGui::TableNextRow();
+                        ImGui::PushID(card.id);
+                        ImGui::TableNextRow();
 
-                    if (card.id == selectedCard1 || card.id == selectedCard2) {
-                        ImGui::TableSetBgColor(
-                            ImGuiTableBgTarget_RowBg0,
-                            ImGui::GetColorU32(ImVec4(0.25f, 0.55f, 0.25f, 0.35f))
-                        );
+                        if (card.id == selectedCard1 || card.id == selectedCard2) {
+                            ImGui::TableSetBgColor(
+                                ImGuiTableBgTarget_RowBg0,
+                                ImGui::GetColorU32(ImVec4(0.25f, 0.55f, 0.25f, 0.35f))
+                            );
+                        }
+
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(card.name.c_str());
+                        ImGui::TableSetColumnIndex(1);
+
+                        if (ImGui::Button("Select##card1", ImVec2(-1.0f, 0.0f))) {
+                            FeatureState::ArenaGogoCardSelected1 = card.id;
+                        }
+
+                        ImGui::TableSetColumnIndex(2);
+
+                        if (ImGui::Button("Select##card2", ImVec2(-1.0f, 0.0f))) {
+                            FeatureState::ArenaGogoCardSelected2 = card.id;
+                        }
+
+                        ImGui::PopID();
                     }
-
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(card.name.c_str());
-                    ImGui::TableSetColumnIndex(1);
-
-                    if (ImGui::Button("Select##card1", ImVec2(-1.0f, 0.0f))) {
-                        FeatureState::ArenaGogoCardSelected1 = card.id;
-                    }
-
-                    ImGui::TableSetColumnIndex(2);
-
-                    if (ImGui::Button("Select##card2", ImVec2(-1.0f, 0.0f))) {
-                        FeatureState::ArenaGogoCardSelected2 = card.id;
-                    }
-
-                    ImGui::PopID();
                 }
 
                 ImGui::EndTable();

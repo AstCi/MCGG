@@ -100,6 +100,9 @@ resolution is name, parameter-count, and parameter-name-shape based; verify
 overload-sensitive changes against `dump/dump.cs`. Preserve the separate 100 ms
 shop and arena ticks, 250 ms Combat and Auto-Play ticks, and 500 ms opponent
 history/HUD cadence unless the task explicitly changes timing.
+Frame-time feature work is guarded by a small render budget; when a frame is
+already busy, lower-priority ticks should defer to the next frame instead of
+stacking managed calls into one render pass.
 
 Shared state is split across `RuntimeMutex::CacheMutex`,
 `RuntimeMutex::FeatureMutex`, and `RuntimeMutex::UiMutex`. Primitive feature
@@ -135,6 +138,12 @@ with the shared gold plan, keep built-in AI startup stateful instead of replayin
 `StartAI` on every tick, allow only a long-gated `StartAI` refresh to recover
 from dropped internal AI state, keep SpeedHack as an explicit Arena-only
 control, and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
+
+Large table-backed UI surfaces such as Shop hero targets and Arena hero, item,
+and GogoCard lists should render through clipping or another visible-row pattern
+so scrolling a loaded table does not process every row every frame. Table cache
+loading should run only when a table-backed tab or active automation actually
+needs the data.
 
 Auto-Play temporarily owns selected Shop, Arena, and Combat assists through its
 policy backup while enabled. If a change touches those assist toggles, preserve
@@ -256,5 +265,6 @@ Settings config should default to the running game package directory as
 Known audit hotspots are early-render readiness, dump-backed signature drift,
 table cache all-or-nothing publication, shop panel operability before buy or
 refresh, grouped shop diagnostic readiness, Auto-Play policy ownership of assist
-toggles, separate Auto-Play deploy/formation cooldowns, exact-opponent-only
-`100%` prediction rows, and Unity timeScale reset paths.
+toggles, separate Auto-Play deploy/formation cooldowns, render-frame budget
+deferral, clipped long tables, exact-opponent-only `100%` prediction rows, and
+Unity timeScale reset paths.

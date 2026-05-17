@@ -215,6 +215,8 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Shop diagnostic readiness is grouped across core shop diagnostic readers; each
   individual shop row still reports `Waiting` when its specific reader is not
   available.
+- Long Shop and Arena data tables render only visible rows to keep scrolling and
+  tab switches responsive after table metadata is loaded.
 
 Feature bindings are resolved against local reference artifacts and runtime IL2CPP metadata. Missing methods and fields are retried periodically instead of being permanently cached as unavailable. When a binding is not ready, the overlay reports a `Waiting for ...` state.
 
@@ -258,6 +260,12 @@ project locks while calling managed IL2CPP APIs. Built-in deploy and smart
 formation use separate cooldowns inside the 250 ms tick, and `StartAI` remains
 stateful with only a long refresh interval for recovery.
 
+Frame-time feature work has a small render budget. If binding retries, managed
+reference refresh, table loading, HUD refresh, or automation work has already
+spent the budget for the current frame, lower-priority ticks defer to the next
+frame. Table cache loading is demand-driven and runs only for table-backed tabs
+or active Auto-Play.
+
 The current runtime cadence is intentionally split by responsibility:
 
 - Binding retry: 2000 ms.
@@ -268,6 +276,7 @@ The current runtime cadence is intentionally split by responsibility:
 - Shop automation tick: 100 ms.
 - Combat power tick: 250 ms.
 - Auto-Play tick: 250 ms.
+- Feature frame budget: 12 ms.
 - Auto-Play AI start retry: 2000 ms.
 - Auto-Play AI refresh: 8000 ms.
 - Auto-Play built-in deploy cooldown: 750 ms.
@@ -463,7 +472,8 @@ At load time and during frame presentation, `jni/Main.cpp` performs the followin
 11. Auto-Play, Arena, Shop, Combat, and opponent-history work run on their own
     bounded ticks rather than in every render pass; Auto-Play keeps built-in
     deploy, smart formation, AI refresh, level-up, and auction cooldowns
-    independent.
+    independent. Busy frames defer lower-priority feature ticks instead of
+    running all pending managed work at once.
 12. Unity touch input is forwarded into ImGui mouse input through the hooked
     `GetTouch` path.
 
@@ -481,6 +491,8 @@ the following bug-prone areas:
 - The render hook is installed before `liblogic.so` and IL2CPP are ready.
   Frame-time code must tolerate a non-ready managed runtime and should not call
   IL2CPP APIs unless `AttachRenderIl2CppThread()` succeeded.
+- Render-frame work is budgeted. Binding retries and table loads may defer later
+  automation ticks to the next frame, but those ticks remain retryable.
 - Method lookup deliberately caches only successful method vectors as reusable
   results. Empty method scans remain retryable. Field lookup caches misses only
   behind the binding retry backoff. Do not turn these into permanent failures.
@@ -532,6 +544,8 @@ the following bug-prone areas:
   250 ms ticks for Combat and Auto-Play, and the 500 ms opponent-history/HUD
   refresh cadence unless timing changes are part of the task.
 - Preserve shop automation throttles for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
+- Keep table cache loading demand-driven and clip long data tables so table UI
+  does not walk every row every frame.
 - Guard direct access to `FeatureState::Heroes`, `FeatureState::Equips`,
   `FeatureState::Cards`, and `FeatureState::ShopSelectedHeroes` with
   `RuntimeMutex::FeatureMutex` or the existing snapshot/access helpers.

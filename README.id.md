@@ -220,6 +220,8 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Kesiapan diagnostik shop digabung dari reader diagnostik shop inti; setiap
   row shop tetap menampilkan `Waiting` saat reader khusus row tersebut belum
   tersedia.
+- Tabel data Shop dan Arena yang panjang hanya merender row yang terlihat agar
+  scroll dan perpindahan tab tetap responsif setelah metadata tabel dimuat.
 
 Feature binding di-resolve terhadap local reference artifacts dan metadata IL2CPP runtime. Method dan field yang belum tersedia akan dicoba ulang secara periodik, bukan langsung disimpan permanen sebagai unavailable. Jika binding belum siap, overlay akan menampilkan status `Waiting for ...`.
 
@@ -263,6 +265,12 @@ menghindari lock proyek saat memanggil API IL2CPP managed. Built-in deploy dan
 smart formation memakai cooldown terpisah di dalam tick 250 ms, dan `StartAI`
 tetap stateful dengan hanya refresh interval panjang untuk recovery.
 
+Pekerjaan fitur pada frame-time memiliki budget render kecil. Jika retry
+binding, refresh managed reference, loading tabel, refresh HUD, atau automation
+sudah memakai budget frame saat ini, tick prioritas lebih rendah ditunda ke
+frame berikutnya. Loading table cache bersifat demand-driven dan hanya berjalan
+untuk tab berbasis tabel atau Auto-Play aktif.
+
 Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 
 - Retry binding: 2000 ms.
@@ -273,6 +281,7 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 - Tick automation Shop: 100 ms.
 - Tick Combat power: 250 ms.
 - Tick Auto-Play: 250 ms.
+- Budget frame fitur: 12 ms.
 - Retry start AI Auto-Play: 2000 ms.
 - Refresh AI Auto-Play: 8000 ms.
 - Cooldown built-in deploy Auto-Play: 750 ms.
@@ -469,7 +478,8 @@ Pada saat load dan selama frame presentation, `jni/Main.cpp` menjalankan urutan 
 11. Auto-Play, Arena, Shop, Combat, dan riwayat opponent berjalan pada tick
     bounded masing-masing, bukan pada setiap render pass; Auto-Play menjaga
     cooldown built-in deploy, smart formation, refresh AI, level-up, dan auction
-    tetap independen.
+    tetap independen. Frame yang sibuk menunda tick fitur prioritas lebih rendah
+    daripada menjalankan semua pekerjaan managed yang tertunda sekaligus.
 12. Input touch Unity diteruskan ke input mouse ImGui melalui path hook
     `GetTouch`.
 
@@ -488,6 +498,9 @@ area yang rawan bug berikut:
 - Render hook dipasang sebelum `liblogic.so` dan IL2CPP siap. Kode frame-time
   harus tahan terhadap runtime managed yang belum siap dan tidak boleh memanggil
   API IL2CPP kecuali `AttachRenderIl2CppThread()` berhasil.
+- Pekerjaan render-frame memiliki budget. Retry binding dan loading tabel boleh
+  menunda tick automation berikutnya ke frame selanjutnya, tetapi tick tersebut
+  tetap retryable.
 - Lookup method sengaja hanya memakai hasil method yang sukses sebagai cache
   reusable. Scan method kosong tetap retryable. Lookup field hanya meng-cache
   miss di balik backoff retry binding. Jangan mengubahnya menjadi failure
@@ -545,6 +558,8 @@ area yang rawan bug berikut:
   tick 250 ms untuk Combat dan Auto-Play, serta cadence 500 ms untuk riwayat
   opponent/HUD kecuali perubahan timing memang bagian dari task.
 - Pertahankan throttle shop automation untuk buy, repeat-buy, refresh, target-worth, dan pengecekan Recommendation Lineup.
+- Jaga loading table cache tetap demand-driven dan clip tabel data panjang agar
+  UI tabel tidak memproses setiap row pada setiap frame.
 - Lindungi akses langsung ke `FeatureState::Heroes`, `FeatureState::Equips`,
   `FeatureState::Cards`, dan `FeatureState::ShopSelectedHeroes` dengan
   `RuntimeMutex::FeatureMutex` atau helper snapshot/access yang sudah ada.

@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → setup thread → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Field misses use a short retry backoff so hot feature paths do not rescan missing metadata every frame.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
+- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
 - **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
@@ -82,6 +82,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The render hook is installed before `liblogic.so` and IL2CPP are ready. Keep managed calls behind `IsIl2CppRuntimeReady()` and render-thread attach checks.
 - Runtime method matching is dump-guided but still name, parameter-count, and parameter-name-shape based. Treat overload-sensitive bindings as unsafe until checked in `dump/dump.cs`.
 - Table cache loading publishes only after hero, equipment, and GogoCard data are all present. Dependent UI should keep `Waiting for ...` states while any table is missing.
+- Table cache loading should be deferred until a table-backed tab or active
+  automation needs it, and long Shop/Arena table views should render visible
+  rows with `ImGuiListClipper` rather than walking every row each frame.
 - Auto-Play owns selected Shop, Arena, and Combat assist settings through a backup while it is active; preserve capture/restore semantics.
 - Opponent prediction may display exact data and weighted guesses together. Only the exact local current opponent should be forced to `100%`.
 - SpeedHack changes global Unity time scale and must reset to `1.0x` when disabled, when battle state is unavailable, or when feature state resets.
@@ -116,6 +119,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   keep built-in deploy and smart formation cooldowns separate, keep SpeedHack
   as a manual Arena-only control, and never hold `FeatureMutex` while calling
   managed IL2CPP APIs.
+- **Freeze stability**: Keep frame-time managed work behind the feature frame
+  budget, defer noncritical ticks when the budget is exhausted, avoid eager table
+  cache loads on unrelated tabs, and clip long table views.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,
