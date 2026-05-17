@@ -17,6 +17,7 @@ Repository ini membangun shared library `arm64-v8a` untuk lingkungan Android Uni
 
 - [Penggunaan yang Bertanggung Jawab](#penggunaan-yang-bertanggung-jawab)
 - [Status Proyek](#status-proyek)
+- [Konteks Game](#konteks-game)
 - [Fitur](#fitur)
 - [Arsitektur](#arsitektur)
 - [Kebutuhan](#kebutuhan)
@@ -61,6 +62,44 @@ Target default yang didukung:
 - Branch utama: `master`
 - Tab overlay saat ini: Info, Combat, Auto-Play, Shop, Arena, Appearance,
   Settings, dan Test
+
+## Konteks Game
+
+Riset eksternal yang dicek pada 2026-05-17 menjaga konteks proyek tetap selaras
+dengan game live tanpa menganggap saran meta saat ini sebagai kebenaran native
+yang stabil.
+
+Referensi publik utama:
+
+- [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
+  mengidentifikasi game ini sebagai judul strategi multiplayer auto-chess dari
+  Vizta Games, mencantumkan 10M+ download, mengarah ke website resmi dan kanal
+  YouTube, serta menunjukkan listing diperbarui pada 2026-01-09.
+- [Website resmi](https://magicchessgogo.com/) menjelaskan loop inti sebagai
+  recruit dan upgrade hero terinspirasi MLBB, membentuk lineup untuk battle
+  8-player, memakai skill Commander, memilih Go Go Cards pada tahap penting,
+  dan membangun kombinasi role/synergy.
+- [Kanal YouTube resmi](https://www.youtube.com/@MagicChessGoGo) serta materi
+  gameplay/guide berguna untuk mengamati alur UI, perilaku shop, pilihan
+  Commander, placement board, pacing economy, pilihan Go Go Card, dan istilah
+  meta, tetapi harus diperlakukan sebagai referensi yang cepat berubah.
+
+Model gameplay yang penting untuk repository ini:
+
+- Match adalah auto-battler 8-player tempat player recruit, merge, sell,
+  deploy, dan reposition hero dari economy mirip shop bersama.
+- Tekanan strategi datang dari gold interest, menjaga HP, timing level dan
+  population, refresh shop, perebutan hero pool, skill Commander, equipment,
+  synergy, Go Go Cards, auction, dan supply khusus round.
+- Catatan publik saat ini tentang Alice, Battle Night, konten event GO1, dan
+  perubahan seasonal Commander/Card menegaskan bahwa nama, lineup, dan prioritas
+  meta berubah lebih cepat daripada layer native binding.
+
+Implikasi engineering: dokumentasi dan diagnostik sebaiknya mendeskripsikan
+surface runtime yang tahan lama seperti battle manager, economy player, state
+shop panel, state round manager, data Commander/Go Go Card, state auction,
+synergy, dan unit board. Hindari hard-code klaim meta publik saat ini ke native
+behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 
 ## Fitur
 

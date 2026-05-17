@@ -42,6 +42,11 @@ git lfs pull
 - Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
   intentionally changes.
+- When using internet, video, or guide research for game context, record durable
+  mechanics rather than seasonal tier claims. Current public references describe
+  MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
+  skills, Go Go Cards, economy/interest decisions, synergies, equipment,
+  auctions, board placement, and round-specific supplies.
 - Preserve the current startup order: process gate, setup thread, early
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `UnityEngine.Input.GetTouch` hook, then lazy render-thread
@@ -174,6 +179,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
 
 Use this checklist when looking for hidden bugs or logic flaws:
 
+- Separate stable game systems from volatile public meta. Guides and videos are
+  useful for UI flow and terminology, but native bindings must still be verified
+  through `dump/dump.cs` and runtime diagnostics.
 - Confirm every new IL2CPP method pointer, hook signature, value type, and field
   read against `dump/dump.cs`, especially overloaded methods where runtime
   resolution only checks method name, parameter count, and parameter-name shape.

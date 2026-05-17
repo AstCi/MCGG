@@ -31,6 +31,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
 
+### Game Context From External Research
+
+- Current external research was checked on 2026-05-17 using the Google Play
+  listing, official website, official YouTube channel, and gameplay/guide
+  material.
+- Public sources frame MCGG as an 8-player auto-battler built around recruiting,
+  merging, deploying, and repositioning MLBB-inspired heroes while managing
+  gold, level, population, HP, equipment, synergies, Commander skills, Go Go
+  Cards, auctions, and round supplies.
+- The Google Play listing was updated on 2026-01-09 and references live content
+  such as Alice, Battle Night, GO1 event content, and Layla seasonal cosmetics.
+  Treat those as current public context, not stable binding assumptions.
+- Use videos and guides to understand UI flows and player vocabulary, but keep
+  implementation anchored to `dump/dump.cs`, runtime diagnostics, bounded
+  managed reads, and `Waiting for ...` states.
+
 ### Current Feature Areas
 - **Info**: runtime status, player/enemy table, and GGC round 7/13 quality display.
 - **Combat**: Invisible Scout.

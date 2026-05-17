@@ -26,6 +26,28 @@ Vendored or external components live under `jni/dobby/`, `jni/imgui/`,
 `jni/xDL/`, and `jni/Il2CppVersions/`. Build output is written to `libs/` and
 `obj/`; do not treat these as source modules.
 
+## Game Context & External Research
+
+When a task asks for broader Magic Chess Go Go analysis, include internet or
+video-context research, then translate it into durable engineering notes instead
+of volatile meta instructions. Current public context checked on 2026-05-17:
+
+- Google Play identifies Magic Chess: Go Go as a Vizta Games auto-chess,
+  multiplayer strategy game, points to `magicchessgogo.com` and the official
+  YouTube channel, and shows the listing updated on 2026-01-09.
+- The official site describes the game around 8-player battles, hero
+  recruitment/upgrades, Commander skills, Go Go Cards, roles, synergies, and
+  classic/ranked/custom play.
+- Public video and guide material is useful for observing UI flow, economy,
+  shop refreshes, board placement, Commander/Card choices, and common meta
+  vocabulary, but seasonal lineups and tier claims are not stable native facts.
+
+Engineering takeaway: prefer documenting stable runtime surfaces such as battle
+managers, player economy, shop panel state, round manager state, Commander and
+Go Go Card data, auction state, synergies, board units, and opponent pairing.
+Do not hard-code public meta claims into native feature logic without
+`dump/dump.cs` and live runtime verification.
+
 ## Build, Test, and Development Commands
 
 ```sh

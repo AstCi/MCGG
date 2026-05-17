@@ -17,6 +17,7 @@ This repository builds an `arm64-v8a` shared library for a Unity `2019.4.33f1` I
 
 - [Responsible Use](#responsible-use)
 - [Project Status](#project-status)
+- [Game Context](#game-context)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Requirements](#requirements)
@@ -61,6 +62,43 @@ The default supported target is:
 - Primary branch: `master`
 - Current overlay tabs: Info, Combat, Auto-Play, Shop, Arena, Appearance,
   Settings, and Test
+
+## Game Context
+
+External research checked on 2026-05-17 keeps the project context aligned with
+the live game without treating current meta advice as stable native truth.
+
+Primary public references:
+
+- [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
+  identifies the game as an auto-chess, multiplayer strategy title by Vizta
+  Games, lists 10M+ downloads, points to the official website and YouTube
+  channel, and shows the listing was updated on 2026-01-09.
+- [Official website](https://magicchessgogo.com/) describes the core loop as
+  recruiting and upgrading MLBB-inspired heroes, forming lineups for 8-player
+  battles, using Commander skills, selecting Go Go Cards at key stages, and
+  building role/synergy combinations.
+- [Official YouTube channel](https://www.youtube.com/@MagicChessGoGo) and
+  gameplay/guide material are useful for observing UI flow, shop behavior,
+  Commander choices, board placement, economy pacing, Go Go Card picks, and
+  meta terminology, but they should be treated as volatile references.
+
+The important gameplay model for this repository is:
+
+- Matches are 8-player auto-battler games where players recruit, merge, sell,
+  deploy, and reposition heroes from a shared shop-like economy.
+- Strategic pressure comes from gold interest, health preservation, level and
+  population timing, shop refreshes, contested hero pools, Commander skills,
+  equipment, synergies, Go Go Cards, auctions, and round-specific supplies.
+- Current public notes around Alice, Battle Night, GO1 event content, and
+  seasonal Commander/Card changes reinforce that names, lineups, and meta
+  priorities move faster than the native binding layer.
+
+Engineering implication: docs and diagnostics should describe durable runtime
+surfaces such as battle managers, player economy, shop panel state, round
+manager state, Commander/Go Go Card data, auction state, synergies, and board
+units. Avoid hard-coding current public meta claims into native behavior unless
+they are backed by `dump/dump.cs` and live runtime verification.
 
 ## Features
 
