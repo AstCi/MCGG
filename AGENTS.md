@@ -66,8 +66,10 @@ control flow.
 
 Do not convert retryable lookups into one-shot failures. Method and field
 resolution can happen before the target metadata is ready, so missing entries
-must be allowed to resolve later. Preserve the separate 100 ms shop and arena
-feature ticks unless the task explicitly changes timing.
+must be allowed to resolve later. Field misses may be cached only with a short
+retry backoff so hot feature paths do not rescan metadata every frame. Preserve
+the separate 100 ms shop and arena feature ticks unless the task explicitly
+changes timing.
 
 Shared state is split across `RuntimeMutex::CacheMutex`,
 `RuntimeMutex::FeatureMutex`, and `RuntimeMutex::UiMutex`. Primitive feature
@@ -82,7 +84,9 @@ Shop automation is intentionally single-threaded and throttled on the frame
 tick. Preserve the existing buy, repeat-buy, refresh, target-worth, and
 Recommendation Lineup cooldowns. Read selected target state through
 `GetShopHeroTargetsSnapshot()` or `GetSelectedShopHeroTargetsSnapshot()` and
-keep scans bounded by the existing runtime limits. Do not add unbounded scans or
+keep scans bounded by the existing runtime limits. Buy and refresh actions
+should wait for an operable shop panel, including delay/spectate/CanOperate
+checks when those bindings are available. Do not add unbounded scans or
 immediate retry loops to the shop hot path unless the task explicitly changes
 that design.
 
@@ -96,8 +100,9 @@ level-up, and auction cooldowns. The controller should read runtime state throug
 existing target helpers. Keep opponent scans bounded to the battle manager
 dictionary limit, keep battlefield movement to one chosen action per cooldown,
 keep shop, auction, passive-gold, free-economy, and level-up decisions aligned
-with the shared gold plan, keep SpeedHack as an explicit Arena-only control, and
-do not hold `FeatureMutex` while calling managed IL2CPP APIs.
+with the shared gold plan, keep built-in AI startup stateful instead of replaying
+`StartAI` on every cooldown, keep SpeedHack as an explicit Arena-only control,
+and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
 
 ## Testing Guidelines
 
@@ -109,7 +114,7 @@ ndk-build -C jni
 ```
 
 When changing IL2CPP calls, verify signatures against `dump/dump.cs` and confirm
-the target remains `arm64-v8a`, Unity `2019.4.22f1`, and native C++ mode
+the target remains `arm64-v8a`, Unity `2019.4.33f1`, and native C++ mode
 `c++26`.
 
 When changing Recommendation Lineup automation, verify the related
@@ -131,7 +136,9 @@ unavailable.
 When changing Arena Skip Round automation, verify
 `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, and
 `LogicRoundMgr.NextRound(Boolean)` against `dump/dump.cs`. Keep the overlay in
-a `Waiting for ...` state while round-manager bindings are unavailable.
+a `Waiting for ...` state while round-manager bindings are unavailable. Automatic
+skip requests should avoid fight/result phases and suppress repeated requests
+for the same source round and target round.
 
 When changing Arena SpeedHack, verify `UnityEngine.Time.set_timeScale(Single)`
 against `dump/dump.cs` and reset the time scale when disabling the feature or
@@ -195,5 +202,8 @@ palettes inspired by Dear ImGui issue #707. Keep `kAppearanceThemes` and
 index `1` for existing configs. Keep mobile accessibility changes compatible
 with the main ImGui TabBar. Helper buttons may select tabs, but the TabBar
 should remain visible and authoritative.
+Settings includes a persisted next-enemy HUD toggle that draws bottom-center
+foreground text above the lower screen edge. Keep it lightweight and throttle
+prediction refreshes instead of rebuilding predictions every render frame.
 Settings config should default to the running game package directory as
 `/data/data/<game-package>/files/mcgg_config.ini`.

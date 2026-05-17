@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "../Il2CppVersions/headers/2019.4.22f1.h"
+#include "../Il2CppVersions/headers/2019.4.33f1.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1046,7 +1046,7 @@ namespace Unity {
 #endif
 
 #ifndef UNITY_VERSION_PATCH
-#define UNITY_VERSION_PATCH 22
+#define UNITY_VERSION_PATCH 33
 #endif
 
 #ifndef UNITY_VERSION_TYPE

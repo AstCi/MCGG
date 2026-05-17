@@ -6,12 +6,12 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Android](https://img.shields.io/badge/Android-native-brightgreen)
 ![ABI](https://img.shields.io/badge/ABI-arm64--v8a-blue)
-![Unity](https://img.shields.io/badge/Unity-2019.4.22f1-black)
+![Unity](https://img.shields.io/badge/Unity-2019.4.33f1-black)
 ![NDK](https://img.shields.io/badge/NDK-r29-orange)
 
 Proyek riset native Android open-source untuk Magic Chess Go Go, berfokus pada analisis runtime Unity/IL2CPP, alur build native Android, dan diagnostik runtime berbasis ImGui.
 
-Repository ini membangun shared library `arm64-v8a` untuk lingkungan Android Unity `2019.4.22f1` IL2CPP. Proyek ini ditujukan hanya untuk pembelajaran, riset defensif, latihan reverse engineering, dan eksperimen yang memiliki otorisasi.
+Repository ini membangun shared library `arm64-v8a` untuk lingkungan Android Unity `2019.4.33f1` IL2CPP. Proyek ini ditujukan hanya untuk pembelajaran, riset defensif, latihan reverse engineering, dan eksperimen yang memiliki otorisasi.
 
 ## Daftar Isi
 
@@ -53,7 +53,7 @@ MCGG adalah proyek native Android eksperimental. Simbol game internal, metadata,
 Target default yang didukung:
 
 - Android ABI: `arm64-v8a`
-- Versi Unity: `2019.4.22f1`
+- Versi Unity: `2019.4.33f1`
 - Android NDK: `r29`
 - Build system: `ndk-build`
 - Standar C++: `c++26`
@@ -106,6 +106,9 @@ Target default yang didukung:
 - Scoring auction yang membaca phase auction, state slot, bid price, reward
   item, reward hero/equipment, dan special upgrade effect sebelum menawar opsi
   bernilai tertinggi secara terbatas.
+- Startup built-in AI bersifat stateful dan memakai cooldown: `StartAI` tidak
+  dipanggil terus-menerus untuk account yang sama, dan `StopAI` dipanggil saat
+  Auto-Play dimatikan atau snapshot battle live belum dapat dipakai.
 - Kontrol opsional untuk built-in battle AI, shop, economy, combat power, arena
   assist, smart formation, auction scoring, dan GogoCard scoring.
 
@@ -121,8 +124,9 @@ Target default yang didukung:
 
 - Kontrol ukuran menu, posisi tetap opsional, navigasi tab yang lebih ramah
   perangkat mobile, dan interaksi window.
+- HUD teks next-enemy opsional yang ditampilkan di dekat tengah bawah layar.
 - Kontrol font scale, opacity, rounding, border, padding, spacing, scrollbar, dan indentation.
-- Save dan load untuk visual settings serta kontrol Auto-Play, Combat, Shop, dan Arena.
+- Save dan load untuk kontrol visual, window, HUD, Auto-Play, Combat, Shop, dan Arena.
 - Path config default berada di package game yang sedang berjalan, di-resolve sebagai `/data/data/<game-package>/files/mcgg_config.ini`.
 
 ### Shop
@@ -135,6 +139,8 @@ Target default yang didukung:
 - Tabel target hero dengan jumlah target yang dapat dikonfigurasi dan tanpa field search yang bergantung pada keyboard.
 - Jumlah target Recommendation Lineup untuk automation shop tingkat lanjut.
 - Throttle buy dan refresh untuk mengurangi aksi berulang saat automation berjalan terus-menerus.
+- Pemeriksaan kesiapan UI shop yang menunggu panel shop operable, tidak delay,
+  dan tidak berada pada state refresh spectate sebelum select, buy, atau refresh.
 
 ### Arena
 
@@ -149,8 +155,11 @@ Target default yang didukung:
 - Helper enemy HP 1.
 - Helper gold manual dan pasif.
 - Helper free shop/upgrade economy, unlimited hero pool, dan bypass shop lock.
-- Kontrol Skip Round untuk memindahkan round manager lokal ke target round yang dipilih.
-- Kontrol SpeedHack berbasis `UnityEngine.Time.set_timeScale`.
+- Kontrol Skip Round untuk memindahkan round manager lokal ke target round yang
+  dipilih, menunggu phase fight/result selesai pada skip otomatis, dan menekan
+  request berulang untuk source round dan target round yang sama.
+- Kontrol SpeedHack berbasis `UnityEngine.Time.set_timeScale`, dengan reset
+  eksplisit ke `1.0x` saat fitur keluar dari state battle aktif.
 
 ### Test
 
@@ -174,7 +183,7 @@ MCGG disusun sebagai native runtime layer kecil yang mengoordinasikan Unity, IL2
 Secara umum, proyek ini berisi:
 
 - Native Android module yang dibangun dengan `ndk-build`.
-- Deklarasi API Unity `2019.4.22f1` IL2CPP.
+- Deklarasi API Unity `2019.4.33f1` IL2CPP.
 - Helper dynamic library lookup runtime.
 - Integrasi function hook berbasis Dobby.
 - Rendering Dear ImGui melalui OpenGL ES.
@@ -204,6 +213,10 @@ ini mengumpulkan snapshot lokal terlebih dahulu, membangun satu gold-interest
 plan, menilai opsi strategy/formation/shop/card/auction dari data lokal, hanya
 mem-publish counter ringkas dan selected target di bawah `FeatureMutex`, dan
 menghindari lock proyek saat memanggil API IL2CPP managed.
+
+Miss metadata field juga dicoba ulang dengan backoff singkat. Ini menjaga
+metadata Unity yang terlambat tetap retryable tanpa membiarkan lookup field yang
+hilang melakukan scan ulang pada setiap tick fitur.
 
 ## Kebutuhan
 
@@ -339,7 +352,7 @@ Unity compatibility defines dikonfigurasi di `jni/Android.mk`:
 ```make
 -DUNITY_VERSION_MAJOR=2019
 -DUNITY_VERSION_MINOR=4
--DUNITY_VERSION_PATCH=22
+-DUNITY_VERSION_PATCH=33
 -DUNITY_VER=194
 ```
 
@@ -432,7 +445,7 @@ Urutan ini disengaja. Rendering dan input diinisialisasi terpisah dari feature b
   menambahkan theme. Config lama mengharapkan Catppuccin Mocha tetap berada di
   theme index `1`.
 - Pertahankan default ABI sebagai `arm64-v8a`.
-- Jaga kompatibilitas Unity tetap selaras dengan `2019.4.22f1`.
+- Jaga kompatibilitas Unity tetap selaras dengan `2019.4.33f1`.
 - Jaga mode bahasa native tetap selaras dengan `c++26` kecuali konfigurasi build memang diubah secara sengaja.
 - Jangan commit output generated `obj/` atau `libs/`.
 - Hindari menambahkan instruksi deployment runtime atau instruksi yang berorientasi penyalahgunaan ke dokumentasi proyek.
@@ -488,7 +501,7 @@ ndk-build -C jni
 
 ### Runtime binding belum tersedia
 
-Binding yang belum tersedia bisa normal pada early startup atau sebelum managed state yang diharapkan tersedia. Overlay akan menampilkannya sebagai status `Waiting for ...` dan mencobanya ulang secara periodik.
+Binding yang belum tersedia bisa normal pada early startup atau sebelum managed state yang diharapkan tersedia. Overlay akan menampilkannya sebagai status `Waiting for ...` dan mencobanya ulang secara periodik. Lookup field yang belum tersedia di-throttle agar metadata yang hilang tidak melakukan scan ulang dari hot path fitur.
 
 Saat menambahkan atau memperbarui binding, verifikasi:
 
@@ -508,6 +521,8 @@ Saat menelusuri masalah penggunaan terus-menerus, verifikasi:
 
 - Binding shop select dan shop automation sudah siap.
 - Panel shop refresh sudah siap saat auto-refresh aktif.
+- Panel shop operable: tidak delay, tidak dalam state refresh spectate, dan
+  diterima oleh `UIPanelBattleHeroShop.CanOperate(Boolean)`.
 - Binding Recommendation Lineup sudah siap saat recommendation buying atau pause-refresh aktif.
 - Keep-gold reserve tidak sedang memblokir aksi.
 - Target count belum tercapai.
@@ -538,7 +553,7 @@ Periksa log GitHub Actions untuk:
 ## Batasan yang Diketahui
 
 - Hanya `arm64-v8a` yang didukung secara default.
-- Kompatibilitas Unity dipatok ke `2019.4.22f1`.
+- Kompatibilitas Unity dipatok ke `2019.4.33f1`.
 - Runtime binding dapat berubah ketika target application update.
 - Ketersediaan fitur bergantung pada runtime state dan managed object yang sedang loaded.
 - Automation Recommendation Lineup bergantung pada data lineup match aktif yang diekspos runtime.

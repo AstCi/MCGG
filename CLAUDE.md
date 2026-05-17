@@ -21,12 +21,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### High-Level Architecture
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → setup thread → dependency resolution (`liblogic.so`) → IL2CPP API attachment → retryable game method and field resolution → function hooking (via Dobby) → managed reference refresh → feature ticks → appearance/config setup → ImGui overlay rendering.
-- **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup.
+- **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Field misses use a short retry backoff so hot feature paths do not rescan missing metadata every frame.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Shop automation and Arena effects run on separate 100 ms ticks for stability and responsiveness. Auto-Play runs on a separate 250 ms tick, builds a shared gold-interest plan, and uses bounded cooldowns for built-in AI startup, deployment/formation moves, level-up actions, and auction bidding. Opponent prediction history refreshes on a separate throttled tick so per-player enemy history is collected outside the Test tab. Shop automation also uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
+- **Runtime Ticks**: Shop automation and Arena effects run on separate 100 ms ticks for stability and responsiveness. Auto-Play runs on a separate 250 ms tick, builds a shared gold-interest plan, and uses bounded cooldowns for stateful built-in AI startup, deployment/formation moves, level-up actions, and auction bidding. Opponent prediction history refreshes on a separate throttled tick so per-player enemy history is collected outside the Test tab. Shop automation also uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
 - **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
-- **Configuration**: Settings saves and loads visual settings plus Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
+- **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
@@ -45,16 +45,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   coordinate existing shop/economy/combat/arena assist controls. It does not
   control Arena SpeedHack.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
-- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, font scale, style tuning, and save/load configuration, including Auto-Play state.
-- **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, and Recommendation Lineup target counts.
-- **Arena**: hero spawn, equipment grant, GogoCard forcing, Battle Power controls, active synergy forcing, level/population 99, outside-map placement, enemy HP 1, passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, Skip Round, and SpeedHack.
+- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, and save/load configuration, including Auto-Play state.
+- **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and shop-panel operability gates before buy/refresh UI actions.
+- **Arena**: hero spawn, equipment grant, GogoCard forcing, Battle Power controls, active synergy forcing, level/population 99, outside-map placement, enemy HP 1, passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, fight/result-aware Skip Round, and SpeedHack with reset-to-normal handling.
 - **Test**: manual binding retry, account inspection, fight prediction, binding, round, player, manager, bridge, shop UI, behavior API, and all-manager diagnostics. Only the exact local current opponent should be locked to `100%` in `Will fight`; every player's enemy history and dump-backed invader order should remain available for weighted predictions.
 
 ### Project Constraints
 - **Target ABI**: `arm64-v8a`
 - **Android Platform**: `android-21`
 - **STL**: `c++_static`
-- **Unity Version**: `2019.4.22f1` (Refer to `UNITY_` macros in `jni/Android.mk`)
+- **Unity Version**: `2019.4.33f1` (Refer to `UNITY_` macros in `jni/Android.mk`)
 - **C++ Standard**: C++26 (defined in `jni/Android.mk`)
 - **NDK App Settings**: `APP_OPTIM := release`, `APP_THIN_ARCHIVE := false`, `APP_PIE := true`
 - **Native C Flags**: `-Oz` and `-DNDEBUG` by default; `NDK_DEBUG=1` adds `-O0`
@@ -73,18 +73,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Naming**: Unity compatibility macros must use the `UNITY_` prefix.
 - **Pointers**: Prefer `void*` for managed objects unless a specific structure from `Structures.hpp` is required.
 - **Single-file feature work**: Keep feature runtime changes in `jni/Main.cpp` unless explicitly asked to split files.
-- **Retry behavior**: Do not permanently cache failed IL2CPP method or field lookups. Missing bindings should retry and user-facing controls should show `Waiting for ...` states where practical.
+- **Retry behavior**: Do not permanently cache failed IL2CPP method or field lookups. Missing bindings should retry, field miss retries should stay throttled, and user-facing controls should show `Waiting for ...` states where practical.
+- **HUD diagnostics**: Keep the next-enemy HUD as lightweight foreground text near the bottom center. Reuse throttled prediction/current-opponent data and avoid rebuilding prediction tables every render frame.
 - **Test diagnostics**: Keep Test additions read-only unless explicitly requested otherwise, and verify class names, method names, parameter counts, return types, and fields against `dump/dump.cs`.
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.
-- **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.
+- **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Wait for non-delayed, non-spectate, operable shop panel state before buy or refresh UI calls. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.
 - **Auto-Play automation**: Preserve the 250 ms tick and bounded cooldowns. Use
   `ReadAutoPlaySnapshot()`, `BuildAutoPlayGoldPlan()`,
   `CollectAutoPlayBoardUnits()`, `BuildAutoPlayBoardPlan()`, and the existing
   table/target helpers. Keep opponent scans bounded to the battle manager
   dictionary limit, keep board placement to one move per cooldown, keep shop,
   auction, passive-gold, free-economy, and level-up decisions on the shared
-  gold plan, keep SpeedHack as a manual Arena-only control, and never hold
-  `FeatureMutex` while calling managed IL2CPP APIs.
+  gold plan, keep built-in AI startup stateful, keep SpeedHack as a manual
+  Arena-only control, and never hold `FeatureMutex` while calling managed IL2CPP APIs.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,
@@ -92,8 +93,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `MCLogicAuctionComp.Bid(MCLogicAuctionSlotInfo, UInt64, UInt32)`, and
   `MCLogicGoGoCardComp.get_m_CurrData` against `dump/dump.cs` before changing
   the controller.
-- **Arena round control**: Preserve the separate Arena tick and bounded Skip Round cooldown. Verify `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, and `LogicRoundMgr.NextRound(Boolean)` against `dump/dump.cs`.
-- **Arena SpeedHack**: Use `UnityEngine.Time.set_timeScale(Single)` and reset time scale to normal when the feature is disabled or feature state is reset.
+- **Arena round control**: Preserve the separate Arena tick and bounded Skip Round cooldown. Verify `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, and `LogicRoundMgr.NextRound(Boolean)` against `dump/dump.cs`. Automatic skip should wait out fight/result phases and avoid repeating the same source/target request.
+- **Arena SpeedHack**: Use `UnityEngine.Time.set_timeScale(Single)` and reset time scale to normal when the feature is disabled, leaves active battle state, or feature state is reset.
 - **Comments**: Add concise comments before risky IL2CPP calls, hook signatures, value-type layouts, or timing-sensitive blocks.
 - **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`) unless explicitly requested.
 - **Appearance**: Keep theme/font changes in the existing appearance setup and preserve fallback to the default ImGui font when Noto Sans CJK is unavailable. When adding themes, keep `kAppearanceThemes` and `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme index `1` for existing configs.

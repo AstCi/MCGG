@@ -6,12 +6,12 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Android](https://img.shields.io/badge/Android-native-brightgreen)
 ![ABI](https://img.shields.io/badge/ABI-arm64--v8a-blue)
-![Unity](https://img.shields.io/badge/Unity-2019.4.22f1-black)
+![Unity](https://img.shields.io/badge/Unity-2019.4.33f1-black)
 ![NDK](https://img.shields.io/badge/NDK-r29-orange)
 
 Open-source native Android research project for Magic Chess Go Go, focused on Unity/IL2CPP runtime analysis, native Android build workflows, and ImGui-based runtime diagnostics.
 
-This repository builds an `arm64-v8a` shared library for a Unity `2019.4.22f1` IL2CPP Android environment. It is intended for learning, defensive research, reverse engineering practice, and authorized experimentation only.
+This repository builds an `arm64-v8a` shared library for a Unity `2019.4.33f1` IL2CPP Android environment. It is intended for learning, defensive research, reverse engineering practice, and authorized experimentation only.
 
 ## Table of Contents
 
@@ -53,7 +53,7 @@ MCGG is an experimental native Android project. Internal game symbols, metadata,
 The default supported target is:
 
 - Android ABI: `arm64-v8a`
-- Unity version: `2019.4.22f1`
+- Unity version: `2019.4.33f1`
 - Android NDK: `r29`
 - Build system: `ndk-build`
 - C++ standard: `c++26`
@@ -104,6 +104,9 @@ The default supported target is:
 - Auction scoring that reads auction phase, slot state, bid price, reward item
   data, hero/equipment rewards, and special upgrade effects before placing a
   bounded bid on the highest-value option.
+- Built-in AI startup is stateful and cooldown-gated: `StartAI` is not replayed
+  continuously for the same account, and `StopAI` is called when Auto-Play is
+  disabled or the live battle snapshot is no longer actionable.
 - Optional controls for built-in battle AI, shop, economy, combat power, arena
   assists, smart formation, auction scoring, and GogoCard scoring.
 
@@ -118,8 +121,9 @@ The default supported target is:
 ### Settings
 
 - Menu size, optional fixed position, mobile-friendly tab navigation, and window interaction controls.
+- Optional next-enemy HUD text rendered near the bottom center of the screen.
 - Font scale, opacity, rounding, border, padding, spacing, scrollbar, and indentation controls.
-- Save and load for visual settings plus Auto-Play, Combat, Shop, and Arena controls.
+- Save and load for visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls.
 - Default config path under the running game package, resolved as `/data/data/<game-package>/files/mcgg_config.ini`.
 
 ### Shop
@@ -132,6 +136,8 @@ The default supported target is:
 - Hero target table with configurable target counts and no keyboard-dependent search field.
 - Recommendation Lineup target count for advanced shop automation.
 - Buy and refresh throttles that reduce repeated actions during continuous automation.
+- Shop UI readiness checks that wait for an operable, non-delayed shop panel
+  before selecting, buying, or refreshing.
 
 ### Arena
 
@@ -146,8 +152,11 @@ The default supported target is:
 - Enemy HP 1 helper.
 - Manual and passive gold helpers.
 - Free shop/upgrade economy, unlimited hero pool, and shop-lock bypass helpers.
-- Skip Round controls that move the local round manager to a selected target round.
-- SpeedHack controls backed by `UnityEngine.Time.set_timeScale`.
+- Skip Round controls that move the local round manager to a selected target
+  round, wait out fight/result phases during automatic skips, and suppress
+  repeated requests for the same source and target round.
+- SpeedHack controls backed by `UnityEngine.Time.set_timeScale`, with an
+  explicit reset to `1.0x` when the feature leaves its active battle state.
 
 ### Test
 
@@ -171,7 +180,7 @@ MCGG is organized around a small native runtime layer that coordinates Unity, IL
 At a high level, the project contains:
 
 - A native Android module built with `ndk-build`.
-- Unity `2019.4.22f1` IL2CPP API declarations.
+- Unity `2019.4.33f1` IL2CPP API declarations.
 - Runtime dynamic library lookup helpers.
 - Dobby-based function hook integration.
 - Dear ImGui rendering through OpenGL ES.
@@ -201,6 +210,10 @@ gathers local snapshots first, builds one gold-interest plan, scores
 strategy/formation/shop/card/auction options from local data, publishes only
 compact counters and selected targets under `FeatureMutex`, and avoids holding
 project locks while calling managed IL2CPP APIs.
+
+Field metadata misses are also retried with a short backoff. This keeps late
+Unity metadata retryable without letting missing field lookups rescan every
+feature tick.
 
 ## Requirements
 
@@ -335,7 +348,7 @@ Unity compatibility defines are configured in `jni/Android.mk`:
 ```make
 -DUNITY_VERSION_MAJOR=2019
 -DUNITY_VERSION_MINOR=4
--DUNITY_VERSION_PATCH=22
+-DUNITY_VERSION_PATCH=33
 -DUNITY_VER=194
 ```
 
@@ -422,7 +435,7 @@ This order is intentional. Rendering and input are initialized separately from f
 - Keep Appearance theme names and palette entries aligned when adding themes.
   Existing configs expect Catppuccin Mocha to remain theme index `1`.
 - Keep the default ABI as `arm64-v8a`.
-- Keep Unity compatibility aligned with `2019.4.22f1`.
+- Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep the native language mode aligned with `c++26` unless the build configuration changes intentionally.
 - Do not commit generated `obj/` or `libs/` output.
 - Avoid adding runtime deployment or abuse-oriented instructions to project documentation.
@@ -478,7 +491,7 @@ ndk-build -C jni
 
 ### Missing runtime bindings
 
-Missing bindings can be normal during early startup or before the expected managed state exists. The overlay reports these as `Waiting for ...` states and retries them periodically.
+Missing bindings can be normal during early startup or before the expected managed state exists. The overlay reports these as `Waiting for ...` states and retries them periodically. Missing field lookups are throttled so unavailable metadata does not repeatedly scan from hot feature paths.
 
 When adding or updating a binding, verify:
 
@@ -498,6 +511,8 @@ When investigating continuous-use issues, verify:
 
 - Shop select and shop automation bindings are ready.
 - Shop refresh panel is ready when auto-refresh is enabled.
+- The shop panel is operable: not delayed, not in spectate refresh state, and
+  accepted by `UIPanelBattleHeroShop.CanOperate(Boolean)`.
 - Recommendation Lineup bindings are ready when recommendation buying or pause-refresh is enabled.
 - Keep-gold reserve is not blocking the action.
 - Target counts have not already been reached.
@@ -527,7 +542,7 @@ Check the GitHub Actions log for:
 ## Known Limitations
 
 - Only `arm64-v8a` is supported by default.
-- Unity compatibility is pinned to `2019.4.22f1`.
+- Unity compatibility is pinned to `2019.4.33f1`.
 - Runtime bindings may change when the target application updates.
 - Feature availability depends on current runtime state and loaded managed objects.
 - Recommendation Lineup automation depends on the active match lineup data exposed by the runtime.

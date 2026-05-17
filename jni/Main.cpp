@@ -38,7 +38,7 @@
 #include "imgui/misc/cpp/imgui_stdlib.h"
 
 #define DO_API(ret, name, args) ret (*name) args;
-#include "Il2CppVersions/api/2019.4.22f1.h"
+#include "Il2CppVersions/api/2019.4.33f1.h"
 #undef DO_API
 
 // Unity input and value layouts used by native hooks.
@@ -145,6 +145,7 @@ void* UnityLibraryHandle = nullptr;
 
 std::unordered_map<std::string, std::vector<MethodInfo*>> MultiMethodCache;
 std::unordered_map<std::string, FieldInfo*> FieldCache;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> FieldMissCache;
 
 namespace RuntimeConfig {
     constexpr int BindingRetryMs = 2000;
@@ -207,6 +208,7 @@ namespace FeatureState {
     std::atomic<int> AutoPlayLastRound{0};
     std::atomic<int> AutoPlayLastHp{-1};
     std::atomic<bool> AutoPlayWasRunning{false};
+    std::atomic<bool> AutoPlayBuiltInAiRunning{false};
     std::atomic<uint64_t> AutoPlayLastAiStartAccountId{0};
     std::atomic<int> AutoPlayFocusGroup{0};
     std::atomic<int> AutoPlayTargetHeroId{0};
@@ -268,6 +270,8 @@ namespace FeatureState {
     std::atomic<int> ArenaPrice{5};
     std::atomic<bool> ArenaSkipRound{false};
     std::atomic<int> ArenaSkipTargetRound{1};
+    std::atomic<uint32_t> ArenaLastSkipSourceRound{0};
+    std::atomic<int> ArenaLastSkipTargetRound{0};
     std::atomic<bool> ArenaSpeedHack{false};
     std::atomic<float> ArenaTimeScale{2.0f};
 
@@ -319,6 +323,7 @@ namespace UiState {
     std::atomic<int> ThemeIndex{1};
     std::atomic<int> FontIndex{1};
     std::atomic<bool> ShopShowSelectedOnly{false};
+    std::atomic<bool> ShowNextEnemyHud{false};
     std::atomic<bool> MoveFromTitleBarOnly{true};
     std::atomic<bool> ResizeFromEdges{false};
     std::atomic<bool> UseFixedMenuPosition{false};
@@ -862,8 +867,17 @@ FieldInfo* GetFieldInfoFromName(
     {
         std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
         auto cached = FieldCache.find(cacheKey);
-        if (cached != FieldCache.end() && cached->second) {
-            return cached->second;
+        if (cached != FieldCache.end()) {
+            if (cached->second) {
+                return cached->second;
+            }
+
+            auto miss = FieldMissCache.find(cacheKey);
+            if (miss != FieldMissCache.end() &&
+                std::chrono::steady_clock::now() - miss->second <
+                    std::chrono::milliseconds(RuntimeConfig::BindingRetryMs)) {
+                return nullptr;
+            }
         }
     }
 
@@ -894,6 +908,7 @@ FieldInfo* GetFieldInfoFromName(
         if (field) {
             std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
             FieldCache[cacheKey] = field;
+            FieldMissCache.erase(cacheKey);
             return field;
         }
     }
@@ -901,6 +916,7 @@ FieldInfo* GetFieldInfoFromName(
     {
         std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
         FieldCache[cacheKey] = nullptr;
+        FieldMissCache[cacheKey] = std::chrono::steady_clock::now();
     }
     return nullptr;
 }
@@ -3203,6 +3219,8 @@ void ClearTableDataCacheUnlocked() {
     FeatureState::LastShopWorthCheck = {};
     FeatureState::LastRecommendLineupCheck = {};
     FeatureState::LastArenaSkipAttempt = {};
+    FeatureState::ArenaLastSkipSourceRound = 0;
+    FeatureState::ArenaLastSkipTargetRound = 0;
     FeatureState::CachedShopHasWorthwhileTarget = false;
     FeatureState::CachedRecommendLineupHeroId = 0;
     FeatureState::LastShopBuyAccountId = 0;
@@ -3582,28 +3600,66 @@ std::string FormatHeroLabel(int heroId) {
     return "Hero #" + std::to_string(heroId);
 }
 
+bool IsShopPanelReadyForAutomation() {
+    void* heroShopPanel = FeatureState::HeroShopPanel.load();
+    if (!heroShopPanel) {
+        return false;
+    }
+
+    if (Originals::UIPanelBattleHeroShop_IsDelayOpen &&
+        Originals::UIPanelBattleHeroShop_IsDelayOpen(heroShopPanel)) {
+        return false;
+    }
+
+    if (Originals::UIPanelBattleHeroShop_GetInfoAfterSpectate &&
+        Originals::UIPanelBattleHeroShop_GetInfoAfterSpectate(heroShopPanel)) {
+        return false;
+    }
+
+    if (Originals::UIPanelBattleHeroShop_CanOperate &&
+        !Originals::UIPanelBattleHeroShop_CanOperate(heroShopPanel, true)) {
+        return false;
+    }
+
+    void* battleBridge = FeatureState::BattleBridge.load();
+    if (battleBridge &&
+        Originals::MCBattleBridge_CheckEnableKeyBoard &&
+        !Originals::MCBattleBridge_CheckEnableKeyBoard(battleBridge)) {
+        return false;
+    }
+
+    return true;
+}
+
 bool SelectShopSlot(int slot) {
     if (slot < 0 || slot >= 5) {
         return false;
     }
 
-    if (FeatureState::HeroShopItemList &&
+    if (!IsShopPanelReadyForAutomation()) {
+        return false;
+    }
+
+    void* heroShopItemList = FeatureState::HeroShopItemList.load();
+    void* heroShopPanel = FeatureState::HeroShopPanel.load();
+
+    if (heroShopItemList &&
         Originals::UIPanelBattleHeroShop_HeroItemList_OnSelectHero) {
         Originals::UIPanelBattleHeroShop_HeroItemList_OnSelectHero(
-            FeatureState::HeroShopItemList,
+            heroShopItemList,
             static_cast<uint8_t>(slot)
         );
         return true;
     }
 
-    if (FeatureState::HeroShopPanel && Originals::UIPanelBattleHeroShop_KeyBoardShopSelect) {
-        Originals::UIPanelBattleHeroShop_KeyBoardShopSelect(FeatureState::HeroShopPanel, slot);
+    if (heroShopPanel && Originals::UIPanelBattleHeroShop_KeyBoardShopSelect) {
+        Originals::UIPanelBattleHeroShop_KeyBoardShopSelect(heroShopPanel, slot);
         return true;
     }
 
-    if (FeatureState::HeroShopPanel && Originals::UIPanelBattleHeroShop_BuyHero) {
+    if (heroShopPanel && Originals::UIPanelBattleHeroShop_BuyHero) {
         Originals::UIPanelBattleHeroShop_BuyHero(
-            FeatureState::HeroShopPanel,
+            heroShopPanel,
             static_cast<uint8_t>(slot),
             false
         );
@@ -3852,18 +3908,21 @@ void ApplyArenaSpeedHack(uint64_t selfAccountId) {
     }
 
     static float appliedTimeScale = 1.0f;
+    static bool speedHackWasActive = false;
     bool active = FeatureState::ArenaSpeedHack.load() && selfAccountId != 0;
     float targetTimeScale =
         active ? ClampArenaTimeScale(FeatureState::ArenaTimeScale.load()) : 1.0f;
     FeatureState::ArenaTimeScale = ClampArenaTimeScale(FeatureState::ArenaTimeScale.load());
 
     if (appliedTimeScale > targetTimeScale - 0.001f &&
-        appliedTimeScale < targetTimeScale + 0.001f) {
+        appliedTimeScale < targetTimeScale + 0.001f &&
+        speedHackWasActive == active) {
         return;
     }
 
     Originals::UnityEngine_Time_set_timeScale(targetTimeScale);
     appliedTimeScale = targetTimeScale;
+    speedHackWasActive = active;
 }
 
 bool TrySkipArenaRoundToTarget(bool force) {
@@ -3881,6 +3940,23 @@ bool TrySkipArenaRoundToTarget(bool force) {
     uint32_t currentRound = Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr);
     if (currentRound == 0 || currentRound >= static_cast<uint32_t>(targetRound)) {
         return false;
+    }
+
+    if (!force) {
+        if (Originals::MCLogicBattleData_ILOGIC_IsFightSection &&
+            Originals::MCLogicBattleData_ILOGIC_IsFightSection(nullptr)) {
+            return false;
+        }
+
+        if (Originals::MCLogicBattleData_ILOGIC_IsFightResultSection &&
+            Originals::MCLogicBattleData_ILOGIC_IsFightResultSection(nullptr)) {
+            return false;
+        }
+
+        if (FeatureState::ArenaLastSkipSourceRound.load() == currentRound &&
+            FeatureState::ArenaLastSkipTargetRound.load() == targetRound) {
+            return false;
+        }
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -3903,6 +3979,8 @@ bool TrySkipArenaRoundToTarget(bool force) {
     Originals::LogicRoundMgr_SetRound(roundManager, stagedRound);
     Originals::LogicRoundMgr_NextRound(roundManager, false);
     FeatureState::LastArenaSkipAttempt = now;
+    FeatureState::ArenaLastSkipSourceRound = currentRound;
+    FeatureState::ArenaLastSkipTargetRound = targetRound;
     return true;
 }
 
@@ -5116,6 +5194,7 @@ bool TryAutoPlayAuction(
         !Originals::LogicRoundMgr_get_m_AuctionComp ||
         !Originals::MCLogicAuctionComp_get_m_CurrPhase ||
         !Originals::MCLogicAuctionComp_Bid ||
+        !Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId ||
         !CooldownElapsed(
             FeatureState::LastAutoPlayAuctionAttempt,
             RuntimeConfig::AutoPlayAuctionCooldownMs,
@@ -5135,8 +5214,7 @@ bool TryAutoPlayAuction(
         return false;
     }
 
-    if (Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId &&
-        Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId(
+    if (Originals::MCLogicAuctionComp_GetSelectItemIndexByAccId(
             auctionComp,
             snapshot.accountId
         ) >= 0) {
@@ -5239,15 +5317,19 @@ bool TryAutoPlayAuction(
         return false;
     }
 
-    Originals::MCLogicAuctionComp_Bid(
+    bool bidAccepted = Originals::MCLogicAuctionComp_Bid(
         auctionComp,
         bestSlot,
         snapshot.accountId,
         static_cast<uint32_t>(std::max(bestBid, 0))
     );
+    FeatureState::LastAutoPlayAuctionAttempt = now;
+    if (!bidAccepted) {
+        return false;
+    }
+
     FeatureState::AutoPlayBestAuctionIndex = bestIndex;
     FeatureState::AutoPlayBestAuctionScore = bestScore;
-    FeatureState::LastAutoPlayAuctionAttempt = now;
     return true;
 }
 
@@ -5734,16 +5816,23 @@ void ApplyAutoPlayPolicy(
     }
 }
 
-void StopAutoPlayRuntime(uint64_t selfAccountId) {
+void StopBuiltInAutoPlayAI(uint64_t selfAccountId) {
     void* selfManager =
         selfAccountId != 0 ? GetBattleManagerByAccountId(selfAccountId) : GetSelfLogicBattleManager();
 
-    if (selfManager && Originals::MCLogicBattleManager_StopAI) {
+    if (FeatureState::AutoPlayBuiltInAiRunning.load() &&
+        selfManager &&
+        Originals::MCLogicBattleManager_StopAI) {
         Originals::MCLogicBattleManager_StopAI(selfManager);
     }
 
-    FeatureState::AutoPlayWasRunning = false;
+    FeatureState::AutoPlayBuiltInAiRunning = false;
     FeatureState::AutoPlayLastAiStartAccountId = 0;
+}
+
+void StopAutoPlayRuntime(uint64_t selfAccountId) {
+    StopBuiltInAutoPlayAI(selfAccountId);
+    FeatureState::AutoPlayWasRunning = false;
 }
 
 void RunBuiltInAutoPlayAI(
@@ -5752,6 +5841,7 @@ void RunBuiltInAutoPlayAI(
     std::chrono::steady_clock::time_point now
 ) {
     if (!FeatureState::AutoPlayUseBuiltInAI.load()) {
+        StopBuiltInAutoPlayAI(selfAccountId);
         return;
     }
 
@@ -5760,16 +5850,21 @@ void RunBuiltInAutoPlayAI(
         return;
     }
 
+    bool needsStart =
+        !FeatureState::AutoPlayBuiltInAiRunning.load() ||
+        FeatureState::AutoPlayLastAiStartAccountId.load() != selfAccountId;
+
     if (Originals::MCLogicBattleManager_StartAI &&
-        (FeatureState::AutoPlayLastAiStartAccountId.load() != selfAccountId ||
-         CooldownElapsed(
-             FeatureState::LastAutoPlayAiStartAttempt,
-             RuntimeConfig::AutoPlayAiStartCooldownMs,
-             now
-         ))) {
+        needsStart &&
+        CooldownElapsed(
+            FeatureState::LastAutoPlayAiStartAttempt,
+            RuntimeConfig::AutoPlayAiStartCooldownMs,
+            now
+        )) {
         int difficulty = std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
         FeatureState::AutoPlayAiDifficulty = difficulty;
         Originals::MCLogicBattleManager_StartAI(selfManager, difficulty);
+        FeatureState::AutoPlayBuiltInAiRunning = true;
         FeatureState::AutoPlayLastAiStartAccountId = selfAccountId;
         FeatureState::LastAutoPlayAiStartAttempt = now;
     }
@@ -5843,6 +5938,14 @@ void TryAutoPlayLevelUp(
     FeatureState::LastAutoPlayLevelAttempt = now;
 }
 
+bool IsAutoPlaySnapshotActionable(const AutoPlaySnapshot& snapshot) {
+    return snapshot.accountId != 0 &&
+        snapshot.round > 0 &&
+        snapshot.hp > 0 &&
+        snapshot.coin >= 0 &&
+        snapshot.level > 0;
+}
+
 void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point now) {
     if (!FeatureState::AutoPlayEnabled.load()) {
         if (FeatureState::AutoPlayWasRunning.load()) {
@@ -5856,6 +5959,11 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     }
 
     AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
+    if (!IsAutoPlaySnapshotActionable(snapshot)) {
+        StopAutoPlayRuntime(selfAccountId);
+        return;
+    }
+
     int pressure = UpdateAutoPlayLearning(snapshot);
     int strategy = SelectAutoPlayStrategy(snapshot, pressure);
     AutoPlayGoldPlan goldPlan = BuildAutoPlayGoldPlan(snapshot, strategy, pressure);
@@ -5925,6 +6033,15 @@ void RunShopAutomation(uint64_t selfAccountId) {
             RuntimeConfig::ShopActionCooldownMs,
             now
         )) {
+        return;
+    }
+
+    bool hasBuyAction =
+        FeatureState::ShopBuyFreeHero ||
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopBuyRecommendLineup;
+    bool hasRefreshAction = FeatureState::ShopRefresh.load();
+    if ((hasBuyAction || hasRefreshAction) && !IsShopPanelReadyForAutomation()) {
         return;
     }
 
@@ -6084,8 +6201,12 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     if (!FeatureState::ShopRefresh ||
         !needRefreshShop ||
-        !FeatureState::HeroShopPanel ||
         !Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop) {
+        return;
+    }
+
+    void* heroShopPanel = FeatureState::HeroShopPanel.load();
+    if (!heroShopPanel || !IsShopPanelReadyForAutomation()) {
         return;
     }
 
@@ -6109,7 +6230,7 @@ void RunShopAutomation(uint64_t selfAccountId) {
           coin - refreshCost >= FeatureState::ShopKeepGoldAt));
 
     if (canRefresh) {
-        Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop(FeatureState::HeroShopPanel);
+        Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop(heroShopPanel);
         MarkShopRefreshAttempt(now);
     }
 }
@@ -6379,6 +6500,7 @@ void ResetVisualSettings() {
     UiState::MoveFromTitleBarOnly = true;
     UiState::ResizeFromEdges = false;
     UiState::UseFixedMenuPosition = false;
+    UiState::ShowNextEnemyHud = false;
     UiState::MenuWidth = 760.0f;
     UiState::MenuHeight = 560.0f;
     UiState::MenuPosX = 20.0f;
@@ -6425,6 +6547,7 @@ void ResetFeatureSettings() {
     FeatureState::AutoPlayStrategyChanges = 0;
     FeatureState::AutoPlayLastRound = 0;
     FeatureState::AutoPlayLastHp = -1;
+    FeatureState::AutoPlayBuiltInAiRunning = false;
     FeatureState::AutoPlayLastAiStartAccountId = 0;
     FeatureState::AutoPlayFocusGroup = 0;
     FeatureState::AutoPlayTargetHeroId = 0;
@@ -6483,6 +6606,8 @@ void ResetFeatureSettings() {
     FeatureState::ArenaPrice = 5;
     FeatureState::ArenaSkipRound = false;
     FeatureState::ArenaSkipTargetRound = 1;
+    FeatureState::ArenaLastSkipSourceRound = 0;
+    FeatureState::ArenaLastSkipTargetRound = 0;
     FeatureState::ArenaSpeedHack = false;
     FeatureState::ArenaTimeScale = 2.0f;
     ApplyArenaSpeedHack(0);
@@ -6656,6 +6781,7 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     if (key == "themeIndex") UiState::ThemeIndex = ParseConfigInt(value, UiState::ThemeIndex);
     else if (key == "fontIndex") UiState::FontIndex = ParseConfigInt(value, UiState::FontIndex);
     else if (key == "shopShowSelectedOnly") UiState::ShopShowSelectedOnly = ParseConfigBool(value, UiState::ShopShowSelectedOnly);
+    else if (key == "showNextEnemyHud") UiState::ShowNextEnemyHud = ParseConfigBool(value, UiState::ShowNextEnemyHud);
     else if (key == "moveFromTitleBarOnly") UiState::MoveFromTitleBarOnly = ParseConfigBool(value, UiState::MoveFromTitleBarOnly);
     else if (key == "resizeFromEdges") UiState::ResizeFromEdges = ParseConfigBool(value, UiState::ResizeFromEdges);
     else if (key == "useFixedMenuPosition") UiState::UseFixedMenuPosition = ParseConfigBool(value, UiState::UseFixedMenuPosition);
@@ -6758,6 +6884,7 @@ bool SaveConfigToFile(const std::string& path) {
     WriteConfigInt(file, "themeIndex", UiState::ThemeIndex);
     WriteConfigInt(file, "fontIndex", UiState::FontIndex);
     WriteConfigBool(file, "shopShowSelectedOnly", UiState::ShopShowSelectedOnly);
+    WriteConfigBool(file, "showNextEnemyHud", UiState::ShowNextEnemyHud);
     WriteConfigBool(file, "moveFromTitleBarOnly", UiState::MoveFromTitleBarOnly);
     WriteConfigBool(file, "resizeFromEdges", UiState::ResizeFromEdges);
     WriteConfigBool(file, "useFixedMenuPosition", UiState::UseFixedMenuPosition);
@@ -7284,6 +7411,8 @@ namespace UiCache {
     std::vector<PlayerInfoRow> InfoPlayerRows;
     bool InfoPlayersReady = false;
     std::chrono::steady_clock::time_point LastInfoPlayerRefresh{};
+    std::string NextEnemyHudText;
+    std::chrono::steady_clock::time_point LastNextEnemyHudRefresh{};
     ImVec2 MenuWindowPos{};
     ImVec2 MenuWindowSize{};
 }
@@ -8067,7 +8196,7 @@ void DrawSettingsTab() {
             }
 
             ImGui::Spacing();
-            ImGui::TextUnformatted("Saved state includes visual settings, window settings, and Auto-Play, Combat, Shop, and Arena controls.");
+            ImGui::TextUnformatted("Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls.");
 
             ImGui::EndTabItem();
         }
@@ -8101,6 +8230,7 @@ void DrawSettingsTab() {
             }
 
             ImGui::SeparatorText("Behavior");
+            changed |= DrawAtomicCheckbox("Show next enemy HUD", UiState::ShowNextEnemyHud);
             changed |= DrawAtomicCheckbox("Move from title bar only", UiState::MoveFromTitleBarOnly);
             changed |= DrawAtomicCheckbox("Resize from edges", UiState::ResizeFromEdges);
 
@@ -9836,6 +9966,111 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
     return rows;
 }
 
+std::string BuildNextEnemyHudText(uint64_t selfAccountId) {
+    if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
+        return "Next enemy: Waiting";
+    }
+
+    uint64_t enemyId = 0;
+
+    if (Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID) {
+        enemyId = Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+            nullptr,
+            selfAccountId
+        );
+    }
+
+    if (enemyId == 0) {
+        void* invasionManager = GetLogicInvasionManager();
+        enemyId = GetCurrentPairFromInvasion(invasionManager, selfAccountId);
+    }
+
+    if (enemyId == 0) {
+        enemyId = GetCurrentOpponentFromManager(GetBattleManagerByAccountId(selfAccountId));
+    }
+
+    if (enemyId != 0 && enemyId != selfAccountId) {
+        std::string enemyName = GetBattlePlayerName(enemyId);
+        if (enemyName.empty()) {
+            enemyName = FormatUInt64(enemyId);
+        }
+        return "Next enemy: " + enemyName;
+    }
+
+    if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
+        return "Next enemy: Waiting";
+    }
+
+    std::vector<OpponentPredictionRow> rows = BuildOpponentPredictions(selfAccountId);
+    auto best = std::max_element(
+        rows.begin(),
+        rows.end(),
+        [](const OpponentPredictionRow& left, const OpponentPredictionRow& right) {
+            return left.percent < right.percent;
+        }
+    );
+
+    if (best == rows.end() || best->percent <= 0) {
+        return "Next enemy: Waiting";
+    }
+
+    std::string enemyName = best->name.empty() ? FormatUInt64(best->accountId) : best->name;
+    if (best->mirror) {
+        enemyName += " (Mirror)";
+    }
+
+    return "Next enemy: " + enemyName + " (" + FormatInt(best->percent) + "%)";
+}
+
+void RefreshNextEnemyHudText() {
+    if (!IntervalElapsed(UiCache::LastNextEnemyHudRefresh, 500)) {
+        return;
+    }
+
+    UiCache::NextEnemyHudText = BuildNextEnemyHudText(GetSelfAccountId());
+}
+
+void DrawNextEnemyHud() {
+    if (!UiState::ShowNextEnemyHud.load()) {
+        return;
+    }
+
+    RefreshNextEnemyHudText();
+    if (UiCache::NextEnemyHudText.empty()) {
+        return;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.DisplaySize.x <= 0.0f || io.DisplaySize.y <= 0.0f) {
+        return;
+    }
+
+    ImFont* font = ImGui::GetFont();
+    float fontSize = ImGui::GetFontSize() * 1.15f;
+    const char* text = UiCache::NextEnemyHudText.c_str();
+    ImVec2 textSize = font->CalcTextSizeA(fontSize, 10000.0f, 0.0f, text);
+    float maxWidth = std::max(io.DisplaySize.x - 16.0f, 16.0f);
+
+    if (textSize.x > maxWidth) {
+        fontSize = std::max(fontSize * (maxWidth / textSize.x), 12.0f);
+        textSize = font->CalcTextSizeA(fontSize, 10000.0f, 0.0f, text);
+    }
+
+    float bottomOffset = std::clamp(io.DisplaySize.y * 0.12f, 72.0f, 150.0f);
+    ImVec2 pos(
+        std::max((io.DisplaySize.x - textSize.x) * 0.5f, 8.0f),
+        std::max(io.DisplaySize.y - bottomOffset - textSize.y * 0.5f, 8.0f)
+    );
+
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    ImU32 shadowColor = ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.80f));
+    ImU32 textColor = ImGui::GetColorU32(ImVec4(1.0f, 0.92f, 0.72f, 1.0f));
+
+    drawList->AddText(font, fontSize, ImVec2(pos.x + 2.0f, pos.y + 2.0f), shadowColor, text);
+    drawList->AddText(font, fontSize, ImVec2(pos.x - 1.0f, pos.y + 1.0f), shadowColor, text);
+    drawList->AddText(font, fontSize, pos, textColor, text);
+}
+
 void DrawOpponentPredictionTable(uint64_t selfAccountId) {
     if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         DrawWaitingText("Waiting for battle manager list");
@@ -11084,6 +11319,7 @@ namespace Hooks {
         }
 
         DrawMainMenu();
+        DrawNextEnemyHud();
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -11170,7 +11406,7 @@ void SetupThread() {
 #define DO_API(ret, name, args) \
     name = reinterpret_cast<decltype(name)>(xdl_sym(handle.liblogic, #name, nullptr));
 
-#include "Il2CppVersions/api/2019.4.22f1.h"
+#include "Il2CppVersions/api/2019.4.33f1.h"
 
 #undef DO_API
 

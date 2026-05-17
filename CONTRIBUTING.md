@@ -39,7 +39,7 @@ git lfs pull
 - Use `dump/dump.cs` to verify IL2CPP class names, method signatures, return
   types, and fields before changing native calls.
 - Keep the default target `arm64-v8a`.
-- Keep Unity compatibility aligned with `2019.4.22f1`.
+- Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
   intentionally changes.
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
@@ -57,7 +57,9 @@ git lfs pull
   `prevRealPlayerEnemy` before falling back to heuristic account ordering.
 - For Shop changes, preserve the existing throttled automation model: buy,
   repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
-  bounded, snapshot-based, and retryable.
+  bounded, snapshot-based, and retryable. Buy and refresh UI actions should also
+  wait for a non-delayed, non-spectate, operable shop panel when those panel
+  bindings are available.
 - For Auto-Play changes, preserve the 250 ms tick and bounded action model:
   built-in AI startup, deployment/formation moves, level-up actions, and auction
   bids must stay cooldown-based. Use runtime snapshots, table metadata, current
@@ -65,8 +67,9 @@ git lfs pull
   unbounded searches or long lock holds. Keep gold-interest decisions centralized
   in the Auto-Play gold plan so shop spending, auction bids, passive gold,
   free-economy assists, and level-up actions share the same reserve logic.
-  Auto-Play should not enable or disable Arena SpeedHack; SpeedHack remains an
-  explicit Arena control.
+  Built-in AI startup should be stateful so `StartAI` is not replayed
+  continuously for the same account. Auto-Play should not enable or disable
+  Arena SpeedHack; SpeedHack remains an explicit Arena control.
 - Auto-Play depends on dump-backed bindings for
   `MCLogicBattleManager.StartAI`, `TryAutoDeploy`, `OnPlayerLvlUp`,
   `GetLineupWorth`, `CalcCurrentFightValue`,
@@ -83,8 +86,14 @@ git lfs pull
 - Arena Skip Round depends on `MCLogicBattleData.get_logicRoundMgr`,
   `LogicRoundMgr.SetRound(UInt32)`, and `LogicRoundMgr.NextRound(Boolean)`.
   Keep the UI in a `Waiting for ...` state while those bindings are missing.
+  Automatic skip should avoid fight/result phases and suppress repeated
+  requests for the same source round and target round.
 - Arena SpeedHack depends on `UnityEngine.Time.set_timeScale(Single)`. Reset
-  the time scale when disabling the feature or resetting feature state.
+  the time scale when disabling the feature, leaving active battle state, or
+  resetting feature state.
+- Settings includes a persisted next-enemy HUD toggle. Keep the HUD as
+  lightweight bottom-center foreground text and throttle current-opponent or
+  prediction refreshes instead of doing prediction work every render frame.
 - Keep Settings save/load behavior scoped to the project config file under the
   running game package directory, normally
   `/data/data/<game-package>/files/mcgg_config.ini`.
@@ -106,6 +115,8 @@ HP pressure, passive gold, free economy, unlimited hero pool, shop-lock bypass
 helpers, Skip Round, and SpeedHack.
 Appearance includes ImGui
 Dark, Catppuccin Mocha, and additional palettes inspired by Dear ImGui issue #707.
+Settings includes the optional next-enemy HUD alongside menu size, position,
+style, and save/load controls.
 Test diagnostics are split into tabbed sections for prediction, bindings, round
 state, player data, battle managers, battle bridge, shop UI, behavior API, and
 all-manager views. New user-facing controls should report delayed runtime
@@ -147,6 +158,8 @@ Follow the existing C++ style in `jni/Main.cpp`:
   navigation surface.
 - Keep config parsing simple, bounded, and compatible with the existing
   key-value Settings file format.
+- Keep retryable IL2CPP field misses throttled instead of permanently failed or
+  repeatedly rescanned from hot feature paths.
 
 ## Build Verification
 
