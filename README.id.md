@@ -73,12 +73,17 @@ Referensi publik utama:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   mengidentifikasi game ini sebagai judul strategi multiplayer auto-chess dari
-  Vizta Games, mencantumkan 10M+ download, mengarah ke website resmi dan kanal
-  YouTube, serta menunjukkan listing diperbarui pada 2026-01-09.
+  Vizta Games, mencantumkan 10M+ download, serta mengarah ke website resmi dan
+  kanal YouTube. Tanggal update store dapat berbeda berdasarkan region atau
+  cache, jadi gunakan listing untuk identitas produk dan link, bukan asumsi
+  native binding.
 - [Website resmi](https://magicchessgogo.com/) menjelaskan loop inti sebagai
   recruit dan upgrade hero terinspirasi MLBB, membentuk lineup untuk battle
   8-player, memakai skill Commander, memilih Go Go Cards pada tahap penting,
   dan membangun kombinasi role/synergy.
+- [Berita global launch MOONTON](https://en.moonton.com/news/195.html)
+  mendeskripsikan MCGG sebagai auto-battler PvP 8-player dan mencatat sistem
+  yang lebih tahan lama seperti synergy, combat buff, dan mekanik seasonal.
 - [Kanal YouTube resmi](https://www.youtube.com/@MagicChessGoGo) serta materi
   gameplay/guide berguna untuk mengamati alur UI, perilaku shop, pilihan
   Commander, placement board, pacing economy, pilihan Go Go Card, dan istilah
@@ -223,14 +228,19 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Tabel data Shop dan Arena yang panjang hanya merender row yang terlihat agar
   scroll dan perpindahan tab tetap responsif setelah metadata tabel dimuat.
 
-Feature binding di-resolve terhadap local reference artifacts dan metadata IL2CPP runtime. Method dan field yang belum tersedia akan dicoba ulang secara periodik, bukan langsung disimpan permanen sebagai unavailable. Jika binding belum siap, overlay akan menampilkan status `Waiting for ...`.
+Feature binding di-resolve terhadap local reference artifacts dan metadata
+IL2CPP runtime. Method dan field yang belum tersedia akan dicoba ulang secara
+periodik, bukan langsung disimpan permanen sebagai unavailable. Scan method
+kosong dan lookup field yang missing sama-sama memakai retry backoff supaya
+render thread tidak melakukan scan metadata besar pada setiap frame. Jika
+binding belum siap, overlay akan menampilkan status `Waiting for ...`.
 
 Prediksi opponent menggabungkan sumber runtime sebelum heuristik publik.
 Observasi current-opponent live dan reverse pair tetap paling kuat, lalu urutan
 invader berbasis dump, pembelajaran siklus opponent terbaru, fallback
-round-robin, dan bobot riwayat yang dibatasi. Row prediksi di-cache pada cadence
-500 ms agar tab Test dan HUD next-enemy tidak membangun ulang state managed pada
-setiap render frame.
+round-robin, pembelajaran jarak dalam siklus, dan bobot riwayat yang dibatasi.
+Row prediksi di-cache pada cadence 500 ms agar tab Test dan HUD next-enemy tidak
+membangun ulang state managed pada setiap render frame.
 
 ## Arsitektur
 
@@ -489,7 +499,9 @@ Pada saat load dan selama frame presentation, `jni/Main.cpp` menjalankan urutan 
    `2019.4.33f1` dari deklarasi API bundled, lalu attach ke IL2CPP domain.
 5. Setup thread me-resolve dan melakukan hook `UnityEngine.Input.GetTouch` saat
    metadata method tersedia.
-6. `RuntimeState::Il2CppReady` diset dan retry feature binding diminta.
+6. `RuntimeState::Il2CppReady` diset, setup thread menjalankan pass pertama
+   feature binding yang guarded, dan retry pada render-frame berikutnya tetap
+   memakai backoff.
 7. Frame hook valid pertama membuat context ImGui, mematikan persistence `.ini`
    ImGui, me-resolve path config dari nama package game, memuat konfigurasi
    proyek jika tersedia, memuat font, dan menerapkan theme serta style settings.
@@ -526,13 +538,14 @@ area yang rawan bug berikut:
 - Startup wait harus tetap berada di setup thread detached, bukan constructor,
   agar loading native library tidak memblokir startup Unity lebih lama dari yang
   diperlukan.
-- Pekerjaan render-frame memiliki budget. Retry binding dan loading tabel boleh
+- Pekerjaan render-frame memiliki budget. Retry binding, loading tabel, refresh
+  HUD prediksi, serta scan board/opponent Auto-Play yang lebih berat boleh
   menunda tick automation berikutnya ke frame selanjutnya, tetapi tick tersebut
   tetap retryable.
-- Lookup method sengaja hanya memakai hasil method yang sukses sebagai cache
-  reusable. Scan method kosong tetap retryable. Lookup field hanya meng-cache
-  miss di balik backoff retry binding. Jangan mengubahnya menjadi failure
-  permanen.
+- Lookup method memakai hasil method yang sukses sebagai cache reusable dan
+  menyimpan scan kosong di balik miss backoff singkat. Lookup field juga hanya
+  meng-cache miss di balik backoff retry binding. Jangan mengubahnya menjadi
+  failure permanen.
 - Matching method memakai class name, method name, jumlah parameter, dan
   containment nama parameter yang case-insensitive. Binding baru yang sensitif
   terhadap overload harus dicek terhadap dump, bukan hanya compile sukses.
@@ -547,9 +560,9 @@ area yang rawan bug berikut:
   backup yang di-capture. Edit user pada toggle assist saat Auto-Play aktif
   dapat kembali ke nilai sebelum Auto-Play saat Auto-Play berhenti.
 - Prediksi opponent menggabungkan pair data exact, state invasion manager,
-  urutan invader berbasis dump, fallback round-robin, dan riwayat pertemuan
-  terbaru. Hanya current opponent lokal yang exact yang boleh ditampilkan
-  sebagai `100%`.
+  urutan invader berbasis dump, fallback round-robin, jarak siklus terbaru, dan
+  riwayat pertemuan terbaru. Hanya current opponent lokal yang exact yang boleh
+  ditampilkan sebagai `100%`.
 - SpeedHack mengubah time scale Unity global. Fitur ini harus tetap reset ke
   `1.0x` saat dinonaktifkan, saat state battle aktif hilang, atau saat feature
   state di-reset.

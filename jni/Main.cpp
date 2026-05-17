@@ -145,11 +145,13 @@ int GLHeight = 0;
 void* UnityLibraryHandle = nullptr;
 
 std::unordered_map<std::string, std::vector<MethodInfo*>> MultiMethodCache;
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> MethodMissCache;
 std::unordered_map<std::string, FieldInfo*> FieldCache;
 std::unordered_map<std::string, std::chrono::steady_clock::time_point> FieldMissCache;
 
 namespace RuntimeConfig {
     constexpr int BindingRetryMs = 2000;
+    constexpr int MissingMethodRetryMs = 5000;
     constexpr int ReferenceRefreshMs = 100;
     constexpr int MatchStateCheckMs = 500;
     constexpr int TableRetryMs = 2000;
@@ -172,6 +174,7 @@ namespace RuntimeConfig {
     constexpr int AutoPlayLevelCooldownMs = 900;
     constexpr int AutoPlayAuctionCooldownMs = 750;
     constexpr int MaxShopTargetChecks = 256;
+    constexpr int MaxAutoPlayFallbackEnemyManagers = 4;
     constexpr int MaxManagedDictionaryEntries = 8192;
     constexpr int MaxManagedListItems = 2048;
     constexpr int MaxManagedStringChars = 4096;
@@ -188,6 +191,7 @@ namespace RuntimeMutex {
 namespace RuntimeState {
     std::atomic<bool> Il2CppReady{false};
     std::atomic<bool> BindingRetryRequested{false};
+    std::atomic<bool> BindingResolveInProgress{false};
 }
 
 void TickOpponentPredictionHistory(uint64_t selfAccountId);
@@ -965,6 +969,7 @@ FieldInfo* GetFieldInfoFromName(
     return nullptr;
 }
 
+// Resolves an instance field address from IL2CPP metadata and a bounded offset.
 bool ResolveInstanceFieldAddress(Il2CppObject* instance, FieldInfo* field, void** address) {
     if (!instance || !field || !address || !il2cpp_field_get_offset) {
         return false;
@@ -979,6 +984,7 @@ bool ResolveInstanceFieldAddress(Il2CppObject* instance, FieldInfo* field, void*
     return true;
 }
 
+// Reads an instance field by offset through a bounded direct copy.
 bool ReadInstanceFieldByOffset(Il2CppObject* instance, FieldInfo* field, void* outValue, size_t valueSize) {
     if (!IsIl2CppRuntimeReady() || !outValue || valueSize == 0) {
         return false;
@@ -993,6 +999,7 @@ bool ReadInstanceFieldByOffset(Il2CppObject* instance, FieldInfo* field, void* o
     return true;
 }
 
+// Writes an instance field by offset through direct memory when it is safe.
 bool WriteInstanceFieldByOffset(Il2CppObject* instance, FieldInfo* field, const void* value, size_t valueSize) {
     if (!IsIl2CppRuntimeReady() || !value || valueSize == 0) {
         return false;
@@ -1208,8 +1215,17 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
     {
         std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
         auto cached = MultiMethodCache.find(cacheKey);
-        if (cached != MultiMethodCache.end() && !cached->second.empty()) {
-            return cached->second;
+        if (cached != MultiMethodCache.end()) {
+            if (!cached->second.empty()) {
+                return cached->second;
+            }
+
+            auto miss = MethodMissCache.find(cacheKey);
+            if (miss != MethodMissCache.end() &&
+                std::chrono::steady_clock::now() - miss->second <
+                    std::chrono::milliseconds(RuntimeConfig::MissingMethodRetryMs)) {
+                return foundMethods;
+            }
         }
     }
 
@@ -1288,6 +1304,11 @@ std::vector<MethodInfo*> GetAllMethodInfosFromName(
     {
         std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
         MultiMethodCache[cacheKey] = foundMethods;
+        if (foundMethods.empty()) {
+            MethodMissCache[cacheKey] = std::chrono::steady_clock::now();
+        } else {
+            MethodMissCache.erase(cacheKey);
+        }
     }
     return foundMethods;
 }
@@ -1373,14 +1394,14 @@ bool HookResolvedMethod(
     }
 
     T hookedOriginal = nullptr;
-    std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
 
-    if (!original) {
-        if (DobbyHook(
+    if (DobbyHook(
             method,
             replacement,
             reinterpret_cast<void**>(&hookedOriginal)
         ) == RT_SUCCESS) {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::CacheMutex);
+        if (!original) {
             original = hookedOriginal;
         }
     }
@@ -1388,6 +1409,7 @@ bool HookResolvedMethod(
     return original != nullptr;
 }
 
+// Advances a timestamp only when the requested interval has actually passed.
 bool IntervalElapsed(
     std::chrono::steady_clock::time_point& lastRun,
     int intervalMs,
@@ -1402,6 +1424,7 @@ bool IntervalElapsed(
     return false;
 }
 
+// Checks a cooldown without mutating its timestamp.
 bool CooldownElapsed(
     const std::chrono::steady_clock::time_point& lastRun,
     int intervalMs,
@@ -1411,6 +1434,7 @@ bool CooldownElapsed(
         now - lastRun >= std::chrono::milliseconds(intervalMs);
 }
 
+// Checks whether this render frame has spent its managed-work budget.
 bool FrameBudgetExceeded(
     const std::chrono::steady_clock::time_point& frameStart,
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()
@@ -1418,10 +1442,12 @@ bool FrameBudgetExceeded(
     return now - frameStart >= std::chrono::milliseconds(RuntimeConfig::FeatureFrameBudgetMs);
 }
 
+// Confirms the IL2CPP domain and thread APIs are available before managed calls.
 bool HasIl2CppDomainApi() {
     return il2cpp_domain_get && il2cpp_thread_attach;
 }
 
+// Confirms the IL2CPP assembly APIs are available before metadata scans.
 bool HasIl2CppAssemblyScanApi() {
     return il2cpp_domain_get &&
         il2cpp_domain_get_assemblies &&
@@ -1429,6 +1455,7 @@ bool HasIl2CppAssemblyScanApi() {
         il2cpp_class_from_name;
 }
 
+// Confirms the IL2CPP method APIs are available before method resolution.
 bool HasIl2CppMethodScanApi() {
     return HasIl2CppAssemblyScanApi() &&
         il2cpp_class_get_methods &&
@@ -1439,12 +1466,14 @@ bool HasIl2CppMethodScanApi() {
         il2cpp_class_get_name;
 }
 
+// Confirms the IL2CPP field APIs are available before field resolution.
 bool HasIl2CppFieldScanApi() {
     return HasIl2CppAssemblyScanApi() &&
         (il2cpp_class_get_field_from_name ||
          (il2cpp_class_get_fields && il2cpp_field_get_name));
 }
 
+// Confirms setup has resolved IL2CPP and the runtime has a live domain.
 bool IsIl2CppRuntimeReady() {
     if (!RuntimeState::Il2CppReady || !HasIl2CppDomainApi()) {
         return false;
@@ -1686,6 +1715,18 @@ void ResolveFeatureBindings() {
     if (!IsIl2CppRuntimeReady() || !HasIl2CppMethodScanApi()) {
         return;
     }
+
+    bool expected = false;
+    if (!RuntimeState::BindingResolveInProgress.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
+    struct BindingResolveGuard {
+        std::atomic<bool>& flag;
+        ~BindingResolveGuard() {
+            flag.store(false);
+        }
+    } bindingResolveGuard{RuntimeState::BindingResolveInProgress};
 
     ResolveOriginal(
         Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName,
@@ -2566,6 +2607,7 @@ void ResolveFeatureBindings() {
     );
 }
 
+// Retries unresolved feature bindings on the shared binding cadence.
 void RetryFeatureBindingsIfNeeded() {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -2578,6 +2620,7 @@ void RetryFeatureBindingsIfNeeded() {
     }
 }
 
+// Converts a managed IL2CPP string into a bounded native std::string.
 std::string ManagedStringToStd(Il2CppString* value) {
     if (!value) {
         return {};
@@ -2593,6 +2636,7 @@ std::string ManagedStringToStd(Il2CppString* value) {
     return managedString->str();
 }
 
+// Filters placeholder and non-hero table names from automation lists.
 bool IsForbidHeroName(const std::string& name) {
     return name.empty() ||
         name == "Dijiang" ||
@@ -2602,6 +2646,7 @@ bool IsForbidHeroName(const std::string& name) {
         name == "Magic ATK";
 }
 
+// Returns the cached or live self account id value used by runtime features.
 uint64_t GetSelfAccountId() {
     static FieldInfo* selfAccountIdField = nullptr;
 
@@ -2612,6 +2657,7 @@ uint64_t GetSelfAccountId() {
     return GetStaticField<uint64_t>(selfAccountIdField);
 }
 
+// Returns the cached or live self logic battle manager value used by runtime features.
 void* GetSelfLogicBattleManager() {
     static FieldInfo* selfBattleManagerField = nullptr;
 
@@ -2623,6 +2669,7 @@ void* GetSelfLogicBattleManager() {
     return GetStaticField<void*>(selfBattleManagerField);
 }
 
+// Returns the cached or live battle manager by account id value used by runtime features.
 void* GetBattleManagerByAccountId(uint64_t accountId) {
     if (accountId == 0) {
         return nullptr;
@@ -2661,11 +2708,13 @@ void* GetBattleManagerByAccountId(uint64_t accountId) {
     return nullptr;
 }
 
+// Checks whether an account ID belongs to the local player.
 bool IsSelfAccount(uint64_t accountId) {
     uint64_t selfAccountId = GetSelfAccountId();
     return selfAccountId != 0 && accountId == selfAccountId;
 }
 
+// Checks whether a battle manager instance belongs to the local player.
 bool IsSelfBattleManager(void* battleManager) {
     if (!battleManager) {
         return false;
@@ -2682,6 +2731,7 @@ bool IsSelfBattleManager(void* battleManager) {
     return IsSelfAccount(Originals::MCLogicBattleManager_get_m_uAccountId(battleManager));
 }
 
+// Parses account id or default from user or config text with a safe fallback.
 uint64_t ParseAccountIdOrDefault(const std::string& value, uint64_t fallback) {
     if (value.empty()) {
         return fallback;
@@ -2697,6 +2747,7 @@ uint64_t ParseAccountIdOrDefault(const std::string& value, uint64_t fallback) {
     return static_cast<uint64_t>(parsed);
 }
 
+// Returns the cached or live logic manager from battle manager value used by runtime features.
 void* GetLogicManagerFromBattleManager(void* battleManager) {
     static FieldInfo* logicManagerField = nullptr;
 
@@ -2709,6 +2760,7 @@ void* GetLogicManagerFromBattleManager(void* battleManager) {
         nullptr;
 }
 
+// Returns the cached or live logic invasion manager value used by runtime features.
 void* GetLogicInvasionManager() {
     void* logicManager = GetLogicManagerFromBattleManager(GetSelfLogicBattleManager());
 
@@ -2728,6 +2780,7 @@ void* GetLogicInvasionManager() {
         nullptr;
 }
 
+// Returns the cached or live battle manager account id value used by runtime features.
 uint64_t GetBattleManagerAccountId(void* battleManager) {
     if (!battleManager) {
         return 0;
@@ -2740,6 +2793,7 @@ uint64_t GetBattleManagerAccountId(void* battleManager) {
     return 0;
 }
 
+// Returns the cached or live mirror origin account id value used by runtime features.
 uint64_t GetMirrorOriginAccountId(void* maybeMirrorManager) {
     if (!maybeMirrorManager) {
         return 0;
@@ -2803,6 +2857,7 @@ uint64_t LookupPairInDictionary(
     return 0;
 }
 
+// Returns the cached or live current pair from invasion value used by runtime features.
 uint64_t GetCurrentPairFromInvasion(void* invasionManager, uint64_t accountId) {
     if (!invasionManager || accountId == 0) {
         return 0;
@@ -2852,6 +2907,7 @@ struct CurrentOpponentLookup {
     bool mirror = false;
 };
 
+// Returns the cached or live current opponent from manager detailed value used by runtime features.
 CurrentOpponentLookup GetCurrentOpponentFromManagerDetailed(void* battleManager) {
     CurrentOpponentLookup result{};
 
@@ -2876,6 +2932,7 @@ CurrentOpponentLookup GetCurrentOpponentFromManagerDetailed(void* battleManager)
     return result;
 }
 
+// Returns the cached or live current opponent from manager value used by runtime features.
 uint64_t GetCurrentOpponentFromManager(void* battleManager) {
     return GetCurrentOpponentFromManagerDetailed(battleManager).accountId;
 }
@@ -2923,6 +2980,7 @@ CurrentOpponentLookup GetCurrentOpponentForAccount(
     return result;
 }
 
+// Returns the cached or live manager pointer account field value used by runtime features.
 uint64_t GetManagerPointerAccountField(void* battleManager, FieldInfo* field) {
     void* value = battleManager && field ?
         GetField<void*>(reinterpret_cast<Il2CppObject*>(battleManager), field) :
@@ -2936,6 +2994,7 @@ uint64_t GetManagerPointerAccountField(void* battleManager, FieldInfo* field) {
     return GetMirrorOriginAccountId(value);
 }
 
+// Checks the current monster round condition before work proceeds.
 bool IsCurrentMonsterRound(void* invasionManager) {
     if (Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound &&
         Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound(nullptr)) {
@@ -2952,6 +3011,7 @@ bool IsCurrentMonsterRound(void* invasionManager) {
         Originals::LogicInvasionMgr_IsMonsterRound(invasionManager, round);
 }
 
+// Checks the real player pairing mode condition before work proceeds.
 bool IsRealPlayerPairingMode(void* invasionManager) {
     if (Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode) {
         return Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode(nullptr);
@@ -3071,6 +3131,7 @@ std::vector<uint64_t> GetInvaderAccountOrder(
     return orderedAccounts;
 }
 
+// Refreshes managed references on its throttled runtime cadence.
 void RefreshManagedReferences(bool force = false) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -3132,6 +3193,7 @@ void RefreshManagedReferences(bool force = false) {
     FeatureState::HeroShopItemList = heroShopItemList;
 }
 
+// Returns the cached or live table cache counts value used by runtime features.
 TableCacheCounts GetTableCacheCounts() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     return {
@@ -3141,6 +3203,7 @@ TableCacheCounts GetTableCacheCounts() {
     };
 }
 
+// Attempts the get hero table entry action and reports whether it was safe to run.
 bool TryGetHeroTableEntry(int heroId, HeroTableEntry* entry) {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     auto it = FeatureState::Heroes.find(heroId);
@@ -3156,6 +3219,7 @@ bool TryGetHeroTableEntry(int heroId, HeroTableEntry* entry) {
     return true;
 }
 
+// Attempts the get equip table entry action and reports whether it was safe to run.
 bool TryGetEquipTableEntry(int equipId, EquipTableEntry* entry) {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     auto it = FeatureState::Equips.find(equipId);
@@ -3171,6 +3235,7 @@ bool TryGetEquipTableEntry(int equipId, EquipTableEntry* entry) {
     return true;
 }
 
+// Attempts the get card table entry action and reports whether it was safe to run.
 bool TryGetCardTableEntry(int cardId, CardTableEntry* entry) {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     auto it = FeatureState::Cards.find(cardId);
@@ -3186,11 +3251,13 @@ bool TryGetCardTableEntry(int cardId, CardTableEntry* entry) {
     return true;
 }
 
+// Returns the cached or live shop hero targets snapshot value used by runtime features.
 std::unordered_map<int, HeroAutomationState> GetShopHeroTargetsSnapshot() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     return FeatureState::ShopSelectedHeroes;
 }
 
+// Returns the cached or live selected shop hero targets snapshot value used by runtime features.
 std::vector<std::pair<int, HeroAutomationState>> GetSelectedShopHeroTargetsSnapshot() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<std::pair<int, HeroAutomationState>> targets;
@@ -3205,6 +3272,7 @@ std::vector<std::pair<int, HeroAutomationState>> GetSelectedShopHeroTargetsSnaps
     return targets;
 }
 
+// Updates shop hero target through the safest available runtime path.
 void SetShopHeroTarget(int heroId, const HeroAutomationState& state) {
     if (heroId <= 0 || heroId > 10000000) {
         return;
@@ -3217,6 +3285,7 @@ void SetShopHeroTarget(int heroId, const HeroAutomationState& state) {
     FeatureState::ShopSelectedHeroes[heroId] = clampedState;
 }
 
+// Coordinates deselect shop hero targets for the overlay runtime.
 void DeselectShopHeroTargets() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
 
@@ -3225,16 +3294,19 @@ void DeselectShopHeroTargets() {
     }
 }
 
+// Clears shop hero targets without touching unrelated feature state.
 void ClearShopHeroTargets() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     FeatureState::ShopSelectedHeroes.clear();
 }
 
+// Returns the cached or live tracked shop hero target count value used by runtime features.
 int GetTrackedShopHeroTargetCount() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     return static_cast<int>(FeatureState::ShopSelectedHeroes.size());
 }
 
+// Returns the cached or live sorted heroes value used by runtime features.
 std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<HeroTableEntry> heroes;
@@ -3263,6 +3335,7 @@ std::vector<HeroTableEntry> GetSortedHeroes(bool validOnly) {
     return heroes;
 }
 
+// Returns the cached or live sorted equips value used by runtime features.
 std::vector<EquipTableEntry> GetSortedEquips() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<EquipTableEntry> equips;
@@ -3287,6 +3360,7 @@ std::vector<EquipTableEntry> GetSortedEquips() {
     return equips;
 }
 
+// Returns the cached or live sorted cards value used by runtime features.
 std::vector<CardTableEntry> GetSortedCards() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::vector<CardTableEntry> cards;
@@ -3311,6 +3385,7 @@ std::vector<CardTableEntry> GetSortedCards() {
     return cards;
 }
 
+// Clears table data cache unlocked without touching unrelated feature state.
 void ClearTableDataCacheUnlocked() {
     FeatureState::TableDataLoaded = false;
     FeatureState::Heroes.clear();
@@ -3341,11 +3416,13 @@ void ClearTableDataCacheUnlocked() {
     FeatureState::LastShopBuyWasFree = false;
 }
 
+// Clears table data cache without touching unrelated feature state.
 void ClearTableDataCache() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     ClearTableDataCacheUnlocked();
 }
 
+// Checks the load table data for frame condition before work proceeds.
 bool ShouldLoadTableDataForFrame(int activeMainTab) {
     if (FeatureState::TableDataLoaded.load()) {
         return false;
@@ -3358,6 +3435,7 @@ bool ShouldLoadTableDataForFrame(int activeMainTab) {
         FeatureState::AutoPlayEnabled.load();
 }
 
+// Checks the battle active condition before work proceeds.
 bool IsBattleActive(uint64_t selfAccountId) {
     if (selfAccountId == 0) {
         return false;
@@ -3384,6 +3462,7 @@ bool IsBattleActive(uint64_t selfAccountId) {
     return false;
 }
 
+// Refreshes table data for match on its throttled runtime cadence.
 void RefreshTableDataForMatch(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -3410,6 +3489,7 @@ void RefreshTableDataForMatch(uint64_t selfAccountId) {
     FeatureState::LastSelfAccountId = battleActive ? selfAccountId : 0;
 }
 
+// Ensures table data loaded exists before file or UI work continues.
 void EnsureTableDataLoaded() {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -3659,10 +3739,12 @@ void EnsureTableDataLoaded() {
     }
 }
 
+// Checks the plausible hero id condition before work proceeds.
 bool IsPlausibleHeroId(int heroId) {
     return heroId > 0 && heroId <= 10000000;
 }
 
+// Checks the known hero id or table pending condition before work proceeds.
 bool IsKnownHeroIdOrTablePending(int heroId) {
     if (!IsPlausibleHeroId(heroId)) {
         return false;
@@ -3675,10 +3757,12 @@ bool IsKnownHeroIdOrTablePending(int heroId) {
         FeatureState::Heroes.find(heroId) != FeatureState::Heroes.end();
 }
 
+// Returns the cached or live recommend lineup target count value used by runtime features.
 int GetRecommendLineupTargetCount() {
     return std::clamp(FeatureState::ShopRecommendTargetCount.load(), 1, 99);
 }
 
+// Returns the cached or live recommend lineup hero id value used by runtime features.
 int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
     if (!Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup) {
         FeatureState::CachedRecommendLineupHeroId = 0;
@@ -3699,6 +3783,7 @@ int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
     return FeatureState::CachedRecommendLineupHeroId;
 }
 
+// Checks the recommend lineup hero condition before work proceeds.
 bool IsRecommendLineupHero(int heroId, int recommendHeroId) {
     if (!IsPlausibleHeroId(heroId)) {
         return false;
@@ -3716,6 +3801,7 @@ bool IsRecommendLineupHero(int heroId, int recommendHeroId) {
         );
 }
 
+// Formats hero label for readable overlay output.
 std::string FormatHeroLabel(int heroId) {
     if (!IsPlausibleHeroId(heroId)) {
         return "Waiting";
@@ -3729,6 +3815,7 @@ std::string FormatHeroLabel(int heroId) {
     return "Hero #" + std::to_string(heroId);
 }
 
+// Checks the shop panel ready for automation condition before work proceeds.
 bool IsShopPanelReadyForAutomation() {
     void* heroShopPanel = FeatureState::HeroShopPanel.load();
     if (!heroShopPanel) {
@@ -3760,6 +3847,7 @@ bool IsShopPanelReadyForAutomation() {
     return true;
 }
 
+// Selects shop slot from the current safe runtime options.
 bool SelectShopSlot(int slot) {
     if (slot < 0 || slot >= 5) {
         return false;
@@ -3798,6 +3886,7 @@ bool SelectShopSlot(int slot) {
     return false;
 }
 
+// Checks the valid shop item data condition before work proceeds.
 bool IsValidShopItemData(const MCLogicHeroShopItemData& shopData, int slot) {
     if (slot < 0 || slot >= 5) {
         return false;
@@ -3876,6 +3965,7 @@ void MarkShopBuyAttempt(
     FeatureState::LastShopWorthCheck = {};
 }
 
+// Checks the attempt shop refresh condition before work proceeds.
 bool CanAttemptShopRefresh(std::chrono::steady_clock::time_point now) {
     return CooldownElapsed(
             FeatureState::LastShopAction,
@@ -3889,6 +3979,7 @@ bool CanAttemptShopRefresh(std::chrono::steady_clock::time_point now) {
         );
 }
 
+// Coordinates mark shop refresh attempt for the overlay runtime.
 void MarkShopRefreshAttempt(std::chrono::steady_clock::time_point now) {
     FeatureState::LastShopAction = now;
     FeatureState::LastShopRefreshAttempt = now;
@@ -3960,6 +4051,7 @@ bool HasWorthwhileShopTarget(
     return FeatureState::CachedShopHasWorthwhileTarget;
 }
 
+// Grants hero through verified live-game bindings.
 void GiveHero(int heroId, int star) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -3990,6 +4082,7 @@ void GiveHero(int heroId, int star) {
     );
 }
 
+// Grants equip through verified live-game bindings.
 void GiveEquip(int equipId) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -4006,6 +4099,7 @@ void GiveEquip(int equipId) {
     Originals::MCEquipUtil_OnGetNewEquip(selfAccountId, equipId, &guid, upgradeState);
 }
 
+// Grants gold through verified live-game bindings.
 void GiveGold() {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -4027,10 +4121,12 @@ void GiveGold() {
     }
 }
 
+// Clamps arena time scale to the supported runtime range.
 float ClampArenaTimeScale(float value) {
     return std::clamp(value, 0.1f, 20.0f);
 }
 
+// Applies arena speed hack to the live runtime when bindings are ready.
 void ApplyArenaSpeedHack(uint64_t selfAccountId) {
     if (!Originals::UnityEngine_Time_set_timeScale) {
         return;
@@ -4054,6 +4150,7 @@ void ApplyArenaSpeedHack(uint64_t selfAccountId) {
     speedHackWasActive = active;
 }
 
+// Attempts the skip arena round to target action and reports whether it was safe to run.
 bool TrySkipArenaRoundToTarget(bool force) {
     if (!IsIl2CppRuntimeReady() ||
         !Originals::MCLogicBattleData_ILOGIC_GetGameRound ||
@@ -4113,6 +4210,7 @@ bool TrySkipArenaRoundToTarget(bool force) {
     return true;
 }
 
+// Checks the any combat power state condition before work proceeds.
 bool HasAnyCombatPowerState() {
     return FeatureState::CombatForceWin ||
         FeatureState::CombatPreventHpLoss ||
@@ -4120,6 +4218,7 @@ bool HasAnyCombatPowerState() {
         FeatureState::CombatCrippleEnemies;
 }
 
+// Applies player hp fields to the live runtime when bindings are ready.
 void ApplyPlayerHpFields(void* playerData, int hpValue, bool useMaxHp) {
     if (!playerData) {
         return;
@@ -4209,6 +4308,7 @@ void ApplyBattleManagerPowerFields(
     }
 }
 
+// Applies combat state to the live runtime when bindings are ready.
 void ApplyCombatState(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady() || selfAccountId == 0 || !HasAnyCombatPowerState()) {
         return;
@@ -4273,6 +4373,7 @@ void ApplyCombatState(uint64_t selfAccountId) {
     }
 }
 
+// Applies arena state to the live runtime when bindings are ready.
 void ApplyArenaState(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -4499,6 +4600,7 @@ struct AutoPlayGoldPlan {
     bool forceLevel = false;
 };
 
+// Publishes auto play snapshot telemetry into atomic UI telemetry.
 void PublishAutoPlaySnapshotTelemetry(const AutoPlaySnapshot& snapshot, bool ready) {
     FeatureState::AutoPlaySnapshotReady = ready;
     FeatureState::AutoPlaySnapshotAccountId = ready ? snapshot.accountId : 0;
@@ -4530,6 +4632,7 @@ void PublishAutoPlaySnapshotTelemetry(const AutoPlaySnapshot& snapshot, bool rea
     }
 }
 
+// Returns the cached or live cached auto play snapshot value used by runtime features.
 AutoPlaySnapshot GetCachedAutoPlaySnapshot() {
     AutoPlaySnapshot snapshot{};
     if (!FeatureState::AutoPlaySnapshotReady.load()) {
@@ -4560,6 +4663,7 @@ AutoPlaySnapshot GetCachedAutoPlaySnapshot() {
     return snapshot;
 }
 
+// Returns the cached or live cached auto play gold plan value used by runtime features.
 AutoPlayGoldPlan GetCachedAutoPlayGoldPlan() {
     AutoPlayGoldPlan plan{};
     plan.interestTier = FeatureState::AutoPlayInterestTier.load();
@@ -4603,6 +4707,7 @@ namespace RuntimePolicy {
     AutoPlayPolicyBackup AutoPlayBackup;
 }
 
+// Coordinates capture auto play policy backup for the overlay runtime.
 void CaptureAutoPlayPolicyBackup() {
     if (RuntimePolicy::AutoPlayBackup.captured) {
         return;
@@ -4639,6 +4744,7 @@ void CaptureAutoPlayPolicyBackup() {
     RuntimePolicy::AutoPlayBackup = backup;
 }
 
+// Coordinates restore auto play policy backup for the overlay runtime.
 void RestoreAutoPlayPolicyBackup() {
     if (!RuntimePolicy::AutoPlayBackup.captured) {
         return;
@@ -4706,6 +4812,7 @@ struct AutoPlayFormationStats {
     int enemyPositionCount = 0;
 };
 
+// Computes auto play strategy name data for the Auto-Play controller.
 const char* AutoPlayStrategyName(int strategy) {
     switch (strategy) {
         case AutoPlayStrategyEconomy:
@@ -4717,6 +4824,7 @@ const char* AutoPlayStrategyName(int strategy) {
     }
 }
 
+// Clamps auto play strategy to the supported runtime range.
 int ClampAutoPlayStrategy(int strategy) {
     return std::clamp(
         strategy,
@@ -4725,23 +4833,28 @@ int ClampAutoPlayStrategy(int strategy) {
     );
 }
 
+// Clamps auto play gold to the supported runtime range.
 int ClampAutoPlayGold(int gold, int maxGold = 999999) {
     return std::clamp(gold, 0, maxGold);
 }
 
+// Computes auto play interest tier for gold data for the Auto-Play controller.
 int AutoPlayInterestTierForGold(int gold) {
     return std::clamp(ClampAutoPlayGold(gold) / 10, 0, 5);
 }
 
+// Computes auto play interest floor for tier data for the Auto-Play controller.
 int AutoPlayInterestFloorForTier(int tier) {
     return std::clamp(tier, 0, 5) * 10;
 }
 
+// Computes auto play next interest gold for gold data for the Auto-Play controller.
 int AutoPlayNextInterestGoldForGold(int gold) {
     int tier = AutoPlayInterestTierForGold(gold);
     return tier >= 5 ? 50 : (tier + 1) * 10;
 }
 
+// Coordinates hero has group for the overlay runtime.
 bool HeroHasGroup(const HeroTableEntry& hero, int groupId) {
     if (groupId <= 0) {
         return false;
@@ -4785,6 +4898,7 @@ int ScoreHeroForAutoPlay(
     return score + quality;
 }
 
+// Checks the frontline hero condition before work proceeds.
 bool IsFrontlineHero(int heroId) {
     HeroTableEntry hero;
     if (!TryGetHeroTableEntry(heroId, &hero)) {
@@ -4797,14 +4911,17 @@ bool IsFrontlineHero(int heroId) {
         StringIncludesCaseInsensitive(hero.name, "tank");
 }
 
+// Checks the auto play frontline unit condition before work proceeds.
 bool IsAutoPlayFrontlineUnit(const AutoPlayBoardUnit& unit) {
     return IsFrontlineHero(unit.heroId) || unit.star >= 3 || unit.quality >= 4;
 }
 
+// Checks the auto play carry unit condition before work proceeds.
 bool IsAutoPlayCarryUnit(const AutoPlayBoardUnit& unit) {
     return !IsAutoPlayFrontlineUnit(unit) && (unit.star >= 2 || unit.quality >= 3);
 }
 
+// Collects auto play board units with bounded managed reads.
 std::vector<AutoPlayBoardUnit> CollectAutoPlayBoardUnits(void* battleManager) {
     std::vector<AutoPlayBoardUnit> units;
 
@@ -4929,10 +5046,12 @@ bool IsBoardCellOccupied(
     return false;
 }
 
+// Checks the valid auto play board cell condition before work proceeds.
 bool IsValidAutoPlayBoardCell(int x, int y) {
     return x >= 0 && x <= 7 && y >= 0 && y <= 3;
 }
 
+// Computes auto play column value data for the Auto-Play controller.
 int AutoPlayColumnValue(const std::array<int, 8>& values, int x) {
     if (x < 0 || x >= static_cast<int>(values.size())) {
         return 0;
@@ -4941,6 +5060,7 @@ int AutoPlayColumnValue(const std::array<int, 8>& values, int x) {
     return values[static_cast<size_t>(x)];
 }
 
+// Computes auto play nearby column value data for the Auto-Play controller.
 int AutoPlayNearbyColumnValue(const std::array<int, 8>& values, int x) {
     return AutoPlayColumnValue(values, x - 1) +
         AutoPlayColumnValue(values, x) +
@@ -5162,6 +5282,7 @@ AutoPlayBoardPlan BuildAutoPlayBoardPlan(
     return plan;
 }
 
+// Publishes auto play board plan into atomic UI telemetry.
 void PublishAutoPlayBoardPlan(const AutoPlayBoardPlan& plan) {
     FeatureState::AutoPlayFocusGroup = plan.focusGroup;
     FeatureState::AutoPlayTargetHeroId = plan.targetHeroId;
@@ -5170,6 +5291,7 @@ void PublishAutoPlayBoardPlan(const AutoPlayBoardPlan& plan) {
     FeatureState::AutoPlayContestedTargets = plan.contestedTargets;
 }
 
+// Applies auto play shop targets to the live runtime when bindings are ready.
 void ApplyAutoPlayShopTargets(const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
     if (!FeatureState::AutoPlayUseShop.load()) {
         return;
@@ -5298,6 +5420,7 @@ bool TryAutoPlaySmartFormation(
     return true;
 }
 
+// Scores auto play card so automation can choose one best action.
 int ScoreAutoPlayCard(int cardId, const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
     if (cardId <= 0) {
         return -999999;
@@ -5404,6 +5527,7 @@ void ApplyAutoPlayGoGoCardChoice(
     }
 }
 
+// Scores auction reward item so automation can choose one best action.
 int ScoreAuctionRewardItem(void* rewardItem, const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
     if (!rewardItem) {
         return 0;
@@ -5637,6 +5761,7 @@ bool TryAutoPlayAuction(
     return true;
 }
 
+// Reads auto play snapshot into a bounded native snapshot.
 AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
     AutoPlaySnapshot snapshot{};
     snapshot.accountId = selfAccountId;
@@ -5806,6 +5931,7 @@ AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
     return snapshot;
 }
 
+// Coordinates update auto play learning for the overlay runtime.
 int UpdateAutoPlayLearning(const AutoPlaySnapshot& snapshot) {
     int pressure = std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100);
 
@@ -5860,6 +5986,7 @@ int UpdateAutoPlayLearning(const AutoPlaySnapshot& snapshot) {
     return pressure;
 }
 
+// Selects auto play strategy from the current safe runtime options.
 int SelectAutoPlayStrategy(const AutoPlaySnapshot& snapshot, int pressure) {
     int strategy = ClampAutoPlayStrategy(FeatureState::AutoPlayStrategy.load());
 
@@ -5927,6 +6054,7 @@ int EstimateAutoPlayGoldThreat(const AutoPlaySnapshot& snapshot, int pressure) {
     return std::clamp(threat, 0, 100);
 }
 
+// Computes auto play needs population gold data for the Auto-Play controller.
 bool AutoPlayNeedsPopulationGold(const AutoPlaySnapshot& snapshot) {
     if (snapshot.currentPopulation < 0 || snapshot.totalPopulation <= 0) {
         return false;
@@ -6056,6 +6184,7 @@ AutoPlayGoldPlan BuildAutoPlayGoldPlan(
     return plan;
 }
 
+// Publishes auto play gold plan into atomic UI telemetry.
 void PublishAutoPlayGoldPlan(const AutoPlayGoldPlan& plan) {
     FeatureState::AutoPlayInterestTier = plan.interestTier;
     FeatureState::AutoPlayInterestNextGold = plan.nextInterestGold;
@@ -6124,6 +6253,7 @@ void ApplyAutoPlayPolicy(
     }
 }
 
+// Stops built in auto play ai and restores owned runtime state.
 void StopBuiltInAutoPlayAI(uint64_t selfAccountId) {
     void* selfManager =
         selfAccountId != 0 ? GetBattleManagerByAccountId(selfAccountId) : GetSelfLogicBattleManager();
@@ -6138,6 +6268,7 @@ void StopBuiltInAutoPlayAI(uint64_t selfAccountId) {
     FeatureState::AutoPlayLastAiStartAccountId = 0;
 }
 
+// Stops auto play runtime and restores owned runtime state.
 void StopAutoPlayRuntime(uint64_t selfAccountId) {
     StopBuiltInAutoPlayAI(selfAccountId);
     RestoreAutoPlayPolicyBackup();
@@ -6255,6 +6386,7 @@ void TryAutoPlayLevelUp(
     FeatureState::LastAutoPlayLevelAttempt = now;
 }
 
+// Checks whether the Auto-Play snapshot has enough live battle data to act on.
 bool IsAutoPlaySnapshotActionable(const AutoPlaySnapshot& snapshot) {
     return snapshot.accountId != 0 &&
         snapshot.round > 0 &&
@@ -6263,7 +6395,12 @@ bool IsAutoPlaySnapshotActionable(const AutoPlaySnapshot& snapshot) {
         snapshot.level > 0;
 }
 
-void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point now) {
+// Runs one Auto-Play controller tick and defers lower-priority work on busy frames.
+void RunAutoPlay(
+    uint64_t selfAccountId,
+    std::chrono::steady_clock::time_point now,
+    std::chrono::steady_clock::time_point frameStart = {}
+) {
     if (!FeatureState::AutoPlayEnabled.load()) {
         if (FeatureState::AutoPlayWasRunning.load()) {
             StopAutoPlayRuntime(selfAccountId);
@@ -6275,9 +6412,18 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
         return;
     }
 
+    auto budgetExceeded = [&frameStart]() {
+        return frameStart.time_since_epoch().count() != 0 &&
+            FrameBudgetExceeded(frameStart);
+    };
+
     AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
     if (!IsAutoPlaySnapshotActionable(snapshot)) {
         StopAutoPlayRuntime(selfAccountId);
+        return;
+    }
+
+    if (budgetExceeded()) {
         return;
     }
 
@@ -6287,14 +6433,23 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     std::vector<AutoPlayBoardUnit> selfUnits = CollectAutoPlayBoardUnits(GetSelfLogicBattleManager());
     std::vector<AutoPlayBoardUnit> enemyUnits;
 
+    if (budgetExceeded()) {
+        return;
+    }
+
     if (snapshot.currentOpponentId != 0) {
         enemyUnits = CollectAutoPlayBoardUnits(
             GetBattleManagerByAccountId(snapshot.currentOpponentId)
         );
     }
 
+    if (budgetExceeded()) {
+        return;
+    }
+
     if (enemyUnits.empty() && Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
+        int scannedFallbackManagers = 0;
         for (const auto& item : CopyDictionaryEntries(battleManagers, 16)) {
             if (item.first == 0 || item.first == selfAccountId || !item.second) {
                 continue;
@@ -6302,7 +6457,17 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
 
             std::vector<AutoPlayBoardUnit> units = CollectAutoPlayBoardUnits(item.second);
             enemyUnits.insert(enemyUnits.end(), units.begin(), units.end());
+            ++scannedFallbackManagers;
+
+            if (scannedFallbackManagers >= RuntimeConfig::MaxAutoPlayFallbackEnemyManagers ||
+                budgetExceeded()) {
+                break;
+            }
         }
+    }
+
+    if (budgetExceeded()) {
+        return;
     }
 
     AutoPlayBoardPlan plan = BuildAutoPlayBoardPlan(snapshot, selfUnits, enemyUnits);
@@ -6320,6 +6485,7 @@ void RunAutoPlay(uint64_t selfAccountId, std::chrono::steady_clock::time_point n
     FeatureState::AutoPlayWasRunning = true;
 }
 
+// Runs shop automation for one bounded feature tick.
 void RunShopAutomation(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -6552,6 +6718,7 @@ void RunShopAutomation(uint64_t selfAccountId) {
     }
 }
 
+// Advances features on its scheduled feature cadence.
 void TickFeatures() {
     if (!IsIl2CppRuntimeReady()) {
         return;
@@ -6563,6 +6730,11 @@ void TickFeatures() {
         std::clamp(UiState::MainTabIndex.load(), 0, static_cast<int>(MainTabTest));
 
     RetryFeatureBindingsIfNeeded();
+    // Let setup-thread binding scans finish before the render thread does managed work.
+    if (RuntimeState::BindingResolveInProgress.load()) {
+        return;
+    }
+
     if (FrameBudgetExceeded(frameStart)) {
         return;
     }
@@ -6631,7 +6803,7 @@ void TickFeatures() {
     }
 
     if (IntervalElapsed(FeatureState::LastAutoPlayTick, RuntimeConfig::AutoPlayTickMs, now)) {
-        RunAutoPlay(selfAccountId, now);
+        RunAutoPlay(selfAccountId, now, frameStart);
         if (FrameBudgetExceeded(frameStart)) {
             return;
         }
@@ -6666,6 +6838,7 @@ void TickFeatures() {
     }
 }
 
+// Coordinates ggc quality name for the overlay runtime.
 const char* GgcQualityName(int quality) {
     switch (quality) {
         case 1:
@@ -6679,6 +6852,7 @@ const char* GgcQualityName(int quality) {
     }
 }
 
+// Coordinates ggc quality color for the overlay runtime.
 ImVec4 GgcQualityColor(int quality) {
     switch (quality) {
         case 1:
@@ -6692,6 +6866,7 @@ ImVec4 GgcQualityColor(int quality) {
     }
 }
 
+// Draws the status row overlay section without changing game state.
 void DrawStatusRow(const char* label, bool ready) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
@@ -6704,6 +6879,7 @@ void DrawStatusRow(const char* label, bool ready) {
     );
 }
 
+// Draws the value row overlay section without changing game state.
 void DrawValueRow(const char* label, const char* value) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
@@ -6712,46 +6888,56 @@ void DrawValueRow(const char* label, const char* value) {
     ImGui::TextUnformatted(value);
 }
 
+// Draws the value row overlay section without changing game state.
 void DrawValueRow(const char* label, const std::string& value) {
     DrawValueRow(label, value.c_str());
 }
 
+// Formats bool for readable overlay output.
 std::string FormatBool(bool value) {
     return value ? "true" : "false";
 }
 
+// Formats optional bool for readable overlay output.
 std::string FormatOptionalBool(bool ready, bool value) {
     return ready ? FormatBool(value) : "Waiting";
 }
 
+// Formats pointer for readable overlay output.
 std::string FormatPointer(const void* value) {
     char buffer[32];
     snprintf(buffer, sizeof(buffer), "%p", value);
     return buffer;
 }
 
+// Formats u int64 for readable overlay output.
 std::string FormatUInt64(uint64_t value) {
     return std::to_string(static_cast<unsigned long long>(value));
 }
 
+// Formats u int32 for readable overlay output.
 std::string FormatUInt32(uint32_t value) {
     return std::to_string(static_cast<unsigned int>(value));
 }
 
+// Formats int64 for readable overlay output.
 std::string FormatInt64(int64_t value) {
     return std::to_string(static_cast<long long>(value));
 }
 
+// Formats int for readable overlay output.
 std::string FormatInt(int value) {
     return std::to_string(value);
 }
 
+// Formats float for readable overlay output.
 std::string FormatFloat(float value) {
     char buffer[32];
     snprintf(buffer, sizeof(buffer), "%.2f", value);
     return buffer;
 }
 
+// Coordinates hex color for the overlay runtime.
 ImVec4 HexColor(unsigned int rgb, float alpha = 1.0f) {
     return ImVec4(
         static_cast<float>((rgb >> 16) & 0xFF) / 255.0f,
@@ -6761,6 +6947,7 @@ ImVec4 HexColor(unsigned int rgb, float alpha = 1.0f) {
     );
 }
 
+// Coordinates trim string for the overlay runtime.
 std::string TrimString(const std::string& value) {
     size_t start = 0;
     while (start < value.size() &&
@@ -6777,6 +6964,7 @@ std::string TrimString(const std::string& value) {
     return value.substr(start, end - start);
 }
 
+// Coordinates lower string for the overlay runtime.
 std::string LowerString(std::string value) {
     std::transform(
         value.begin(),
@@ -6789,6 +6977,7 @@ std::string LowerString(std::string value) {
     return value;
 }
 
+// Parses config bool from user or config text with a safe fallback.
 bool ParseConfigBool(const std::string& value, bool fallback) {
     std::string lower = LowerString(TrimString(value));
 
@@ -6803,6 +6992,7 @@ bool ParseConfigBool(const std::string& value, bool fallback) {
     return fallback;
 }
 
+// Parses config int from user or config text with a safe fallback.
 int ParseConfigInt(const std::string& value, int fallback) {
     char* end = nullptr;
     long parsed = strtol(value.c_str(), &end, 10);
@@ -6814,6 +7004,7 @@ int ParseConfigInt(const std::string& value, int fallback) {
     return static_cast<int>(parsed);
 }
 
+// Parses config float from user or config text with a safe fallback.
 float ParseConfigFloat(const std::string& value, float fallback) {
     char* end = nullptr;
     float parsed = strtof(value.c_str(), &end);
@@ -6825,6 +7016,7 @@ float ParseConfigFloat(const std::string& value, float fallback) {
     return parsed;
 }
 
+// Clamps configurable state to the supported runtime range.
 void ClampConfigurableState() {
     UiState::MainTabIndex = std::clamp(UiState::MainTabIndex.load(), 0, 7);
     UiState::ThemeIndex =
@@ -6887,6 +7079,7 @@ void ClampConfigurableState() {
     }
 }
 
+// Resets visual settings back to safe default values.
 void ResetVisualSettings() {
     UiState::ThemeIndex = kDefaultThemeIndex;
     UiState::FontIndex = AppearanceState::NotoCjkFont ? 1 : 0;
@@ -6918,6 +7111,7 @@ void ResetVisualSettings() {
     AppearanceState::AppliedThemeIndex = -1;
 }
 
+// Resets feature settings back to safe default values.
 void ResetFeatureSettings() {
     uint64_t selfAccountId = IsIl2CppRuntimeReady() ? GetSelfAccountId() : 0;
     StopAutoPlayRuntime(selfAccountId);
@@ -7028,6 +7222,7 @@ void ResetFeatureSettings() {
     ApplyArenaSpeedHack(0);
 }
 
+// Ensures directory path exists before file or UI work continues.
 bool EnsureDirectoryPath(const std::string& directory) {
     if (directory.empty()) {
         return true;
@@ -7055,6 +7250,7 @@ bool EnsureDirectoryPath(const std::string& directory) {
     return true;
 }
 
+// Ensures parent directory exists before file or UI work continues.
 bool EnsureParentDirectory(const std::string& path) {
     size_t slash = path.find_last_of('/');
 
@@ -7065,6 +7261,7 @@ bool EnsureParentDirectory(const std::string& path) {
     return EnsureDirectoryPath(path.substr(0, slash));
 }
 
+// Returns the cached or live current process name value used by runtime features.
 std::string GetCurrentProcessName() {
     FILE* file = fopen("/proc/self/cmdline", "r");
     if (!file) {
@@ -7083,6 +7280,7 @@ std::string GetCurrentProcessName() {
     return std::string(buffer);
 }
 
+// Returns the cached or live game package name value used by runtime features.
 std::string GetGamePackageName() {
     std::string processName = GetCurrentProcessName();
     size_t suffix = processName.find(':');
@@ -7094,6 +7292,7 @@ std::string GetGamePackageName() {
     return processName;
 }
 
+// Returns the cached or live default config path value used by runtime features.
 std::string GetDefaultConfigPath() {
     std::string packageName = GetGamePackageName();
 
@@ -7104,6 +7303,7 @@ std::string GetDefaultConfigPath() {
     return "/data/data/" + packageName + "/files/mcgg_config.ini";
 }
 
+// Ensures config path initialized exists before file or UI work continues.
 void EnsureConfigPathInitialized() {
     std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     if (UiState::ConfigPath.empty()) {
@@ -7111,6 +7311,7 @@ void EnsureConfigPathInitialized() {
     }
 }
 
+// Updates config status through the safest available runtime path.
 void SetConfigStatus(const char* prefix, const std::string& path, bool success) {
     std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     UiState::ConfigStatus = prefix;
@@ -7118,6 +7319,7 @@ void SetConfigStatus(const char* prefix, const std::string& path, bool success) 
     UiState::ConfigStatus += path;
 }
 
+// Formats shop selected heroes for readable overlay output.
 std::string FormatShopSelectedHeroes() {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     std::string value;
@@ -7139,6 +7341,7 @@ std::string FormatShopSelectedHeroes() {
     return value;
 }
 
+// Loads shop selected heroes and falls back cleanly if unavailable.
 void LoadShopSelectedHeroes(const std::string& value) {
     std::lock_guard<std::mutex> lock(RuntimeMutex::FeatureMutex);
     FeatureState::ShopSelectedHeroes.clear();
@@ -7176,22 +7379,27 @@ void LoadShopSelectedHeroes(const std::string& value) {
     }
 }
 
+// Writes config bool in the existing config or managed runtime format.
 void WriteConfigBool(FILE* file, const char* key, bool value) {
     fprintf(file, "%s=%d\n", key, value ? 1 : 0);
 }
 
+// Writes config int in the existing config or managed runtime format.
 void WriteConfigInt(FILE* file, const char* key, int value) {
     fprintf(file, "%s=%d\n", key, value);
 }
 
+// Writes config float in the existing config or managed runtime format.
 void WriteConfigFloat(FILE* file, const char* key, float value) {
     fprintf(file, "%s=%.3f\n", key, value);
 }
 
+// Writes config string in the existing config or managed runtime format.
 void WriteConfigString(FILE* file, const char* key, const std::string& value) {
     fprintf(file, "%s=%s\n", key, value.c_str());
 }
 
+// Applies config value to the live runtime when bindings are ready.
 void ApplyConfigValue(const std::string& key, const std::string& value) {
     if (key == "themeIndex") UiState::ThemeIndex = ParseConfigInt(value, UiState::ThemeIndex);
     else if (key == "fontIndex") UiState::FontIndex = ParseConfigInt(value, UiState::FontIndex);
@@ -7276,6 +7484,7 @@ void ApplyConfigValue(const std::string& key, const std::string& value) {
     else if (key == "arenaTimeScale") FeatureState::ArenaTimeScale = ParseConfigFloat(value, FeatureState::ArenaTimeScale);
 }
 
+// Saves config to file using the project config format.
 bool SaveConfigToFile(const std::string& path) {
     std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
@@ -7391,6 +7600,7 @@ bool SaveConfigToFile(const std::string& path) {
     return true;
 }
 
+// Loads config from file and falls back cleanly if unavailable.
 bool LoadConfigFromFile(const std::string& path, bool updateStatus) {
     std::lock_guard<std::recursive_mutex> lock(RuntimeMutex::UiMutex);
     EnsureConfigPathInitialized();
@@ -7452,6 +7662,7 @@ struct Issue707ThemePalette {
     float popupAlpha;
 };
 
+// Applies issue707 palette theme to the live runtime when bindings are ready.
 void ApplyIssue707PaletteTheme(int themeIndex) {
     static const Issue707ThemePalette palettes[] = {
         {0xE6E6E6, 0x999999, 0x171724, 0x33334D, 0x4D4D73, 0x6F80B3, 0x899CDD, 0xA8B8FF, 0x6E6E80, 0xA8B8FF, 1.00f, 0.72f, 0.94f},
@@ -7551,6 +7762,7 @@ void ApplyIssue707PaletteTheme(int themeIndex) {
     style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 }
 
+// Applies catppuccin mocha theme to the live runtime when bindings are ready.
 void ApplyCatppuccinMochaTheme() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec4* colors = style.Colors;
@@ -7645,6 +7857,7 @@ void ApplyCatppuccinMochaTheme() {
     (void)subtext;
 }
 
+// Applies selected theme to the live runtime when bindings are ready.
 void ApplySelectedTheme() {
     int themeIndex = std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
     if (AppearanceState::AppliedThemeIndex == themeIndex) {
@@ -7667,6 +7880,7 @@ void ApplySelectedTheme() {
     AppearanceState::AppliedThemeIndex = themeIndex;
 }
 
+// Applies user style settings to the live runtime when bindings are ready.
 void ApplyUserStyleSettings() {
     ClampConfigurableState();
 
@@ -7694,6 +7908,7 @@ void ApplyUserStyleSettings() {
     style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 }
 
+// Applies selected font to the live runtime when bindings are ready.
 void ApplySelectedFont() {
     if (UiState::FontIndex == 1 && !AppearanceState::NotoCjkFont) {
         UiState::FontIndex = 0;
@@ -7713,6 +7928,7 @@ void ApplySelectedFont() {
     AppearanceState::AppliedFontIndex = UiState::FontIndex;
 }
 
+// Loads appearance fonts and falls back cleanly if unavailable.
 void LoadAppearanceFonts() {
     ImGuiIO& io = ImGui::GetIO();
     AppearanceState::DefaultFont = io.Fonts->AddFontDefault();
@@ -7745,12 +7961,14 @@ void LoadAppearanceFonts() {
     io.Fonts->Build();
 }
 
+// Applies appearance to the live runtime when bindings are ready.
 void ApplyAppearance() {
     ApplySelectedTheme();
     ApplySelectedFont();
     ApplyUserStyleSettings();
 }
 
+// Formats field bool for readable overlay output.
 std::string FormatFieldBool(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7759,6 +7977,7 @@ std::string FormatFieldBool(void* instance, FieldInfo* field) {
     return FormatBool(GetField<bool>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
+// Formats field int for readable overlay output.
 std::string FormatFieldInt(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7767,6 +7986,7 @@ std::string FormatFieldInt(void* instance, FieldInfo* field) {
     return FormatInt(GetField<int>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
+// Formats field u int32 for readable overlay output.
 std::string FormatFieldUInt32(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7775,6 +7995,7 @@ std::string FormatFieldUInt32(void* instance, FieldInfo* field) {
     return FormatUInt32(GetField<uint32_t>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
+// Formats field u int64 for readable overlay output.
 std::string FormatFieldUInt64(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7783,6 +8004,7 @@ std::string FormatFieldUInt64(void* instance, FieldInfo* field) {
     return FormatUInt64(GetField<uint64_t>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
+// Formats field float for readable overlay output.
 std::string FormatFieldFloat(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7791,6 +8013,7 @@ std::string FormatFieldFloat(void* instance, FieldInfo* field) {
     return FormatFloat(GetField<float>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
+// Formats field pointer for readable overlay output.
 std::string FormatFieldPointer(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -7837,6 +8060,7 @@ namespace UiCache {
     ImVec2 MenuWindowSize{};
 }
 
+// Normalizes display name for stable sorting and comparison.
 std::string NormalizeDisplayName(const std::string& value) {
     std::string output = value;
     std::transform(
@@ -7850,6 +8074,7 @@ std::string NormalizeDisplayName(const std::string& value) {
     return output;
 }
 
+// Refreshes ggc info on its throttled runtime cadence.
 void RefreshGgcInfo(bool force = false) {
     if (!IsIl2CppRuntimeReady() ||
         !Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound) {
@@ -7891,6 +8116,7 @@ void RefreshGgcInfo(bool force = false) {
     UiCache::GgcInfoReady = true;
 }
 
+// Refreshes info player rows on its throttled runtime cadence.
 void RefreshInfoPlayerRows(bool force = false) {
     if (!IsIl2CppRuntimeReady()) {
         UiCache::InfoPlayerRows.clear();
@@ -7986,6 +8212,7 @@ void RefreshInfoPlayerRows(bool force = false) {
     UiCache::InfoPlayersReady = true;
 }
 
+// Draws the runtime status overlay section without changing game state.
 void DrawRuntimeStatus() {
     if (!ImGui::CollapsingHeader("Runtime Status", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
@@ -8059,10 +8286,12 @@ void DrawRuntimeStatus() {
     }
 }
 
+// Draws the waiting text overlay section without changing game state.
 void DrawWaitingText(const char* message) {
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "%s", message);
 }
 
+// Draws the atomic checkbox overlay section without changing game state.
 bool DrawAtomicCheckbox(const char* label, std::atomic<bool>& value) {
     bool current = value.load();
 
@@ -8141,6 +8370,7 @@ bool DrawAtomicInputFloat(
     return true;
 }
 
+// Checks the shop select binding condition before work proceeds.
 bool HasShopSelectBinding() {
     return IsIl2CppRuntimeReady() &&
         ((FeatureState::HeroShopItemList &&
@@ -8151,6 +8381,7 @@ bool HasShopSelectBinding() {
           Originals::UIPanelBattleHeroShop_BuyHero));
 }
 
+// Checks the shop automation bindings condition before work proceeds.
 bool HasShopAutomationBindings() {
     bool needsHeroCount =
         FeatureState::ShopBuySelectedHero ||
@@ -8170,12 +8401,14 @@ bool HasShopAutomationBindings() {
         (!needsRecommendLineup || HasShopRecommendLineupBindings());
 }
 
+// Checks the shop refresh bindings condition before work proceeds.
 bool HasShopRefreshBindings() {
     return IsIl2CppRuntimeReady() &&
         FeatureState::HeroShopPanel &&
         Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop;
 }
 
+// Checks the shop recommend lineup bindings condition before work proceeds.
 bool HasShopRecommendLineupBindings() {
     return IsIl2CppRuntimeReady() &&
         (Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup ||
@@ -8183,6 +8416,7 @@ bool HasShopRecommendLineupBindings() {
           Originals::MCBattleBridge_IsHeroInRecommendLineup));
 }
 
+// Checks the shop diagnostic bindings condition before work proceeds.
 bool HasShopDiagnosticBindings() {
     return IsIl2CppRuntimeReady() &&
         (Originals::MCLogicBattleData_ILOGIC_GetShopIsForbid ||
@@ -8195,6 +8429,7 @@ bool HasShopDiagnosticBindings() {
          Originals::MCLogicBattleData_ILOGIC_GetHeroSlotDict_Count);
 }
 
+// Checks the combat power bindings condition before work proceeds.
 bool HasCombatPowerBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleManager_get_m_bDefendFaild &&
@@ -8203,22 +8438,26 @@ bool HasCombatPowerBindings() {
         Originals::MCLogicBattleData_ILOGIC_GetPlayerData;
 }
 
+// Checks the arena hero bindings condition before work proceeds.
 bool HasArenaHeroBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleManager_BuyNormalHero &&
         (Originals::MCComp_GetGamer || FeatureState::LastSelfAccountId.load() != 0);
 }
 
+// Checks the arena item bindings condition before work proceeds.
 bool HasArenaItemBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCEquipUtil_OnGetNewEquip != nullptr;
 }
 
+// Checks the arena gogo card bindings condition before work proceeds.
 bool HasArenaGogoCardBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCComp_GetGoGoCardComp != nullptr;
 }
 
+// Checks the arena gold bindings condition before work proceeds.
 bool HasArenaGoldBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetPlayerData &&
@@ -8226,6 +8465,7 @@ bool HasArenaGoldBindings() {
         Originals::MCChessPlayerData_UpdateCoin;
 }
 
+// Checks the arena round skip bindings condition before work proceeds.
 bool HasArenaRoundSkipBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
@@ -8234,11 +8474,13 @@ bool HasArenaRoundSkipBindings() {
         Originals::LogicRoundMgr_NextRound;
 }
 
+// Checks the arena speed hack bindings condition before work proceeds.
 bool HasArenaSpeedHackBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::UnityEngine_Time_set_timeScale;
 }
 
+// Checks the battle test bindings condition before work proceeds.
 bool HasBattleTestBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetRoundRemainTime &&
@@ -8249,6 +8491,7 @@ bool HasBattleTestBindings() {
         Originals::MCLogicBattleManager_get_m_bDefendFaild;
 }
 
+// Checks the auto play bindings condition before work proceeds.
 bool HasAutoPlayBindings() {
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
@@ -8272,6 +8515,7 @@ bool HasAutoPlayBindings() {
         HasShopRecommendLineupBindings();
 }
 
+// Draws the ggc info overlay section without changing game state.
 void DrawGgcInfo() {
     ImGui::SeparatorText("GGC");
 
@@ -8299,6 +8543,7 @@ void DrawGgcInfo() {
     );
 }
 
+// Draws the info players table overlay section without changing game state.
 void DrawInfoPlayersTable() {
     ImGui::SeparatorText("Players");
 
@@ -8359,6 +8604,7 @@ void DrawInfoPlayersTable() {
     ImGui::EndTable();
 }
 
+// Draws the info tab overlay section without changing game state.
 void DrawInfoTab() {
     if (!IsIl2CppRuntimeReady()) {
         DrawWaitingText("Waiting for IL2CPP runtime");
@@ -8372,6 +8618,7 @@ void DrawInfoTab() {
     DrawInfoPlayersTable();
 }
 
+// Draws the combat tab overlay section without changing game state.
 void DrawCombatTab() {
     if (!Originals::MCShowSpectatorComp_SetSpectate) {
         DrawWaitingText("Waiting for spectator hook");
@@ -8383,6 +8630,7 @@ void DrawCombatTab() {
     );
 }
 
+// Draws the auto play tab overlay section without changing game state.
 void DrawAutoPlayTab() {
     if (!HasAutoPlayBindings()) {
         DrawWaitingText("Waiting for auto-play controller bindings");
@@ -8553,6 +8801,7 @@ void DrawAutoPlayTab() {
     }
 }
 
+// Draws the arena battle power controls overlay section without changing game state.
 void DrawArenaBattlePowerControls() {
     ImGui::SeparatorText("Battle Power");
 
@@ -8580,6 +8829,7 @@ void DrawArenaBattlePowerControls() {
         std::clamp(FeatureState::CombatEnemyAttackRatioPercent.load(), 0, 100);
 }
 
+// Draws the appearance tab overlay section without changing game state.
 void DrawAppearanceTab() {
     ImGui::SeparatorText("Theme");
 
@@ -8618,6 +8868,7 @@ void DrawAppearanceTab() {
     }
 }
 
+// Draws the settings tab overlay section without changing game state.
 void DrawSettingsTab() {
     EnsureConfigPathInitialized();
 
@@ -8764,6 +9015,7 @@ void DrawSettingsTab() {
     }
 }
 
+// Returns the cached or live battle player name value used by runtime features.
 std::string GetBattlePlayerName(uint64_t accountId) {
     if (!IsIl2CppRuntimeReady() ||
         accountId == 0 ||
@@ -8776,6 +9028,7 @@ std::string GetBattlePlayerName(uint64_t accountId) {
     );
 }
 
+// Returns the cached or live round result data field value used by runtime features.
 std::string GetRoundResultDataField(void* battleManager, const char* fieldName) {
     if (!battleManager) {
         return "Waiting";
@@ -8820,6 +9073,7 @@ std::string GetRoundResultDataField(void* battleManager, const char* fieldName) 
     return FormatFieldInt(roundResultData, valueField);
 }
 
+// Draws the test binding rows overlay section without changing game state.
 void DrawTestBindingRows() {
     if (!ImGui::BeginTable(
         "##TestBindingTable",
@@ -8967,6 +9221,7 @@ void DrawTestRoundRows(
     ImGui::EndTable();
 }
 
+// Formats an account-specific integer reader for Test tab diagnostics.
 std::string FormatAccountInt(
     uint64_t accountId,
     int (*reader)(void* instance, uint64_t accountId)
@@ -8974,6 +9229,7 @@ std::string FormatAccountInt(
     return accountId && reader ? FormatInt(reader(nullptr, accountId)) : "Waiting";
 }
 
+// Formats an account-specific unsigned integer reader for Test tab diagnostics.
 std::string FormatAccountUInt32(
     uint64_t accountId,
     uint32_t (*reader)(void* instance, uint64_t accountId)
@@ -8981,6 +9237,7 @@ std::string FormatAccountUInt32(
     return accountId && reader ? FormatUInt32(reader(nullptr, accountId)) : "Waiting";
 }
 
+// Formats an account-specific boolean reader for Test tab diagnostics.
 std::string FormatAccountBool(
     uint64_t accountId,
     bool (*reader)(void* instance, uint64_t accountId)
@@ -8988,10 +9245,12 @@ std::string FormatAccountBool(
     return accountId && reader ? FormatBool(reader(nullptr, accountId)) : "Waiting";
 }
 
+// Formats global int for readable overlay output.
 std::string FormatGlobalInt(int (*reader)(void* instance)) {
     return reader ? FormatInt(reader(nullptr)) : "Waiting";
 }
 
+// Formats shop star level for readable overlay output.
 std::string FormatShopStarLevel(uint64_t accountId) {
     if (!accountId || !Originals::MCLogicBattleData_ILOGIC_GetShopStarLv) {
         return "Waiting";
@@ -9004,6 +9263,7 @@ std::string FormatShopStarLevel(uint64_t accountId) {
     return FormatInt(shopStar.x) + " / " + FormatInt(shopStar.y);
 }
 
+// Draws the test player rows overlay section without changing game state.
 void DrawTestPlayerRows(uint64_t targetAccountId) {
     if (!ImGui::BeginTable(
         "##TestPlayerDataTable",
@@ -9204,6 +9464,7 @@ void DrawTestPlayerRows(uint64_t targetAccountId) {
     ImGui::EndTable();
 }
 
+// Draws the test manager rows overlay section without changing game state.
 void DrawTestManagerRows(void* battleManager) {
     static FieldInfo* fightOverField = nullptr;
     static FieldInfo* defendFailedField = nullptr;
@@ -9332,6 +9593,7 @@ void DrawTestManagerRows(void* battleManager) {
     ImGui::EndTable();
 }
 
+// Draws the test behavior rows overlay section without changing game state.
 void DrawTestBehaviorRows(uint64_t targetAccountId) {
     void* behaviorApi = targetAccountId && Originals::MCBehaviorThreeApi_Get ?
         Originals::MCBehaviorThreeApi_Get(targetAccountId) :
@@ -9368,6 +9630,7 @@ void DrawTestBehaviorRows(uint64_t targetAccountId) {
     ImGui::EndTable();
 }
 
+// Formats list field count for readable overlay output.
 std::string FormatListFieldCount(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -9385,6 +9648,7 @@ std::string FormatListFieldCount(void* instance, FieldInfo* field) {
     return TryGetManagedListData(list, &data, &size) ? FormatInt(size) : "Unreadable";
 }
 
+// Formats int dictionary field count for readable overlay output.
 std::string FormatIntDictionaryFieldCount(void* instance, FieldInfo* field) {
     if (!instance || !field) {
         return "Waiting";
@@ -9414,6 +9678,7 @@ std::string FormatIntDictionaryFieldCount(void* instance, FieldInfo* field) {
     return FormatInt(activeEntries);
 }
 
+// Draws the test bridge rows overlay section without changing game state.
 void DrawTestBridgeRows() {
     void* battleBridge = FeatureState::BattleBridge.load();
 
@@ -9555,6 +9820,7 @@ void DrawTestBridgeRows() {
     ImGui::EndTable();
 }
 
+// Draws the test shop panel rows overlay section without changing game state.
 void DrawTestShopPanelRows() {
     void* heroShopPanel = FeatureState::HeroShopPanel.load();
     void* heroShopItemList = FeatureState::HeroShopItemList.load();
@@ -9750,6 +10016,7 @@ namespace PredictionCache {
     bool CachedRowsReady = false;
 }
 
+// Collects prediction players with bounded managed reads.
 std::vector<PredictionPlayer> CollectPredictionPlayers(uint64_t selfAccountId) {
     std::vector<PredictionPlayer> players;
 
@@ -9790,6 +10057,7 @@ std::vector<PredictionPlayer> CollectPredictionPlayers(uint64_t selfAccountId) {
     return players;
 }
 
+// Resets opponent prediction history if needed back to safe default values.
 void ResetOpponentPredictionHistoryIfNeeded(uint64_t selfAccountId) {
     if (selfAccountId == 0) {
         return;
@@ -9833,11 +10101,13 @@ void RememberOpponentObservation(
     }
 }
 
+// Finds the latest cached current-opponent observation for one account.
 const CurrentOpponentObservation* FindCurrentOpponentObservation(uint64_t accountId) {
     auto found = PredictionCache::CurrentRoundOpponents.find(accountId);
     return found != PredictionCache::CurrentRoundOpponents.end() ? &found->second : nullptr;
 }
 
+// Formats observed enemy name for readable overlay output.
 std::string FormatObservedEnemyName(const CurrentOpponentObservation& observation) {
     if (observation.opponentId == 0) {
         return {};
@@ -9855,6 +10125,7 @@ std::string FormatObservedEnemyName(const CurrentOpponentObservation& observatio
     return enemyName;
 }
 
+// Counts recent opponent history from bounded cached history.
 int CountRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxEntries) {
     if (accountId == 0 || opponentId == 0 || maxEntries <= 0) {
         return 0;
@@ -9879,6 +10150,32 @@ int CountRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxE
     return count;
 }
 
+// Finds how many cached real-player meetings ago this opponent appeared.
+int FindRecentOpponentDistance(uint64_t accountId, uint64_t opponentId, int maxEntries) {
+    if (accountId == 0 || opponentId == 0 || maxEntries <= 0) {
+        return -1;
+    }
+
+    auto found = PredictionCache::OpponentHistory.find(accountId);
+    if (found == PredictionCache::OpponentHistory.end()) {
+        return -1;
+    }
+
+    const std::vector<OpponentHistoryEntry>& history = found->second;
+    int inspected = 0;
+
+    for (auto it = history.rbegin(); it != history.rend() && inspected < maxEntries; ++it) {
+        if (it->opponentId == opponentId && !it->mirror) {
+            return inspected;
+        }
+
+        ++inspected;
+    }
+
+    return -1;
+}
+
+// Scores recent opponent history so repeated pairings can be deprioritized.
 double ScoreRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxEntries) {
     if (accountId == 0 || opponentId == 0 || maxEntries <= 0) {
         return 0.0;
@@ -9905,6 +10202,7 @@ double ScoreRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int m
     return score;
 }
 
+// Scores both directions of recent opponent history and keeps the stronger signal.
 double ScoreMutualRecentOpponentHistory(uint64_t accountId, uint64_t opponentId, int maxEntries) {
     return std::max(
         ScoreRecentOpponentHistory(accountId, opponentId, maxEntries),
@@ -9912,6 +10210,7 @@ double ScoreMutualRecentOpponentHistory(uint64_t accountId, uint64_t opponentId,
     );
 }
 
+// Counts real player opponent history from bounded cached history.
 int CountRealPlayerOpponentHistory(uint64_t accountId) {
     auto found = PredictionCache::OpponentHistory.find(accountId);
     if (found == PredictionCache::OpponentHistory.end()) {
@@ -10089,6 +10388,7 @@ void RefreshPredictionOpponentCache(
     }
 }
 
+// Advances opponent prediction history on its scheduled feature cadence.
 void TickOpponentPredictionHistory(uint64_t selfAccountId) {
     if (selfAccountId == 0 || !Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         return;
@@ -10159,6 +10459,7 @@ uint64_t FindExactPredictedOpponent(
     return 0;
 }
 
+// Builds opponent predictions from current runtime evidence.
 std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccountId) {
     std::vector<OpponentPredictionRow> rows;
     std::vector<PredictionPlayer> players = CollectPredictionPlayers(selfAccountId);
@@ -10431,6 +10732,20 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         );
         row.recentMeetings = recentSelfMeetings;
 
+        int recentDistance = FindRecentOpponentDistance(selfAccountId, row.accountId, 12);
+        if (recentDistance == 0) {
+            weight *= 0.30;
+        } else if (recentDistance == 1) {
+            weight *= 0.52;
+        } else if (recentDistance >= 2 &&
+                   aliveOpponentCount > 1 &&
+                   recentDistance >= static_cast<int>(aliveOpponentCount) - 1) {
+            weight *= 1.28;
+            ++sourceVotes;
+        } else if (recentDistance < 0 && realPlayerHistoryCount >= 3) {
+            weight *= 1.18;
+        }
+
         bool inRecentCycle = ContainsAccountId(recentCycleOpponents, row.accountId);
         if (!recentCycleOpponents.empty() &&
             recentCycleOpponents.size() < aliveOpponentCount) {
@@ -10559,6 +10874,7 @@ const std::vector<OpponentPredictionRow>& GetCachedOpponentPredictionRows() {
     return PredictionCache::CachedRows;
 }
 
+// Builds next enemy hud text from current runtime evidence.
 std::string BuildNextEnemyHudText(uint64_t selfAccountId) {
     if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
         return "Next enemy: Waiting";
@@ -10615,6 +10931,7 @@ std::string BuildNextEnemyHudText(uint64_t selfAccountId) {
     return "Next enemy: " + enemyName + " (" + FormatInt(best->percent) + "%)";
 }
 
+// Refreshes next enemy hud text on its throttled runtime cadence.
 void RefreshNextEnemyHudText(uint64_t selfAccountId) {
     if (!IntervalElapsed(UiCache::LastNextEnemyHudRefresh, 500)) {
         return;
@@ -10623,6 +10940,7 @@ void RefreshNextEnemyHudText(uint64_t selfAccountId) {
     UiCache::NextEnemyHudText = BuildNextEnemyHudText(selfAccountId);
 }
 
+// Draws the next enemy hud overlay section without changing game state.
 void DrawNextEnemyHud() {
     if (!UiState::ShowNextEnemyHud.load()) {
         return;
@@ -10663,6 +10981,7 @@ void DrawNextEnemyHud() {
     drawList->AddText(font, fontSize, pos, textColor, text);
 }
 
+// Draws the opponent prediction table overlay section without changing game state.
 void DrawOpponentPredictionTable(uint64_t selfAccountId) {
     if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         DrawWaitingText("Waiting for battle manager list");
@@ -10719,6 +11038,7 @@ void DrawOpponentPredictionTable(uint64_t selfAccountId) {
     ImGui::EndTable();
 }
 
+// Draws the test all managers table overlay section without changing game state.
 void DrawTestAllManagersTable() {
     if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr) {
         DrawWaitingText("Waiting for battle manager list");
@@ -10816,6 +11136,7 @@ void DrawTestAllManagersTable() {
     ImGui::EndTable();
 }
 
+// Draws the test tab overlay section without changing game state.
 void DrawTestTab() {
     if (!IsIl2CppRuntimeReady()) {
         DrawWaitingText("Waiting for IL2CPP runtime");
@@ -10922,6 +11243,7 @@ void DrawTestTab() {
     }
 }
 
+// Draws the shop tab overlay section without changing game state.
 void DrawShopTab() {
     if (ImGui::BeginTabBar("##ShopTabBar")) {
         if (ImGui::BeginTabItem("Automation")) {
@@ -11092,6 +11414,7 @@ void DrawShopTab() {
     }
 }
 
+// Draws the arena tab overlay section without changing game state.
 void DrawArenaTab() {
     if (ImGui::BeginTabBar("##ArenaTabBar")) {
         if (ImGui::BeginTabItem("Heroes")) {
@@ -11420,12 +11743,14 @@ struct MainMenuTab {
     void (*draw)();
 };
 
+// Checks the compact display condition before work proceeds.
 bool IsCompactDisplay() {
     ImGuiIO& io = ImGui::GetIO();
     return io.DisplaySize.x > 0.0f &&
         (io.DisplaySize.x < 700.0f || io.DisplaySize.y < 520.0f);
 }
 
+// Draws the main tab quick controls overlay section without changing game state.
 void DrawMainTabQuickControls(const MainMenuTab* tabs, int tabCount) {
     if (!IsCompactDisplay() || !tabs || tabCount <= 0) {
         return;
@@ -11452,6 +11777,7 @@ void DrawMainTabQuickControls(const MainMenuTab* tabs, int tabCount) {
     ImGui::Spacing();
 }
 
+// Draws the menu tab button overlay section without changing game state.
 void DrawMenuTabButton(const char* label, int index) {
     bool selected = UiState::MainTabIndex.load() == index;
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
@@ -11464,6 +11790,7 @@ void DrawMenuTabButton(const char* label, int index) {
     ImGui::PopStyleVar(2);
 }
 
+// Returns the cached or live validated menu size value used by runtime features.
 ImVec2 GetValidatedMenuSize() {
     ClampConfigurableState();
 
@@ -11484,6 +11811,7 @@ ImVec2 GetValidatedMenuSize() {
     );
 }
 
+// Returns the cached or live validated menu position value used by runtime features.
 ImVec2 GetValidatedMenuPosition(const ImVec2& menuSize) {
     ImGuiIO& io = ImGui::GetIO();
     float maxX = io.DisplaySize.x > 0.0f ? io.DisplaySize.x - 48.0f : 4000.0f;
@@ -11497,6 +11825,7 @@ ImVec2 GetValidatedMenuPosition(const ImVec2& menuSize) {
     );
 }
 
+// Draws the main menu overlay section without changing game state.
 void DrawMainMenu() {
     static const MainMenuTab tabs[] = {
         {"Info", DrawInfoTab},
@@ -11571,6 +11900,7 @@ void DrawMainMenu() {
     ImGui::End();
 }
 
+// Initializes overlay once the render context is valid.
 bool InitializeOverlay() {
     if (ImGui::GetCurrentContext() != nullptr) {
         return true;
@@ -11605,6 +11935,7 @@ bool InitializeOverlay() {
     return true;
 }
 
+// Attaches render il2 cpp thread only after IL2CPP is ready.
 bool AttachRenderIl2CppThread(std::atomic<bool>& attached) {
     if (attached.load()) {
         return true;
@@ -11624,6 +11955,7 @@ bool AttachRenderIl2CppThread(std::atomic<bool>& attached) {
 }
 
 namespace Hooks {
+    // Hook wrapper for show spectator comp set spectate, applying feature overrides only when enabled.
     void MCShowSpectatorComp_SetSpectate(void* instance, uint64_t accountId) {
         if (FeatureState::CombatInvisibleScout) {
             return;
@@ -11652,6 +11984,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic battle data ilogic get refresh cost, applying feature overrides only when enabled.
     int MCLogicBattleData_ILOGIC_GetRefreshCost(void* instance, uint64_t accountId) {
         if (FeatureState::ArenaFreeEconomy && IsSelfAccount(accountId)) {
             return 0;
@@ -11662,6 +11995,7 @@ namespace Hooks {
             0;
     }
 
+    // Hook wrapper for logic battle data ilogic is refresh free, applying feature overrides only when enabled.
     bool MCLogicBattleData_ILOGIC_IsRefreshFree(void* instance, uint64_t accountId) {
         if (FeatureState::ArenaFreeEconomy && IsSelfAccount(accountId)) {
             return true;
@@ -11672,6 +12006,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic battle data i logic hero count in pool, applying feature overrides only when enabled.
     int MCLogicBattleData_ILogic_HeroCountInPool(void* instance, int heroId) {
         if (FeatureState::ArenaUnlimitedHeroPool) {
             return 99;
@@ -11714,6 +12049,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic battle data ilogic get shop is forbid, applying feature overrides only when enabled.
     bool MCLogicBattleData_ILOGIC_GetShopIsForbid(void* instance, uint64_t accountId) {
         if ((FeatureState::ArenaNoShopLock || FeatureState::ArenaFreeEconomy) &&
             IsSelfAccount(accountId)) {
@@ -11725,6 +12061,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic battle data ilogic get upgrade cost, applying feature overrides only when enabled.
     int MCLogicBattleData_ILOGIC_GetUpgradeCost(void* instance, uint64_t accountId) {
         if (FeatureState::ArenaFreeEconomy && IsSelfAccount(accountId)) {
             return 0;
@@ -11735,6 +12072,7 @@ namespace Hooks {
             0;
     }
 
+    // Hook wrapper for logic battle manager get m b defend faild, applying feature overrides only when enabled.
     bool MCLogicBattleManager_get_m_bDefendFaild(void* instance) {
         if (FeatureState::CombatForceWin && IsSelfBattleManager(instance)) {
             return false;
@@ -11826,6 +12164,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for show battle touch mgr clamp grid pos, applying feature overrides only when enabled.
     AstarInt2 ShowBattleTouchMgr_ClampGridPos(void* instance, AstarInt2 gridPos) {
         AstarInt2 result = gridPos;
 
@@ -11840,6 +12179,7 @@ namespace Hooks {
         return result;
     }
 
+    // Hook wrapper for a star tile map valid pos, applying feature overrides only when enabled.
     bool AStarTileMap_ValidPos(int x, int y) {
         if (FeatureState::ArenaOutsideMapPlacement) {
             return true;
@@ -11850,6 +12190,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic entity map can walkable, applying feature overrides only when enabled.
     bool MCLogicEntityMap_CanWalkable(void* instance, int x, int y) {
         if (FeatureState::ArenaOutsideMapPlacement) {
             return true;
@@ -11860,6 +12201,7 @@ namespace Hooks {
             false;
     }
 
+    // Hook wrapper for logic entity map is walkable around, applying feature overrides only when enabled.
     bool MCLogicEntityMap_IsWalkableAround(void* instance, int x, int y) {
         if (FeatureState::ArenaOutsideMapPlacement) {
             return true;
@@ -12022,6 +12364,10 @@ void SetupThread() {
         return;
     }
 
+    RuntimeState::Il2CppReady = true;
+    ResolveFeatureBindings();
+    RefreshManagedReferences(true);
+
     auto GetTouch_Methods =
         GetAllMethodsFromName("UnityEngine", "Input", "GetTouch", {"int"});
 
@@ -12033,7 +12379,6 @@ void SetupThread() {
         );
     }
 
-    RuntimeState::Il2CppReady = true;
     RuntimeState::BindingRetryRequested = true;
 }
 

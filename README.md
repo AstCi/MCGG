@@ -72,12 +72,16 @@ Primary public references:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   identifies the game as an auto-chess, multiplayer strategy title by Vizta
-  Games, lists 10M+ downloads, points to the official website and YouTube
-  channel, and shows the listing was updated on 2026-01-09.
+  Games, lists 10M+ downloads, and points to the official website and YouTube
+  channel. Store update dates can vary by region or cache, so use the listing
+  for product identity and links rather than native binding assumptions.
 - [Official website](https://magicchessgogo.com/) describes the core loop as
   recruiting and upgrading MLBB-inspired heroes, forming lineups for 8-player
   battles, using Commander skills, selecting Go Go Cards at key stages, and
   building role/synergy combinations.
+- [MOONTON global launch news](https://en.moonton.com/news/195.html) describes
+  MCGG as an 8-player PvP auto-battler and documents durable systems such as
+  synergies, combat buffs, and seasonal mechanics.
 - [Official YouTube channel](https://www.youtube.com/@MagicChessGoGo) and
   gameplay/guide material are useful for observing UI flow, shop behavior,
   Commander choices, board placement, economy pacing, Go Go Card picks, and
@@ -218,14 +222,19 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Long Shop and Arena data tables render only visible rows to keep scrolling and
   tab switches responsive after table metadata is loaded.
 
-Feature bindings are resolved against local reference artifacts and runtime IL2CPP metadata. Missing methods and fields are retried periodically instead of being permanently cached as unavailable. When a binding is not ready, the overlay reports a `Waiting for ...` state.
+Feature bindings are resolved against local reference artifacts and runtime
+IL2CPP metadata. Missing methods and fields are retried periodically instead of
+being permanently cached as unavailable. Empty method scans and missing field
+lookups both use retry backoffs so the render thread does not rescan broad
+metadata every frame. When a binding is not ready, the overlay reports a
+`Waiting for ...` state.
 
 Opponent prediction combines runtime sources before public heuristics. Live
 current-opponent observations and reverse pair reads remain strongest, followed
 by dump-backed invader ordering, learned recent-opponent cycles, round-robin
-fallback, and bounded history weights. Prediction rows are cached on the 500 ms
-feature cadence so the Test tab and next-enemy HUD do not rebuild managed state
-every render frame.
+fallback, bounded cycle-gap learning, and bounded history weights. Prediction
+rows are cached on the 500 ms feature cadence so the Test tab and next-enemy HUD
+do not rebuild managed state every render frame.
 
 ## Architecture
 
@@ -483,7 +492,9 @@ At load time and during frame presentation, `jni/Main.cpp` performs the followin
    IL2CPP domain.
 5. The setup thread resolves and hooks `UnityEngine.Input.GetTouch` when the
    method metadata is available.
-6. `RuntimeState::Il2CppReady` is set and a feature binding retry is requested.
+6. `RuntimeState::Il2CppReady` is set, the setup thread performs the first
+   guarded feature-binding pass, and later render-frame retries remain
+   backoff-gated.
 7. The first valid hooked frame creates the ImGui context, disables ImGui
    `.ini` persistence, resolves the config path from the game package name,
    loads saved project configuration when present, loads fonts, and applies the
@@ -518,10 +529,11 @@ the following bug-prone areas:
   IL2CPP APIs unless `AttachRenderIl2CppThread()` succeeded.
 - Startup waits should remain in the detached setup thread, not the constructor,
   so loading the native library does not block Unity startup longer than needed.
-- Render-frame work is budgeted. Binding retries and table loads may defer later
+- Render-frame work is budgeted. Binding retries, table loads, prediction HUD
+  refreshes, and heavier Auto-Play board/opponent scans may defer later
   automation ticks to the next frame, but those ticks remain retryable.
-- Method lookup deliberately caches only successful method vectors as reusable
-  results. Empty method scans remain retryable. Field lookup caches misses only
+- Method lookup caches successful method vectors as reusable results and stores
+  empty scans behind a short miss backoff. Field lookup also caches misses only
   behind the binding retry backoff. Do not turn these into permanent failures.
 - Method matching uses class name, method name, parameter count, and
   case-insensitive parameter-name containment. Any new overload-sensitive
@@ -536,8 +548,9 @@ the following bug-prone areas:
   captured policy backup. User edits to those assist toggles while Auto-Play is
   active can be restored to the pre-Auto-Play backup when Auto-Play stops.
 - Opponent prediction combines exact pair data, invasion manager state,
-  dump-backed invader order, round-robin fallback, and recent meeting history.
-  Only the exact local current opponent should be shown as `100%`.
+  dump-backed invader order, round-robin fallback, recent-cycle distance, and
+  recent meeting history. Only the exact local current opponent should be shown
+  as `100%`.
 - SpeedHack changes global Unity time scale. It must continue to reset to
   `1.0x` when disabled, when the active battle state is gone, or when feature
   state is reset.

@@ -23,8 +23,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Code Architecture & Standards
 
 ### High-Level Architecture
-- **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → detached setup thread with startup waits → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
-- **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Field misses use a short retry backoff so hot feature paths do not rescan missing metadata every frame.
+- **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → detached setup thread with startup waits → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → guarded first feature-binding pass → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
+- **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Empty method scans and field misses use short retry backoffs so hot feature paths do not rescan missing metadata every frame. Binding resolution is single-flight so the setup thread and render thread do not scan IL2CPP metadata at the same time.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
 - **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
@@ -50,12 +50,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Cards, auctions, and round supplies.
 - Public positioning/scouting guides and video posts reinforce that opponent
   board reads matter, while older Magic Chess pairing discussion points to a
-  rotating opponent order that deprioritizes recent opponents. Use that only as
-  a heuristic beneath live runtime pair observations and dump-backed invader
-  reads.
-- The Google Play listing was updated on 2026-01-09 and references live content
-  such as Alice, Battle Night, GO1 event content, and Layla seasonal cosmetics.
-  Treat those as current public context, not stable binding assumptions.
+  rotating opponent order that deprioritizes recent opponents until a cycle
+  advances. Use that only as a heuristic beneath live runtime pair observations
+  and dump-backed invader reads.
+- Google Play and third-party store mirrors can disagree on exact update dates
+  by region/cache. Treat store metadata as product context, not stable binding
+  assumptions.
 - Use videos and guides to understand UI flows and player vocabulary, but keep
   implementation anchored to `dump/dump.cs`, runtime diagnostics, bounded
   managed reads, and `Waiting for ...` states.
@@ -112,7 +112,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Opponent prediction may display exact data and weighted guesses together. Only the exact local current opponent should be forced to `100%`.
 - Opponent prediction rows should be built on the throttled 500 ms feature tick,
   not inside the ImGui draw path. Weight live current-opponent data first, then
-  invader order, recent-cycle learning, round-robin fallback, and history.
+  invader order, recent-cycle learning, cycle-gap distance, round-robin
+  fallback, and history.
 - SpeedHack changes global Unity time scale and must reset to `1.0x` when disabled, when battle state is unavailable, or when feature state resets.
 - Repository-wide documentation work should update the top-level Markdown files only: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md`, and `README.id.md`. Leave `goal.md` and submodule Markdown untouched.
 

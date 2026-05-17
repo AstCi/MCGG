@@ -36,7 +36,8 @@ of volatile meta instructions. Current public context checked on 2026-05-17:
 
 - Google Play identifies Magic Chess: Go Go as a Vizta Games auto-chess,
   multiplayer strategy game, points to `magicchessgogo.com` and the official
-  YouTube channel, and shows the listing updated on 2026-01-09.
+  YouTube channel. Store update dates can vary by region/cache, so use them as
+  product context rather than native binding facts.
 - The official site describes the game around 8-player battles, hero
   recruitment/upgrades, Commander skills, Go Go Cards, roles, synergies, and
   classic/ranked/custom play.
@@ -47,7 +48,8 @@ of volatile meta instructions. Current public context checked on 2026-05-17:
   boards, while older Magic Chess pairing discussion describes a turn-like
   opponent order where recent opponents are deprioritized until the cycle
   advances. Treat that as a prediction heuristic only; live runtime pair data,
-  invader-order reads, and local opponent history remain stronger evidence.
+  invader-order reads, recent-cycle distance, and local opponent history remain
+  stronger evidence.
 
 Engineering takeaway: prefer documenting stable runtime surfaces such as battle
 managers, player economy, shop panel state, round manager state, Commander and
@@ -164,7 +166,8 @@ needs the data.
 Opponent prediction should not rebuild managed prediction rows from the draw
 path. Reuse the 500 ms prediction tick, keep live current-opponent observations
 highest priority, then combine invader order, recent opponent cycle learning,
-round-robin fallback, and per-player history as weaker signals.
+cycle-gap distance, round-robin fallback, and per-player history as weaker
+signals.
 
 Auto-Play temporarily owns selected Shop, Arena, and Combat assists through its
 policy backup while enabled. If a change touches those assist toggles, preserve
@@ -290,5 +293,5 @@ Known audit hotspots are early-render readiness, dump-backed signature drift,
 table cache all-or-nothing publication, shop panel operability before buy or
 refresh, grouped shop diagnostic readiness, Auto-Play policy ownership of assist
 toggles, separate Auto-Play deploy/formation cooldowns, render-frame budget
-deferral, clipped long tables, exact-opponent-only `100%` prediction rows, and
-Unity timeScale reset paths.
+deferral, method-miss backoff, guarded binding resolution, clipped long tables,
+exact-opponent-only `100%` prediction rows, and Unity timeScale reset paths.

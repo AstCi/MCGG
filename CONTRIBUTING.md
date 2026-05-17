@@ -57,8 +57,8 @@ git lfs pull
   auctions, board placement, and round-specific supplies.
 - Prediction research should treat public scouting and positioning advice as
   weak heuristics. Runtime current-opponent data, invader order, recent-cycle
-  learning, and local history should drive predictions before any generic
-  internet or video-derived assumption.
+  learning, cycle-gap distance, and local history should drive predictions
+  before any generic internet or video-derived assumption.
 - Preserve the current startup order: process gate, setup thread, early
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `UnityEngine.Input.GetTouch` hook, then lazy render-thread
@@ -70,7 +70,8 @@ git lfs pull
   stay behind readiness checks and successful render-thread IL2CPP attachment.
 - Keep frame-time managed work within the feature frame budget. If a frame is
   already busy, defer noncritical ticks to the next frame instead of stacking
-  every automation path into one render pass.
+  every automation path into one render pass. Heavy Auto-Play fallback opponent
+  scans should also yield to the budget and retry on a later tick.
 - Use the Runtime Status and Test tabs to validate binding readiness, managed
   references, round state, player economy/rank/shop state, battle manager
   fields, battle bridge state, shop panel state, shop diagnostic reader
@@ -84,6 +85,8 @@ git lfs pull
   `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
   `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, and
   `prevRealPlayerEnemy` before falling back to heuristic account ordering.
+  Recent-cycle distance may bias probabilities, but it must stay weaker than
+  exact current-opponent or reverse-pair reads.
 - For Shop changes, preserve the existing throttled automation model: buy,
   repeat-buy, refresh, target-worth, and Recommendation Lineup checks must stay
   bounded, snapshot-based, and retryable. Buy and refresh UI actions should also
@@ -229,9 +232,10 @@ Use this checklist when looking for hidden bugs or logic flaws:
   frames and do not turn retryable runtime state into a one-shot failure.
 - Confirm prediction changes preserve the source priority: exact live pair,
   reverse live pair, invader-order read, recent-cycle queue, round-robin
-  fallback, and only then generic history weighting.
-- Keep method misses retryable and field misses backed off rather than
-  permanently cached as unavailable.
+  fallback, recent-cycle distance, and only then generic history weighting.
+- Keep method misses and field misses backed off rather than permanently cached
+  as unavailable, and keep feature binding resolution single-flight so setup and
+  render retries do not scan IL2CPP metadata at the same time.
 - Treat table caches as all-or-nothing for heroes, equipment, and GogoCards.
   UI and automation should show `Waiting for ...` while any required table is
   unavailable.
