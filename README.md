@@ -72,10 +72,11 @@ Primary public references:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   identifies the game as an auto-chess, multiplayer strategy title by Vizta
-  Games, currently lists 50M+ downloads and an Apr 14, 2026 store update in the
-  checked region, and points to the official website and YouTube channel. Store
-  counts and update dates can vary by region or cache, so use the listing for
-  product identity and links rather than native binding assumptions.
+  Games, showed 10M+ downloads and a May 9, 2026 store update in the checked
+  web region, highlighted S6 Dawnlight Celebration events, and points to the
+  official website and YouTube channel. Store counts and update dates can vary
+  by region or cache, so use the listing for product identity and links rather
+  than native binding assumptions.
 - [Official website](https://magicchessgogo.com/) describes the core loop as
   recruiting and upgrading MLBB-inspired heroes, forming lineups for 8-player
   battles, using Commander skills, selecting Go Go Cards at key stages, and
@@ -83,6 +84,10 @@ Primary public references:
 - [MOONTON global launch news](https://en.moonton.com/news/195.html) describes
   MCGG as an 8-player PvP auto-battler and documents durable systems such as
   synergies, combat buffs, and seasonal mechanics.
+- [MOONTON Season 5 news](https://en.moonton.com/news/305.html) documents Go Go
+  Plaza, GOGO MOBA, Golden Month content, new synergies, GO1 esports momentum,
+  and a 30M-download milestone after global launch. Google Play's current
+  "What's new" copy also names Commander Ruby and Gold Rush mode.
 - [Official YouTube channel](https://www.youtube.com/@MagicChessGoGo) and
   gameplay/guide material are useful for observing UI flow, shop behavior,
   Commander choices, board placement, economy pacing, Go Go Card picks, and
@@ -95,9 +100,10 @@ The important gameplay model for this repository is:
 - Strategic pressure comes from gold interest, health preservation, level and
   population timing, shop refreshes, contested hero pools, Commander skills,
   equipment, synergies, Go Go Cards, auctions, and round-specific supplies.
-- Current public notes around Alice, Battle Night, GO1 event content, and
-  seasonal Commander/Card changes reinforce that names, lineups, and meta
-  priorities move faster than the native binding layer.
+- Current public notes around S6 Dawnlight Celebration, Ruby, Gold Rush, Go Go
+  Plaza, GOGO MOBA, GO1 event content, and seasonal Commander/Card changes
+  reinforce that names, lineups, and meta priorities move faster than the native
+  binding layer.
 
 Engineering implication: docs and diagnostics should describe durable runtime
 surfaces such as battle managers, player economy, shop panel state, round
@@ -148,10 +154,11 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Auction scoring that reads auction phase, slot state, bid price, reward item
   data, hero/equipment rewards, and special upgrade effects before placing a
   bounded bid on the highest-value option.
-- Built-in AI startup is stateful and cooldown-gated: `StartAI` is not replayed
-  continuously for the same account, a long-gated refresh can restart dropped
-  internal AI state, and `StopAI` is called when Auto-Play is disabled or the
-  live battle snapshot is no longer actionable.
+- Built-in AI startup is opt-in, safe-phase, stateful, and cooldown-gated:
+  `StartAI` is not replayed continuously for the same account, it is skipped
+  during fight, fight-result, and monster phases, a long-gated refresh can
+  restart dropped internal AI state, and `StopAI` is called when Auto-Play is
+  disabled or the live battle snapshot is no longer actionable.
 - Built-in deployment and smart formation use separate cooldown clocks so board
   movement cannot starve `TryAutoDeploy`.
 - Optional controls for built-in battle AI, shop, economy, combat power, arena
@@ -280,8 +287,10 @@ gathers local snapshots first, builds one gold-interest plan, scores
 strategy/formation/shop/card/auction options from local data, publishes only
 compact counters and selected targets under `FeatureMutex`, and avoids holding
 project locks while calling managed IL2CPP APIs. Built-in deploy and smart
-formation use separate cooldowns inside the 250 ms tick, and `StartAI` remains
-stateful with only a long refresh interval for recovery.
+formation use separate cooldowns inside the 250 ms tick. The built-in AI bridge
+is disabled by default, stays stateful when explicitly enabled, and only calls
+`StartAI` from safe non-fight/non-result phases with a long refresh interval for
+recovery.
 
 Frame-time feature work has a small render budget. If binding retries, managed
 reference refresh, table loading, HUD refresh, or automation work has already
@@ -536,6 +545,9 @@ the following bug-prone areas:
 - Render-frame work is budgeted. Binding retries, table loads, prediction HUD
   refreshes, and heavier Auto-Play board/opponent scans may defer later
   automation ticks to the next frame, but those ticks remain retryable.
+- Auto-Play action groups after planning are also budget-gated. Card scoring,
+  auction bids, built-in AI, smart formation, and level-up work should not all
+  stack into one render pass when the frame budget is already spent.
 - Method lookup caches successful method vectors as reusable results and stores
   empty scans behind a short miss backoff. Field lookup also caches misses only
   behind the binding retry backoff. Do not turn these into permanent failures.
@@ -551,6 +563,10 @@ the following bug-prone areas:
 - Auto-Play temporarily owns selected Shop, Arena, and Combat assists through a
   captured policy backup. User edits to those assist toggles while Auto-Play is
   active can be restored to the pre-Auto-Play backup when Auto-Play stops.
+- Built-in AI coordination is opt-in. Keep direct `StartAI` calls out of fight,
+  fight-result, and monster phases, and preserve the default-disabled setting so
+  enabling Auto-Play itself does not immediately invoke the game's AI entry
+  point.
 - Opponent prediction combines exact pair data, invasion manager state,
   dump-backed invader order, round-robin fallback, recent-cycle distance, and
   recent meeting history. Only the exact local current opponent should be shown
@@ -598,6 +614,8 @@ the following bug-prone areas:
 - Preserve separate 100 ms ticks for shop automation and arena effects, the
   250 ms ticks for Combat and Auto-Play, and the 500 ms opponent-history/HUD
   refresh cadence unless timing changes are part of the task.
+- Preserve built-in AI as an opt-in Auto-Play assist that is phase-gated and
+  stateful; do not make enabling Auto-Play itself call `StartAI` immediately.
 - Preserve shop automation throttles for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
 - Keep table cache loading demand-driven and clip long data tables so table UI
   does not walk every row every frame.

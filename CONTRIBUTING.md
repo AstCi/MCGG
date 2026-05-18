@@ -55,9 +55,12 @@ git lfs pull
   MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
   skills, Go Go Cards, economy/interest decisions, synergies, equipment,
   auctions, board placement, and round-specific supplies. Public context was
-  last checked on 2026-05-18; Google Play showed 50M+ downloads and an Apr 14,
-  2026 store update in the checked region, but those store values should remain
-  product context rather than native binding assumptions.
+  last checked on 2026-05-18; Google Play showed 10M+ downloads, a May 9, 2026
+  store update, S6 Dawnlight Celebration event context, Commander Ruby, and Gold
+  Rush mode in the checked web region, while MOONTON Season 5 news documented
+  Go Go Plaza, GOGO MOBA, Golden Month content, new synergies, GO1 esports
+  momentum, and a 30M-download milestone after global launch. Treat those public
+  details as product context rather than native binding assumptions.
 - Prediction research should treat public scouting and positioning advice as
   weak heuristics. Runtime current-opponent data, invader order, recent-cycle
   learning, cycle-gap distance, and local history should drive predictions
@@ -102,10 +105,12 @@ git lfs pull
   unbounded searches or long lock holds. Keep gold-interest decisions centralized
   in the Auto-Play gold plan so shop spending, auction bids, passive gold,
   free-economy assists, and level-up actions share the same reserve logic.
-  Built-in AI startup should be stateful so `StartAI` is not replayed
-  continuously for the same account, with only a long-gated refresh to recover
-  dropped internal AI state. Keep built-in deployment and smart formation on
-  separate cooldowns so formation movement cannot starve `TryAutoDeploy`.
+  Built-in AI startup should be opt-in, limited to safe non-fight/non-result
+  phases, and stateful so `StartAI` is not replayed continuously for the same
+  account, with only a long-gated refresh to recover dropped internal AI state.
+  Keep built-in deployment and smart formation on separate cooldowns so formation
+  movement cannot starve `TryAutoDeploy`, and keep budget checks between
+  card/auction/AI/formation/level-up action groups after planning.
   Auto-Play should not enable or disable Arena SpeedHack; SpeedHack remains an
   explicit Arena control.
 - Auto-Play depends on dump-backed bindings for
@@ -210,8 +215,10 @@ Follow the existing C++ style in `jni/Main.cpp`:
   250 ms for Combat and Auto-Play, and 500 ms for opponent prediction history
   and the next-enemy HUD refresh.
 - Preserve Auto-Play's sub-cooldowns inside that 250 ms tick: stateful
-  `StartAI`, long-gated AI refresh, built-in deploy, separate smart formation,
-  level-up, and auction actions should not share one retry clock.
+  opt-in `StartAI`, long-gated AI refresh, built-in deploy, separate smart
+  formation, level-up, and auction actions should not share one retry clock.
+- Confirm built-in AI remains default-disabled and phase-gated so enabling
+  Auto-Play itself does not immediately invoke `MCLogicBattleManager.StartAI`.
 - Keep table cache loading demand-driven. Unrelated tabs should not repeatedly
   perform heavy table scans, and long Shop/Arena table views should use visible
   row clipping.

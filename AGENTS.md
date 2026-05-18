@@ -35,16 +35,22 @@ video-context research, then translate it into durable engineering notes instead
 of volatile meta instructions. Current public context checked on 2026-05-18:
 
 - Google Play identifies Magic Chess: Go Go as a Vizta Games auto-chess,
-  multiplayer strategy game, currently shows 50M+ downloads and an Apr 14,
-  2026 update in the checked region, and points to `magicchessgogo.com` and the
-  official YouTube channel. Store counts and update dates can vary by
-  region/cache, so use them as product context rather than native binding facts.
+  multiplayer strategy game, showed 10M+ downloads and a May 9, 2026 update in
+  the checked web region, listed S6 Dawnlight Celebration events, and points to
+  `magicchessgogo.com` and the official YouTube channel. Store counts and
+  update dates can vary by region/cache, so use them as product context rather
+  than native binding facts.
 - The official site describes the game around 8-player battles, hero
   recruitment/upgrades, Commander skills, Go Go Cards, roles, synergies, and
   classic/ranked/custom play.
 - Public video and guide material is useful for observing UI flow, economy,
   shop refreshes, board placement, Commander/Card choices, and common meta
   vocabulary, but seasonal lineups and tier claims are not stable native facts.
+- MOONTON's public news around Season 5 documented Go Go Plaza, GOGO MOBA,
+  Golden Month content, Neobeasts/Exorcist/Mystic Meow/Heartbond synergies, and
+  GO1 esports momentum. Google Play's current "What's new" context mentions
+  Commander Ruby and Gold Rush mode. Treat these as live product context and
+  vocabulary, not native binding contracts.
 - Public positioning and scouting guides emphasize adapting to the opponents'
   boards, while older Magic Chess pairing discussion describes a turn-like
   opponent order where recent opponents are deprioritized until the cycle
@@ -155,10 +161,13 @@ existing target helpers. Keep opponent scans bounded to the battle manager
 dictionary limit, keep built-in deploy and smart formation on separate cooldowns,
 keep battlefield movement to one chosen action per formation cooldown,
 keep shop, auction, passive-gold, free-economy, and level-up decisions aligned
-with the shared gold plan, keep built-in AI startup stateful instead of replaying
-`StartAI` on every tick, allow only a long-gated `StartAI` refresh to recover
-from dropped internal AI state, keep SpeedHack as an explicit Arena-only
-control, and do not hold `FeatureMutex` while calling managed IL2CPP APIs.
+with the shared gold plan, keep built-in AI startup opt-in, stateful, and limited
+to safe non-fight/non-result phases instead of replaying `StartAI` on every tick,
+allow only a long-gated `StartAI` refresh to recover from dropped internal AI
+state, keep SpeedHack as an explicit Arena-only control, and do not hold
+`FeatureMutex` while calling managed IL2CPP APIs. Managed Auto-Play action groups
+after planning should keep checking the frame budget so card, auction, AI,
+formation, and level-up work do not stack into one overloaded render pass.
 
 Large table-backed UI surfaces such as Shop hero targets and Arena hero, item,
 and GogoCard lists should render through clipping or another visible-row pattern
@@ -253,7 +262,7 @@ Do not revert unrelated local changes in the working tree.
 Current user-facing feature areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. If a feature binding is missing at runtime, the
 overlay should show a `Waiting for ...` state rather than failing silently.
-Auto-Play includes adaptive strategy pressure, built-in AI coordination,
+Auto-Play includes adaptive strategy pressure, opt-in built-in AI coordination,
 opponent-aware board analysis, advanced role-aware formation moves, selected
 shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
 decisions, and optional coordination of Combat and Arena assists. Shop currently
@@ -295,6 +304,8 @@ Settings config should default to the running game package directory as
 Known audit hotspots are early-render readiness, dump-backed signature drift,
 table cache all-or-nothing publication, shop panel operability before buy or
 refresh, grouped shop diagnostic readiness, Auto-Play policy ownership of assist
-toggles, separate Auto-Play deploy/formation cooldowns, render-frame budget
-deferral, method-miss backoff, guarded binding resolution, clipped long tables,
-exact-opponent-only `100%` prediction rows, and Unity timeScale reset paths.
+toggles, opt-in safe-phase built-in AI startup, separate Auto-Play
+deploy/formation cooldowns, render-frame budget deferral between Auto-Play
+action groups, method-miss backoff, guarded binding resolution, clipped long
+tables, exact-opponent-only `100%` prediction rows, and Unity timeScale reset
+paths.

@@ -208,7 +208,7 @@ void RefreshNextEnemyHudText(uint64_t selfAccountId);
 namespace FeatureState {
     std::atomic<bool> AutoPlayEnabled{false};
     std::atomic<bool> AutoPlayAdaptive{true};
-    std::atomic<bool> AutoPlayUseBuiltInAI{true};
+    std::atomic<bool> AutoPlayUseBuiltInAI{false};
     std::atomic<bool> AutoPlayUseShop{true};
     std::atomic<bool> AutoPlayUseEconomy{true};
     std::atomic<bool> AutoPlayUseCombat{true};
@@ -4576,6 +4576,14 @@ enum AutoPlayStrategyKind {
     AutoPlayStrategyAggressive = 2
 };
 
+enum GamePhaseKind {
+    GamePhasePrepare = 1,
+    GamePhaseWelfare = 5,
+    GamePhaseForecast = 6,
+    GamePhaseRegionPick = 7,
+    GamePhaseAuction = 8
+};
+
 struct AutoPlaySnapshot {
     uint64_t accountId = 0;
     int round = 0;
@@ -4600,6 +4608,7 @@ struct AutoPlaySnapshot {
     int contestedTargetOwners = 0;
     uint64_t currentOpponentId = 0;
     bool fightSection = false;
+    bool fightResultSection = false;
     bool monsterRound = false;
 };
 
@@ -5870,6 +5879,11 @@ AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
             Originals::MCLogicBattleData_ILOGIC_IsFightSection(nullptr);
     }
 
+    if (Originals::MCLogicBattleData_ILOGIC_IsFightResultSection) {
+        snapshot.fightResultSection =
+            Originals::MCLogicBattleData_ILOGIC_IsFightResultSection(nullptr);
+    }
+
     if (Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound) {
         snapshot.monsterRound =
             Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound(nullptr);
@@ -6302,6 +6316,23 @@ void StopAutoPlayRuntime(uint64_t selfAccountId) {
     FeatureState::AutoPlayWasRunning = false;
 }
 
+// Checks whether it is safe to call the game's built-in AI entry points.
+bool IsAutoPlayBuiltInAiSafePhase(const AutoPlaySnapshot& snapshot) {
+    if (snapshot.fightSection || snapshot.fightResultSection || snapshot.monsterRound) {
+        return false;
+    }
+
+    if (snapshot.phase < 0) {
+        return true;
+    }
+
+    return snapshot.phase == GamePhasePrepare ||
+        snapshot.phase == GamePhaseWelfare ||
+        snapshot.phase == GamePhaseForecast ||
+        snapshot.phase == GamePhaseRegionPick ||
+        snapshot.phase == GamePhaseAuction;
+}
+
 // Starts or refreshes the built-in AI on cooldown without replaying it every tick.
 void RunBuiltInAutoPlayAI(
     uint64_t selfAccountId,
@@ -6315,6 +6346,10 @@ void RunBuiltInAutoPlayAI(
 
     void* selfManager = GetSelfLogicBattleManager();
     if (!selfManager) {
+        return;
+    }
+
+    if (!IsAutoPlayBuiltInAiSafePhase(snapshot)) {
         return;
     }
 
@@ -6437,7 +6472,14 @@ void RunAutoPlay(
         return;
     }
 
-    if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
+    if (!IsIl2CppRuntimeReady()) {
+        return;
+    }
+
+    if (selfAccountId == 0) {
+        if (FeatureState::AutoPlayWasRunning.load()) {
+            StopAutoPlayRuntime(0);
+        }
         return;
     }
 
@@ -6445,6 +6487,10 @@ void RunAutoPlay(
         return frameStart.time_since_epoch().count() != 0 &&
             FrameBudgetExceeded(frameStart);
     };
+
+    if (budgetExceeded()) {
+        return;
+    }
 
     AutoPlaySnapshot snapshot = ReadAutoPlaySnapshot(selfAccountId);
     if (!IsAutoPlaySnapshotActionable(snapshot)) {
@@ -6505,13 +6551,34 @@ void RunAutoPlay(
     PublishAutoPlayGoldPlan(goldPlan);
 
     ApplyAutoPlayPolicy(snapshot, strategy, goldPlan);
-    ApplyAutoPlayShopTargets(plan, snapshot);
-    ApplyAutoPlayGoGoCardChoice(snapshot, plan);
-    TryAutoPlayAuction(snapshot, plan, goldPlan, now);
-    RunBuiltInAutoPlayAI(selfAccountId, snapshot, now);
-    TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
-    TryAutoPlayLevelUp(snapshot, goldPlan, now);
     FeatureState::AutoPlayWasRunning = true;
+
+    ApplyAutoPlayShopTargets(plan, snapshot);
+    if (budgetExceeded()) {
+        return;
+    }
+
+    ApplyAutoPlayGoGoCardChoice(snapshot, plan);
+    if (budgetExceeded()) {
+        return;
+    }
+
+    TryAutoPlayAuction(snapshot, plan, goldPlan, now);
+    if (budgetExceeded()) {
+        return;
+    }
+
+    RunBuiltInAutoPlayAI(selfAccountId, snapshot, now);
+    if (budgetExceeded()) {
+        return;
+    }
+
+    TryAutoPlaySmartFormation(snapshot, plan, selfUnits, enemyUnits, now);
+    if (budgetExceeded()) {
+        return;
+    }
+
+    TryAutoPlayLevelUp(snapshot, goldPlan, now);
 }
 
 // Runs shop automation for one bounded feature tick.
@@ -7146,7 +7213,7 @@ void ResetFeatureSettings() {
     StopAutoPlayRuntime(selfAccountId);
     FeatureState::AutoPlayEnabled = false;
     FeatureState::AutoPlayAdaptive = true;
-    FeatureState::AutoPlayUseBuiltInAI = true;
+    FeatureState::AutoPlayUseBuiltInAI = false;
     FeatureState::AutoPlayUseShop = true;
     FeatureState::AutoPlayUseEconomy = true;
     FeatureState::AutoPlayUseCombat = true;
@@ -8526,13 +8593,17 @@ bool HasBattleTestBindings() {
 
 // Checks the auto play bindings condition before work proceeds.
 bool HasAutoPlayBindings() {
+    bool builtInAiReady =
+        !FeatureState::AutoPlayUseBuiltInAI.load() ||
+        (Originals::MCLogicBattleManager_StartAI &&
+         Originals::MCLogicBattleManager_TryAutoDeploy);
+
     return IsIl2CppRuntimeReady() &&
         Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
         Originals::MCLogicBattleData_ILOGIC_GetPlayerHP &&
         Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin &&
         Originals::MCLogicBattleData_ILOGIC_GetPlayerLevel &&
-        Originals::MCLogicBattleManager_StartAI &&
-        Originals::MCLogicBattleManager_TryAutoDeploy &&
+        builtInAiReady &&
         Originals::MCLogicBattleManager_OnPlayerLvlUp &&
         Originals::MCLogicBattleManager_CalcCurrentFightValue &&
         Originals::MCLogicBattleManager_MoveHeroInBattleField &&
