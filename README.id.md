@@ -73,11 +73,11 @@ Referensi publik utama:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   mengidentifikasi game ini sebagai judul strategi multiplayer auto-chess dari
-  Vizta Games, saat ini mencantumkan 50M+ download dan update store 14 Apr
-  2026 pada region yang dicek, serta mengarah ke website resmi dan kanal
-  YouTube. Jumlah download dan tanggal update store dapat berbeda berdasarkan
-  region atau cache, jadi gunakan listing untuk identitas produk dan link,
-  bukan asumsi native binding.
+  Vizta Games, menampilkan 10M+ download dan update store 9 Mei 2026 pada web
+  region yang dicek, menyorot event S6 Dawnlight Celebration, serta mengarah ke
+  website resmi dan kanal YouTube. Jumlah download dan tanggal update store
+  dapat berbeda berdasarkan region atau cache, jadi gunakan listing untuk
+  identitas produk dan link, bukan asumsi native binding.
 - [Website resmi](https://magicchessgogo.com/) menjelaskan loop inti sebagai
   recruit dan upgrade hero terinspirasi MLBB, membentuk lineup untuk battle
   8-player, memakai skill Commander, memilih Go Go Cards pada tahap penting,
@@ -85,6 +85,10 @@ Referensi publik utama:
 - [Berita global launch MOONTON](https://en.moonton.com/news/195.html)
   mendeskripsikan MCGG sebagai auto-battler PvP 8-player dan mencatat sistem
   yang lebih tahan lama seperti synergy, combat buff, dan mekanik seasonal.
+- [Berita Season 5 MOONTON](https://en.moonton.com/news/305.html) mencatat Go
+  Go Plaza, GOGO MOBA, konten Golden Month, synergy baru, momentum esports GO1,
+  dan milestone 30M download setelah global launch. Copy "What's new" Google
+  Play saat ini juga menyebut Commander Ruby dan mode Gold Rush.
 - [Kanal YouTube resmi](https://www.youtube.com/@MagicChessGoGo) serta materi
   gameplay/guide berguna untuk mengamati alur UI, perilaku shop, pilihan
   Commander, placement board, pacing economy, pilihan Go Go Card, dan istilah
@@ -97,9 +101,10 @@ Model gameplay yang penting untuk repository ini:
 - Tekanan strategi datang dari gold interest, menjaga HP, timing level dan
   population, refresh shop, perebutan hero pool, skill Commander, equipment,
   synergy, Go Go Cards, auction, dan supply khusus round.
-- Catatan publik saat ini tentang Alice, Battle Night, konten event GO1, dan
-  perubahan seasonal Commander/Card menegaskan bahwa nama, lineup, dan prioritas
-  meta berubah lebih cepat daripada layer native binding.
+- Catatan publik saat ini tentang S6 Dawnlight Celebration, Ruby, Gold Rush, Go
+  Go Plaza, GOGO MOBA, konten event GO1, dan perubahan seasonal Commander/Card
+  menegaskan bahwa nama, lineup, dan prioritas meta berubah lebih cepat daripada
+  layer native binding.
 
 Implikasi engineering: dokumentasi dan diagnostik sebaiknya mendeskripsikan
 surface runtime yang tahan lama seperti battle manager, economy player, state
@@ -152,8 +157,9 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Scoring auction yang membaca phase auction, state slot, bid price, reward
   item, reward hero/equipment, dan special upgrade effect sebelum menawar opsi
   bernilai tertinggi secara terbatas.
-- Startup built-in AI bersifat stateful dan memakai cooldown: `StartAI` tidak
-  dipanggil terus-menerus untuk account yang sama, refresh dengan interval
+- Startup built-in AI bersifat opt-in, safe-phase, stateful, dan memakai
+  cooldown: `StartAI` tidak dipanggil terus-menerus untuk account yang sama,
+  dilewati saat fase fight, fight-result, dan monster, refresh dengan interval
   panjang dapat memulai ulang state AI internal yang terlepas, dan `StopAI`
   dipanggil saat Auto-Play dimatikan atau snapshot battle live belum dapat
   dipakai.
@@ -286,8 +292,10 @@ ini mengumpulkan snapshot lokal terlebih dahulu, membangun satu gold-interest
 plan, menilai opsi strategy/formation/shop/card/auction dari data lokal, hanya
 mem-publish counter ringkas dan selected target di bawah `FeatureMutex`, dan
 menghindari lock proyek saat memanggil API IL2CPP managed. Built-in deploy dan
-smart formation memakai cooldown terpisah di dalam tick 250 ms, dan `StartAI`
-tetap stateful dengan hanya refresh interval panjang untuk recovery.
+smart formation memakai cooldown terpisah di dalam tick 250 ms. Bridge built-in
+AI default-nya nonaktif, tetap stateful saat diaktifkan eksplisit, dan hanya
+memanggil `StartAI` dari fase non-fight/non-result yang aman dengan refresh
+interval panjang untuk recovery.
 
 Pekerjaan fitur pada frame-time memiliki budget render kecil. Jika retry
 binding, refresh managed reference, loading tabel, refresh HUD, atau automation
@@ -546,6 +554,9 @@ area yang rawan bug berikut:
   HUD prediksi, serta scan board/opponent Auto-Play yang lebih berat boleh
   menunda tick automation berikutnya ke frame selanjutnya, tetapi tick tersebut
   tetap retryable.
+- Action group Auto-Play setelah planning juga dibatasi budget. Scoring card,
+  bid auction, built-in AI, smart formation, dan level-up tidak boleh menumpuk
+  dalam satu render pass ketika budget frame sudah terpakai.
 - Lookup method memakai hasil method yang sukses sebagai cache reusable dan
   menyimpan scan kosong di balik miss backoff singkat. Lookup field juga hanya
   meng-cache miss di balik backoff retry binding. Jangan mengubahnya menjadi
@@ -563,6 +574,9 @@ area yang rawan bug berikut:
 - Auto-Play sementara memiliki assist Shop, Arena, dan Combat melalui policy
   backup yang di-capture. Edit user pada toggle assist saat Auto-Play aktif
   dapat kembali ke nilai sebelum Auto-Play saat Auto-Play berhenti.
+- Koordinasi built-in AI bersifat opt-in. Jaga call langsung `StartAI` tetap di
+  luar fase fight, fight-result, dan monster, serta pertahankan default nonaktif
+  agar mengaktifkan Auto-Play tidak langsung memanggil entry point AI game.
 - Prediksi opponent menggabungkan pair data exact, state invasion manager,
   urutan invader berbasis dump, fallback round-robin, jarak siklus terbaru, dan
   riwayat pertemuan terbaru. Hanya current opponent lokal yang exact yang boleh
@@ -615,6 +629,8 @@ area yang rawan bug berikut:
 - Pertahankan tick terpisah 100 ms untuk shop automation dan arena effects,
   tick 250 ms untuk Combat dan Auto-Play, serta cadence 500 ms untuk riwayat
   opponent/HUD kecuali perubahan timing memang bagian dari task.
+- Pertahankan built-in AI sebagai assist Auto-Play opt-in yang phase-gated dan
+  stateful; jangan membuat aktivasi Auto-Play langsung memanggil `StartAI`.
 - Pertahankan throttle shop automation untuk buy, repeat-buy, refresh, target-worth, dan pengecekan Recommendation Lineup.
 - Jaga loading table cache tetap demand-driven dan clip tabel data panjang agar
   UI tabel tidak memproses setiap row pada setiap frame.

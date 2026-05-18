@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → detached setup thread with startup waits → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → guarded first feature-binding pass → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Empty method scans and field misses use short retry backoffs so hot feature paths do not rescan missing metadata every frame. Binding resolution is single-flight so the setup thread and render thread do not scan IL2CPP metadata at the same time.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for stateful built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
+- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for opt-in safe-phase built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
 - **Field Access**: Typed regular instance field reads and non-pointer writes
   use resolved `il2cpp_field_get_offset` values for direct bounded copies on
@@ -45,10 +45,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   listing, official website, official YouTube channel, and gameplay/guide
   material.
 - Google Play currently identifies the title as a Vizta Games strategy
-  auto-chess game, shows 50M+ downloads and an Apr 14, 2026 store update in the
-  checked region, and links to the official site and YouTube channel. Treat
-  those figures as product context because store metadata can vary by
-  region/cache.
+  auto-chess game, showed 10M+ downloads and a May 9, 2026 store update in the
+  checked web region, listed S6 Dawnlight Celebration events, and links to the
+  official site and YouTube channel. Treat those figures as product context
+  because store metadata can vary by region/cache.
+- MOONTON's public Season 5 news documents Go Go Plaza, GOGO MOBA, Golden Month
+  content, Neobeasts/Exorcist/Mystic Meow/Heartbond synergies, GO1 esports
+  momentum, and a 30M-download milestone after global launch. Google Play's
+  current "What's new" context mentions Commander Ruby and Gold Rush mode.
 - Public sources frame MCGG as an 8-player auto-battler built around recruiting,
   merging, deploying, and repositioning MLBB-inspired heroes while managing
   gold, level, population, HP, equipment, synergies, Commander skills, Go Go
@@ -78,8 +82,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   interest breakpoints through a shared reserve/spend budget plan, and can
   coordinate existing shop/economy/combat/arena assist controls. It does not
   control Arena SpeedHack. Built-in deploy and smart formation use separate
-  cooldown clocks, and `StartAI` may be refreshed only on a long interval to
-  recover if the game drops its internal AI state.
+  cooldown clocks. Direct `StartAI` coordination is opt-in, skipped during
+  fight/fight-result/monster phases, and may be refreshed only on a long
+  interval to recover if the game drops its internal AI state.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
 - **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, and save/load configuration, including Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and shop-panel operability gates before buy/refresh UI actions.
@@ -155,13 +160,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   table/target helpers. Keep opponent scans bounded to the battle manager
   dictionary limit, keep board placement to one move per cooldown, keep shop,
   auction, passive-gold, free-economy, and level-up decisions on the shared
-  gold plan, keep built-in AI startup stateful with only a long-gated refresh,
-  keep built-in deploy and smart formation cooldowns separate, keep SpeedHack
-  as a manual Arena-only control, and never hold `FeatureMutex` while calling
-  managed IL2CPP APIs.
+  gold plan, keep built-in AI startup opt-in, safe-phase, and stateful with only
+  a long-gated refresh, keep built-in deploy and smart formation cooldowns
+  separate, keep SpeedHack as a manual Arena-only control, and never hold
+  `FeatureMutex` while calling managed IL2CPP APIs.
 - **Freeze stability**: Keep frame-time managed work behind the feature frame
   budget, defer noncritical ticks when the budget is exhausted, avoid eager table
-  cache loads on unrelated tabs, and clip long table views.
+  cache loads on unrelated tabs, budget-gate Auto-Play action groups after
+  planning, and clip long table views.
 - **Auto-Play signatures**: Verify `MCLogicBattleManager.StartAI`,
   `TryAutoDeploy`, `OnPlayerLvlUp`, `GetLineupWorth`,
   `CalcCurrentFightValue`, `MoveHeroInBattleField(UInt32, Byte, Byte,
