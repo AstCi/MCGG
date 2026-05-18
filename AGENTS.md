@@ -32,12 +32,13 @@ Vendored or external components live under `jni/dobby/`, `jni/imgui/`,
 
 When a task asks for broader Magic Chess Go Go analysis, include internet or
 video-context research, then translate it into durable engineering notes instead
-of volatile meta instructions. Current public context checked on 2026-05-17:
+of volatile meta instructions. Current public context checked on 2026-05-18:
 
 - Google Play identifies Magic Chess: Go Go as a Vizta Games auto-chess,
-  multiplayer strategy game, points to `magicchessgogo.com` and the official
-  YouTube channel. Store update dates can vary by region/cache, so use them as
-  product context rather than native binding facts.
+  multiplayer strategy game, currently shows 50M+ downloads and an Apr 14,
+  2026 update in the checked region, and points to `magicchessgogo.com` and the
+  official YouTube channel. Store counts and update dates can vary by
+  region/cache, so use them as product context rather than native binding facts.
 - The official site describes the game around 8-player battles, hero
   recruitment/upgrades, Commander skills, Go Go Cards, roles, synergies, and
   classic/ranked/custom play.
@@ -94,15 +95,17 @@ history.
 
 Follow the existing C++ style in `jni/Main.cpp`: 4-space indentation, concise
 helper functions, explicit pointer types, and short comments placed directly
-above functions or complex blocks. Keep Unity compatibility macros named with
-the `UNITY_` prefix. Prefer `void*` for managed object instances unless a local
-structure layout is required.
+above functions or complex blocks. Current project-owned native function
+definitions in `jni/Main.cpp` and `jni/structures/Structures.hpp` carry a short
+contract comment; preserve that coverage when adding or changing functions.
+Keep Unity compatibility macros named with the `UNITY_` prefix. Prefer `void*`
+for managed object instances unless a local structure layout is required.
 
 Keep runtime sections clear and local: IL2CPP resolution, managed reference
 refresh, table caches, appearance setup, Settings persistence, feature ticks,
-hooks, test diagnostics, and ImGui tabs should remain easy to scan. Add concise
-comments for risky IL2CPP calls or value-type assumptions, not for obvious
-control flow.
+hooks, test diagnostics, and ImGui tabs should remain easy to scan. Keep
+function comments focused on contract, safety boundary, or layout meaning, and
+avoid line-by-line narration of obvious control flow.
 
 Do not convert retryable lookups into one-shot failures. Method and field
 resolution can happen before the target metadata is ready, so missing entries
