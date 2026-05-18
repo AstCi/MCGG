@@ -180,6 +180,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Comments**: Preserve concise comments before project-owned function
   definitions and add extra notes only for risky IL2CPP calls, hook signatures,
   value-type layouts, or timing-sensitive blocks.
+- **Commit Messages**: Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Use short typed messages such as `feat(autoplay): add gold interest planning`, `fix(ui): resolve main menu tab switching`, or `docs: update runtime audit guidance`. Accepted types: `feat`, `fix`, `perf`, `refactor`, `docs`, `build`, `ci`, `chore`, `revert`, `test`. Common scopes: `main`, `ui`, `shop`, `arena`, `autoplay`, `hud`, `appearance`, `test`, `readme`. Release notes are generated from commit subjects and body text, so include enough context for commits to stand alone.
 - **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`) unless explicitly requested.
 - **Appearance**: Keep theme/font changes in the existing appearance setup and preserve fallback to the default ImGui font when Noto Sans CJK is unavailable. When adding themes, keep `kAppearanceThemes` and `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme index `1` for existing configs.
 - **Settings**: Keep persistence in the project config file under the game app data directory; do not re-enable ImGui `.ini` persistence unless explicitly requested.
