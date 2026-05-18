@@ -181,6 +181,10 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Kontrol font scale, opacity, rounding, border, padding, spacing, scrollbar, dan indentation.
 - Save dan load untuk kontrol visual, window, HUD, Auto-Play, Combat, Shop, dan Arena.
 - Path config default berada di package game yang sedang berjalan, di-resolve sebagai `/data/data/<game-package>/files/mcgg_config.ini`.
+- Indikator update library dan view collapsible `Updates / Changelog` berbasis
+  GitHub Releases. Bagian ini menampilkan versi lokal embedded, commit/ref,
+  rilis terbaru, tanggal rilis, waktu check terakhir, status, summary singkat,
+  tombol refresh manual, dan release notes per versi dalam area scroll.
 
 ### Shop
 
@@ -217,8 +221,8 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 ### Test
 
 - Section Runtime Status untuk binding battle data, GGC, shop, Recommendation
-  Lineup, Battle Power, arena, round skip, speedhack, test, spectator, synergy,
-  dan placement.
+  Lineup, update check, Battle Power, arena, round skip, speedhack, test,
+  spectator, synergy, dan placement.
 - Kontrol manual untuk retry binding dan refresh managed reference.
 - Inspeksi account berdasarkan self, opponent, atau account ID eksplisit.
 - Tabel prediksi fight dengan sinyal direct, manager-derived, invasion-pair,
@@ -263,6 +267,9 @@ Secara umum, proyek ini berisi:
 - Forwarding input touch Unity ke input mouse ImGui.
 - Setup appearance runtime dengan persistence `.ini` ImGui yang dinonaktifkan.
 - Persistence konfigurasi milik proyek untuk overlay dan feature state.
+- Update check GitHub Releases yang berjalan pada thread detached, memakai
+  static libcurl hanya untuk metadata rilis publik, dan menyimpan data
+  changelog di memory selama sesi berjalan.
 - State runtime primitive yang bersifat atomic dengan domain mutex terpisah
   untuk cache IL2CPP, koleksi fitur, dan string UI/config.
 - Helper typed berbasis offset untuk read field instance reguler dan write
@@ -322,6 +329,9 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 - Refresh teks HUD next-enemy: 500 ms saat HUD aktif.
 - Refresh cache row prediksi opponent: 500 ms saat tab Test atau HUD next-enemy
   membutuhkan data prediksi.
+- Update check GitHub Releases: sekali per sesi overlay, lalu maksimal setiap
+  6 jam kecuali user menekan refresh. Kegagalan network atau metadata dicoba
+  ulang dengan exponential backoff terbatas dari 5 menit sampai 60 menit.
 
 Miss metadata field juga dicoba ulang dengan backoff singkat. Ini menjaga
 metadata Unity yang terlambat tetap retryable tanpa membiarkan lookup field yang
@@ -507,13 +517,28 @@ Unity compatibility defines dikonfigurasi di `jni/Android.mk`:
 
 Pastikan nilai tersebut tetap selaras dengan header Unity di `jni/Il2CppVersions/`.
 
+Build metadata di-embed ke native library melalui `jni/Android.mk`. Build lokal
+fallback ke nilai dari Git saat tersedia, sedangkan CI mengirim metadata rilis
+generated secara eksplisit:
+
+```make
+-DMCGG_BUILD_REPOSITORY
+-DMCGG_BUILD_VERSION
+-DMCGG_BUILD_COMMIT
+-DMCGG_BUILD_REF
+```
+
+Overlay memakai constant tersebut sebagai sumber setara `BUILD_INFO.txt` untuk
+indikator update di Settings dan diagnostik Runtime Status di Test.
+
 ## Packaging Rilis CI
 
-Workflow GitHub Actions di `.github/workflows/build.yml` menginstal prerequisite
-build curl/libpsl/OpenSSL, membangun archive static OpenSSL, libpsl, dan curl,
-membangun native module dengan Android NDK `29.0.14206865`, mengunggah zip rilis
-sebagai workflow artifact, dan memublikasikan GitHub release untuk run yang
-bukan pull request.
+Workflow GitHub Actions di `.github/workflows/build.yml` menyiapkan metadata
+rilis berbasis tanggal UTC sebelum compile, meneruskannya ke `ndk-build` sebagai
+constant `MCGG_BUILD_*`, menginstal prerequisite build curl/libpsl/OpenSSL,
+membangun archive static OpenSSL, libpsl, dan curl, membangun native module
+dengan Android NDK `29.0.14206865`, mengunggah zip rilis sebagai workflow
+artifact, dan memublikasikan GitHub release untuk run yang bukan pull request.
 
 Nama asset rilis memakai prefix proyek, versi berbasis tanggal UTC, metadata
 workflow run, dan short commit SHA. Setiap package menyertakan
@@ -527,6 +552,15 @@ fallback ke commit saat ini saja. Subject commit dan body commit akan disertakan
 jika ada. Release yang sudah ada dengan tag generated yang sama akan diperbarui
 dengan notes hasil generate terbaru sebelum asset diunggah ulang memakai
 `--clobber`.
+
+Saat runtime, overlay melakukan query
+`https://api.github.com/repos/Yan-0001/MCGG/releases?per_page=20` melalui
+libcurl, memfilter draft dan prerelease, memperlakukan rilis compatible pertama
+sebagai versi terbaru, lalu membandingkannya dengan versi lokal embedded atau
+target commit rilis yang cocok. Request hanya memakai header standar GitHub API
+dan user agent proyek. Request ini tidak mengirim gameplay state, data account,
+identifier device, credential, atau data runtime privat, dan tidak pernah
+men-download atau menerapkan asset rilis secara otomatis.
 
 ## Alur Runtime
 
@@ -614,6 +648,10 @@ area yang rawan bug berikut:
 - SpeedHack mengubah time scale Unity global. Fitur ini harus tetap reset ke
   `1.0x` saat dinonaktifkan, saat state battle aktif hilang, atau saat feature
   state di-reset.
+- Update checker hanya informatif. Pertahankan prosesnya asynchronous, simpan
+  metadata rilis di cache dengan `RuntimeMutex::UpdateMutex`, throttle retry,
+  dan jangan menambahkan download otomatis, deployment, forced update, bypass,
+  atau upload data gameplay.
 - Komentar fungsi kini mencakup semua definisi native function milik proyek di
   `jni/Main.cpp` dan `jni/structures/Structures.hpp`; helper baru harus menjaga
   coverage tersebut, bukan hanya mengandalkan komentar section.
@@ -673,7 +711,8 @@ area yang rawan bug berikut:
   bawah lock.
 - Jaga perubahan cache method dan field tetap berada di bawah
   `RuntimeMutex::CacheMutex`, dan lindungi string UI/config dengan
-  `RuntimeMutex::UiMutex`.
+  `RuntimeMutex::UiMutex`. Metadata release untuk update check berada di bawah
+  `RuntimeMutex::UpdateMutex`.
 - Pertahankan scan selected-target shop tetap bounded dan berbasis snapshot.
 - Pastikan nama theme Appearance dan entry palette tetap sejajar saat
   menambahkan theme. Config lama mengharapkan Catppuccin Mocha tetap berada di
@@ -793,6 +832,21 @@ Tab Appearance akan fallback ke font default ImGui saat font Noto Sans CJK embed
 
 Path config default di-resolve dari process game yang sedang berjalan dan disimpan sebagai `/data/data/<game-package>/files/mcgg_config.ini`. Jika tab Settings melaporkan kegagalan save atau load, cek apakah process dapat membaca dan menulis direktori data app game.
 
+### Update check tetap pending atau gagal
+
+Section `Updates / Changelog` di tab Settings memulai request GitHub Releases
+pada thread detached dan menyimpan metadata rilis di memory selama sesi
+berjalan. Row Runtime Status di tab Test menampilkan `Waiting for network
+check`, `Up to date`, `Update available`, `GitHub request failed`, `Malformed
+release metadata`, atau `Unknown local version`.
+
+Jika request gagal, pastikan environment target dapat mengakses `api.github.com`
+melalui HTTPS dan direktori certificate system Android tersedia untuk OpenSSL.
+Kegagalan dicoba ulang dengan backoff, dan tombol refresh dapat memulai check
+manual. `Unknown local version` berarti library dibangun tanpa metadata
+`MCGG_BUILD_VERSION` yang usable; rebuild melalui `ndk-build` atau CI agar
+constant `MCGG_BUILD_*` terdefinisi.
+
 ### CI build gagal
 
 Workflow berjalan pada push ke `master` dan pull request yang menargetkan
@@ -827,6 +881,9 @@ Periksa log GitHub Actions untuk:
 - Curl dikonfigurasi dengan backend TLS OpenSSL `4.0.0` yang dipin, dukungan
   libpsl, dan tanpa flag yang menonaktifkan fitur curl; fitur opsional tetap
   bergantung pada library target yang tersedia saat langkah configure.
+- Ketersediaan update bergantung pada akses network publik ke GitHub Releases
+  dan metadata build embedded. Checker ini hanya informatif dan tidak pernah
+  menginstal atau men-deploy library yang lebih baru.
 - Termux tidak dikelola sebagai target build resmi.
 - Dokumentasi sengaja tidak menyertakan instruksi deployment runtime dan instruksi yang berorientasi penyalahgunaan.
 

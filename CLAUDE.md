@@ -18,9 +18,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run `git diff --check` for native or mixed code changes.
 - For documentation-only edits, inspect the Markdown diff before finishing.
 - The GitHub Actions release workflow is `.github/workflows/build.yml`; it
-  installs curl/libpsl/OpenSSL build tools, builds the static OpenSSL, libpsl, and curl
-  archives, builds with Android NDK `29.0.14206865`, packages `libs/`, and
-  publishes release notes that include commit descriptions.
+  prepares release metadata before compilation, passes `MCGG_BUILD_*` constants
+  into `ndk-build`, installs curl/libpsl/OpenSSL build tools, builds the static
+  OpenSSL, libpsl, and curl archives, builds with Android NDK `29.0.14206865`,
+  packages `libs/`, and publishes release notes that include commit
+  descriptions.
 - `jni/Application.mk` carries app-wide stability flags for stack protection,
   fortify checks, conservative alias/overflow/null-check behavior, unwind
   tables, hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
@@ -32,20 +34,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Empty method scans and field misses use short retry backoffs so hot feature paths do not rescan missing metadata every frame. Binding resolution is single-flight so the setup thread and render thread do not scan IL2CPP metadata at the same time.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
 - **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for opt-in safe-phase built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
-- **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match.
+- **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match. GitHub release metadata is cached in memory under `RuntimeMutex::UpdateMutex` for the session.
 - **Field Access**: Typed regular instance field reads and non-pointer writes
   use resolved `il2cpp_field_get_offset` values for direct bounded copies on
   hot paths. Raw IL2CPP get/set fallbacks remain for unresolved offsets, static
   fields stay on static IL2CPP APIs, and managed-object pointer writes should
   preserve IL2CPP write barriers.
-- **Diagnostics**: The Test tab houses Runtime Status plus binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
+- **Diagnostics**: The Test tab houses Runtime Status plus binding readiness, update-check status, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
+- **Updates / Changelog**: Settings includes an informational GitHub Releases
+  checker. It uses embedded `MCGG_BUILD_REPOSITORY`, `MCGG_BUILD_VERSION`,
+  `MCGG_BUILD_COMMIT`, and `MCGG_BUILD_REF` metadata, queries public releases
+  through libcurl on a detached worker, filters draft/prerelease entries,
+  compares the latest compatible release against the local version or target
+  commit, and shows status, release date, summary, last check time, refresh
+  control, and scrollable release notes. It sends no gameplay/account/device
+  data and must not download, deploy, inject, bypass, or force updates.
 - **curl Build**: `jni/curl`, `jni/libpsl`, and `jni/openssl` are pinned
   submodules built by `jni/build-curl-android.sh` into `obj/curl-install/`,
   `obj/libpsl-install/`, and `obj/openssl-install/`. `jni/Android.mk` links
   `libcurl.a`, `libpsl.a`, `libssl.a`, and `libcrypto.a` as prebuilt static
   libraries before the main module build.
-- **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
+- **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags before build, embeds that version into the native library, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects. Function-level comments document the shared layout helpers so offset and value-type reviews do not rely on names alone.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
 
@@ -96,7 +106,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   fight/fight-result/monster phases, and may be refreshed only on a long
   interval to recover if the game drops its internal AI state.
 - **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
-- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, and save/load configuration, including Auto-Play state.
+- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, GitHub release update/changelog status, and save/load configuration, including Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and shop-panel operability gates before buy/refresh UI actions.
 - **Arena**: hero spawn, equipment grant, GogoCard forcing, Battle Power controls, active synergy forcing, level/population 99, outside-map placement, enemy HP 1, passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, fight/result-aware Skip Round, and SpeedHack with reset-to-normal handling.
 - **Test**: Runtime Status, manual binding retry, account inspection, fight prediction, binding, round, player, manager, bridge, shop UI, behavior API, and all-manager diagnostics. Only the exact local current opponent should be locked to `100%` in `Will fight`; every player's enemy history and dump-backed invader order should remain available for weighted predictions.
@@ -114,6 +124,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `-fvisibility-inlines-hidden`, `-Wl,-z,relro`, `-Wl,-z,now`, and
   `-Wl,--as-needed`
 - **Native C Flags**: `-Oz` and `-DNDEBUG` by default; `NDK_DEBUG=1` adds `-O0`
+- **Build Metadata Defines**: `MCGG_BUILD_REPOSITORY`, `MCGG_BUILD_VERSION`,
+  `MCGG_BUILD_COMMIT`, and `MCGG_BUILD_REF` are embedded by `jni/Android.mk`.
+  Local builds use Git-derived fallbacks when available; CI overrides them with
+  the generated release metadata.
 - **curl Static Library**: pinned curl submodule at `jni/curl`, pinned libpsl
   submodule at `jni/libpsl`, pinned OpenSSL `4.0.0` submodule at `jni/openssl`,
   generated archives at `obj/curl-install/lib/libcurl.a`,
@@ -141,12 +155,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   invader order, recent-cycle learning, cycle-gap distance, round-robin
   fallback, and history.
 - SpeedHack changes global Unity time scale and must reset to `1.0x` when disabled, when battle state is unavailable, or when feature state resets.
+- The update checker is informational only. Keep it detached/asynchronous,
+  cached under `RuntimeMutex::UpdateMutex`, throttled to the 6-hour refresh and
+  bounded retry backoff, and free of gameplay/account/device/private data
+  collection or automatic download/deployment behavior.
 - Repository-wide documentation work should update the top-level Markdown files only: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md`, and `README.id.md`. Leave `goal.md` and submodule Markdown untouched.
 
 ### Shared State Discipline
 
 - `RuntimeMutex::CacheMutex` protects IL2CPP method and field caches.
 - `RuntimeMutex::FeatureMutex` protects complex feature collections, including `FeatureState::Heroes`, `FeatureState::Equips`, `FeatureState::Cards`, and `FeatureState::ShopSelectedHeroes`.
+- `RuntimeMutex::UpdateMutex` protects GitHub release update/check metadata and
+  cached changelog entries.
 - `RuntimeMutex::UiMutex` protects UI/config strings and config save/load status.
 - Primitive feature flags, counters, runtime readiness flags, and managed reference pointers use `std::atomic`; follow the existing `.load()` and assignment patterns.
 - Use existing snapshot/access helpers such as `GetSortedHeroes()`, `GetSortedEquips()`, `GetSortedCards()`, `TryGetHeroTableEntry()`, `GetShopHeroTargetsSnapshot()`, and `GetSelectedShopHeroTargetsSnapshot()` instead of unlocked map reads.
@@ -200,3 +220,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`, `jni/curl/`, `jni/libpsl/`, `jni/openssl/`) unless explicitly requested.
 - **Appearance**: Keep theme/font changes in the existing appearance setup and preserve fallback to the default ImGui font when Noto Sans CJK is unavailable. When adding themes, keep `kAppearanceThemes` and `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme index `1` for existing configs.
 - **Settings**: Keep persistence in the project config file under the game app data directory; do not re-enable ImGui `.ini` persistence unless explicitly requested.
+- **Update checker**: Keep GitHub release checks on a detached worker or an
+  equally non-blocking path. Preserve in-memory caching, retry/backoff, explicit
+  failure states, scrollable changelog rendering, privacy guarantees, and
+  informational-only behavior.

@@ -58,6 +58,10 @@ bash jni/build-curl-android.sh
   `obj/openssl-install/lib/libcrypto.a` before native builds. Curl should be
   configured with the pinned OpenSSL `4.0.0` TLS backend, libpsl support, and
   without curl feature-disabling flags.
+- Keep build metadata embedded through `MCGG_BUILD_REPOSITORY`,
+  `MCGG_BUILD_VERSION`, `MCGG_BUILD_COMMIT`, and `MCGG_BUILD_REF`. CI prepares
+  the release version before compiling and passes those constants into
+  `ndk-build`; local builds should keep the Git-derived fallbacks usable.
 - Keep `jni/Application.mk` app-wide stability flags aligned with the current
   release profile: stack protector, fortify, conservative alias/overflow/null
   check behavior, unwind tables, hidden inline visibility, RELRO, immediate
@@ -91,11 +95,11 @@ bash jni/build-curl-android.sh
   every automation path into one render pass. Heavy Auto-Play fallback opponent
   scans should also yield to the budget and retry on a later tick.
 - Use the Test tab, including its Runtime Status section, to validate binding
-  readiness, managed references, round state, player economy/rank/shop state,
-  battle manager fields, battle bridge state, shop panel state, shop diagnostic
-  reader readiness, behavior API state, Auto-Play state, auction state, GogoCard
-  state, board formation state, and opponent prediction behavior after feature
-  changes.
+  readiness, update-check status, managed references, round state, player
+  economy/rank/shop state, battle manager fields, battle bridge state, shop
+  panel state, shop diagnostic reader readiness, behavior API state, Auto-Play
+  state, auction state, GogoCard state, board formation state, and opponent
+  prediction behavior after feature changes.
 - In the Test prediction table, `Will fight` is the local player's opponent
   probability. Only the exact local current opponent should be forced to
   `100%`; other rows should stay weighted even when their `Current enemy`
@@ -153,6 +157,13 @@ bash jni/build-curl-android.sh
 - Keep Settings save/load behavior scoped to the project config file under the
   running game package directory, normally
   `/data/data/<game-package>/files/mcgg_config.ini`.
+- Settings also includes an informational `Updates / Changelog` section. Keep
+  GitHub Releases checks asynchronous, cached in memory under
+  `RuntimeMutex::UpdateMutex`, throttled to the 6-hour refresh cadence with
+  bounded retry backoff, and limited to public release metadata. Do not send
+  gameplay state, account data, device identifiers, credentials, or private
+  runtime data, and do not add automatic download, deployment, forced update,
+  bypass, or evasion behavior.
 - Do not commit generated `libs/` or `obj/` output, including curl/libpsl/OpenSSL
   build output under `obj/curl-*`, `obj/libpsl-*`, `obj/openssl-*`, and related
   install dirs.
@@ -174,8 +185,8 @@ HP pressure, passive gold, free economy, unlimited hero pool, shop-lock bypass
 helpers, Skip Round, and SpeedHack.
 Appearance includes ImGui
 Dark, Catppuccin Mocha, and additional palettes inspired by Dear ImGui issue #707.
-Settings includes the optional next-enemy HUD alongside menu size, position,
-style, and save/load controls.
+Settings includes the optional next-enemy HUD and GitHub release update status
+alongside menu size, position, style, and save/load controls.
 Test diagnostics are split into tabbed sections for prediction, bindings, round
 state, player data, battle managers, battle bridge, shop UI, behavior API, and
 all-manager views. New user-facing controls should report delayed runtime
@@ -189,6 +200,8 @@ individual row should still show `Waiting` while its specific reader is missing.
 - `RuntimeMutex::FeatureMutex` guards complex feature collections such as
   `FeatureState::Heroes`, `FeatureState::Equips`, `FeatureState::Cards`, and
   `FeatureState::ShopSelectedHeroes`.
+- `RuntimeMutex::UpdateMutex` guards GitHub release update-check state and the
+  cached changelog entries used by Settings and Test.
 - Use existing snapshot and access helpers such as `GetSortedHeroes()`,
   `GetSortedEquips()`, `GetSortedCards()`, `TryGetHeroTableEntry()`,
   `GetShopHeroTargetsSnapshot()`, and

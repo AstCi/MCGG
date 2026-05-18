@@ -9,10 +9,10 @@ event, collection, and string layouts are kept in
 `jni/structures/Structures.hpp`.
 
 `jni/Main.cpp` contains the process gate, setup thread, IL2CPP helpers, feature
-binding resolver, runtime caches, Dobby hooks, ImGui rendering, and feature
-logic. It also owns the Info, Combat, Auto-Play, Shop, Arena, Appearance,
-Settings, and Test overlay tabs. Keep feature work in this file unless the user
-explicitly requests a multi-file refactor.
+binding resolver, runtime caches, GitHub release update checker, Dobby hooks,
+ImGui rendering, and feature logic. It also owns the Info, Combat, Auto-Play,
+Shop, Arena, Appearance, Settings, and Test overlay tabs. Keep feature work in
+this file unless the user explicitly requests a multi-file refactor.
 
 The current boot order is process gate, detached setup thread, early
 `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
@@ -109,10 +109,12 @@ backend and libpsl support, and should not pass curl feature-disabling flags.
 
 `.github/workflows/build.yml` is the CI release workflow. It installs the curl
 and libpsl autotools prerequisites, builds the static OpenSSL, libpsl, and curl
-archives, builds with Android NDK `29.0.14206865`, packages the generated
-`libs/` output with `BUILD_INFO.txt`, uploads the zip as a workflow artifact,
-and publishes or updates GitHub releases whose notes include commit descriptions
-from Git history.
+archives, prepares UTC date-based release metadata before compilation, passes
+the generated `MCGG_BUILD_*` metadata constants into `ndk-build`, builds with
+Android NDK `29.0.14206865`, packages the generated `libs/` output with
+`BUILD_INFO.txt`, uploads the zip as a workflow artifact, and publishes or
+updates GitHub releases whose notes include commit descriptions from Git
+history.
 
 ## Coding Style & Naming Conventions
 
@@ -149,13 +151,23 @@ fields on the IL2CPP static APIs, and avoid bypassing IL2CPP write barriers for
 managed-object pointer writes.
 
 Shared state is split across `RuntimeMutex::CacheMutex`,
-`RuntimeMutex::FeatureMutex`, and `RuntimeMutex::UiMutex`. Primitive feature
-flags, counters, and managed reference pointers use `std::atomic`. Guard direct
-access to complex feature collections such as `FeatureState::Heroes`,
-`FeatureState::Equips`, `FeatureState::Cards`, and
-`FeatureState::ShopSelectedHeroes` with `FeatureMutex` or the existing
-snapshot/access helpers. Do not hold `FeatureMutex` while calling managed IL2CPP
-APIs; gather local data first and publish results under the lock.
+`RuntimeMutex::FeatureMutex`, `RuntimeMutex::UpdateMutex`, and
+`RuntimeMutex::UiMutex`. Primitive feature flags, counters, and managed
+reference pointers use `std::atomic`. Guard direct access to complex feature
+collections such as `FeatureState::Heroes`, `FeatureState::Equips`,
+`FeatureState::Cards`, and `FeatureState::ShopSelectedHeroes` with
+`FeatureMutex` or the existing snapshot/access helpers. Guard cached GitHub
+release metadata with `UpdateMutex`. Do not hold `FeatureMutex` while calling
+managed IL2CPP APIs; gather local data first and publish results under the lock.
+
+The update checker is informational only. It embeds local build metadata through
+`MCGG_BUILD_REPOSITORY`, `MCGG_BUILD_VERSION`, `MCGG_BUILD_COMMIT`, and
+`MCGG_BUILD_REF`, queries public GitHub Releases with libcurl on a detached
+worker, filters draft/prerelease entries, caches release notes in memory, and
+uses a 6-hour refresh cadence with 5-to-60-minute retry backoff. It must not
+send gameplay state, account data, device identifiers, credentials, or private
+runtime data, and must not add automatic download, deployment, injection,
+forced update, bypass, or evasion behavior.
 
 Shop automation is intentionally single-threaded and throttled on the frame
 tick. Preserve the existing buy, repeat-buy, refresh, target-worth, and
@@ -287,8 +299,9 @@ Keep changes scoped. Do not modify vendored directories such as
 Do not revert unrelated local changes in the working tree.
 
 Current user-facing feature areas are Info, Combat, Auto-Play, Shop, Arena,
-Appearance, Settings, and Test. If a feature binding is missing at runtime, the
-overlay should show a `Waiting for ...` state rather than failing silently.
+Appearance, Settings, and Test. If a feature binding or update-check state is
+missing at runtime, the overlay should show a `Waiting for ...` or explicit
+failure state rather than failing silently.
 Auto-Play includes adaptive strategy pressure, opt-in built-in AI coordination,
 opponent-aware board analysis, advanced role-aware formation moves, selected
 shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
@@ -323,8 +336,10 @@ index `1` for existing configs. Keep mobile accessibility changes compatible
 with the main ImGui TabBar. Helper buttons may select tabs, but the TabBar
 should remain visible and authoritative.
 Settings includes a persisted next-enemy HUD toggle that draws bottom-center
-foreground text above the lower screen edge. Keep it lightweight and throttle
-prediction refreshes instead of rebuilding predictions every render frame.
+foreground text above the lower screen edge, plus the `Updates / Changelog`
+section for release status and cached GitHub release notes. Keep HUD work
+lightweight and throttle prediction refreshes instead of rebuilding predictions
+every render frame.
 Settings config should default to the running game package directory as
 `/data/data/<game-package>/files/mcgg_config.ini`.
 
@@ -333,6 +348,6 @@ table cache all-or-nothing publication, shop panel operability before buy or
 refresh, grouped shop diagnostic readiness, Auto-Play policy ownership of assist
 toggles, opt-in safe-phase built-in AI startup, separate Auto-Play
 deploy/formation cooldowns, render-frame budget deferral between Auto-Play
-action groups, method-miss backoff, guarded binding resolution, clipped long
-tables, exact-opponent-only `100%` prediction rows, and Unity timeScale reset
-paths.
+action groups, method-miss backoff, guarded binding resolution, update-check
+thread/cache/backoff behavior, clipped long tables, exact-opponent-only `100%`
+prediction rows, and Unity timeScale reset paths.

@@ -35,6 +35,29 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq autoconf automake autopoint gettext libtool pkg-config perl
 
+      - name: Prepare release metadata
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="v$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          short_sha="${GITHUB_SHA::7}"
+          asset_base="${RELEASE_PREFIX}-${version}-${short_sha}"
+          asset_name="${asset_base}.zip"
+          release_notes_path="dist/${asset_base}-release-notes.md"
+
+          {
+            echo "version=${version}"
+            echo "tag=${version}"
+            echo "short_sha=${short_sha}"
+            echo "asset_base=${asset_base}"
+            echo "asset_name=${asset_name}"
+            echo "asset_path=dist/${asset_name}"
+            echo "release_notes_path=${release_notes_path}"
+            echo "release_name=${RELEASE_PREFIX} ${version}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build OpenSSL, libpsl, and curl static libraries
         run: |
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -42,6 +65,11 @@ jobs:
           bash jni/build-curl-android.sh
 
       - name: Build with ndk-build
+        env:
+          MCGG_BUILD_REPOSITORY: ${{ github.repository }}
+          MCGG_BUILD_VERSION: ${{ steps.release_meta.outputs.version }}
+          MCGG_BUILD_COMMIT: ${{ github.sha }}
+          MCGG_BUILD_REF: ${{ github.ref_name }}
         run: |
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           "$SDK_ROOT/ndk/$ANDROID_NDK_VERSION/ndk-build" -C jni
@@ -51,14 +79,17 @@ jobs:
         shell: bash
         env:
           EVENT_BEFORE: ${{ github.event.before || '' }}
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          RELEASE_ASSET_BASE: ${{ steps.release_meta.outputs.asset_base }}
+          RELEASE_ASSET_NAME: ${{ steps.release_meta.outputs.asset_name }}
+          RELEASE_NOTES_PATH: ${{ steps.release_meta.outputs.release_notes_path }}
         run: |
           set -euo pipefail
 
-          version="v$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          short_sha="${GITHUB_SHA::7}"
-          asset_base="${RELEASE_PREFIX}-${version}-${short_sha}"
-          asset_name="${asset_base}.zip"
-          release_notes_path="dist/${asset_base}-release-notes.md"
+          version="${RELEASE_VERSION}"
+          asset_base="${RELEASE_ASSET_BASE}"
+          asset_name="${RELEASE_ASSET_NAME}"
+          release_notes_path="${RELEASE_NOTES_PATH}"
 
           mkdir -p dist/"$asset_base"/libs
           cp -R libs/. dist/"$asset_base"/libs/
@@ -108,12 +139,12 @@ jobs:
           (cd dist && zip -r "$asset_name" "$asset_base")
 
           {
-            echo "version=${version}"
-            echo "tag=${version}"
-            echo "asset_name=${asset_name}"
-            echo "asset_path=dist/${asset_name}"
-            echo "release_notes_path=${release_notes_path}"
-            echo "release_name=${RELEASE_PREFIX} ${version}"
+            echo "version=${{ steps.release_meta.outputs.version }}"
+            echo "tag=${{ steps.release_meta.outputs.tag }}"
+            echo "asset_name=${{ steps.release_meta.outputs.asset_name }}"
+            echo "asset_path=${{ steps.release_meta.outputs.asset_path }}"
+            echo "release_notes_path=${{ steps.release_meta.outputs.release_notes_path }}"
+            echo "release_name=${{ steps.release_meta.outputs.release_name }}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifacts

@@ -176,6 +176,10 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Font scale, opacity, rounding, border, padding, spacing, scrollbar, and indentation controls.
 - Save and load for visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls.
 - Default config path under the running game package, resolved as `/data/data/<game-package>/files/mcgg_config.ini`.
+- Library update indicator and collapsible `Updates / Changelog` view backed by
+  GitHub Releases. It shows the embedded local version, commit/ref, latest
+  release, release date, last check time, status, short summary, a manual
+  refresh button, and scrollable per-version release notes.
 
 ### Shop
 
@@ -212,8 +216,8 @@ they are backed by `dump/dump.cs` and live runtime verification.
 ### Test
 
 - Runtime Status section for battle data, GGC, shop, Recommendation Lineup,
-  Battle Power, arena, round skip, speedhack, test, spectator, synergy, and
-  placement bindings.
+  update checks, Battle Power, arena, round skip, speedhack, test, spectator,
+  synergy, and placement bindings.
 - Manual binding retry and managed reference refresh controls.
 - Account inspection by self, opponent, or explicit account ID.
 - Fight prediction table with direct, manager-derived, invasion-pair,
@@ -258,6 +262,9 @@ At a high level, the project contains:
 - Unity touch input forwarding into ImGui mouse input.
 - Runtime appearance setup with disabled ImGui `.ini` persistence.
 - Project-owned configuration persistence for overlay and feature state.
+- A detached GitHub Releases update check that uses static libcurl only for
+  public release metadata and keeps changelog data cached in memory for the
+  session.
 - Atomic primitive runtime state with dedicated mutex domains for IL2CPP
   caches, feature collections, and UI/config strings.
 - Offset-backed typed helpers for regular instance field reads and non-pointer
@@ -317,6 +324,9 @@ The current runtime cadence is intentionally split by responsibility:
 - Next-enemy HUD text refresh: 500 ms while the HUD is enabled.
 - Cached opponent prediction row refresh: 500 ms while the Test tab or
   next-enemy HUD needs prediction data.
+- GitHub release update check: once per overlay session, then no more than
+  every 6 hours unless the user presses refresh. Network or metadata failures
+  retry with bounded exponential backoff from 5 minutes up to 60 minutes.
 
 Field metadata misses are also retried with a short backoff. This keeps late
 Unity metadata retryable without letting missing field lookups rescan every
@@ -501,13 +511,29 @@ Unity compatibility defines are configured in `jni/Android.mk`:
 
 Keep these values aligned with the Unity headers under `jni/Il2CppVersions/`.
 
+Build metadata is embedded into the native library through `jni/Android.mk`.
+Local builds fall back to Git-derived values when available, while CI passes the
+generated release metadata explicitly:
+
+```make
+-DMCGG_BUILD_REPOSITORY
+-DMCGG_BUILD_VERSION
+-DMCGG_BUILD_COMMIT
+-DMCGG_BUILD_REF
+```
+
+The overlay uses those constants as a `BUILD_INFO.txt`-equivalent source for
+the Settings update indicator and Test Runtime Status diagnostics.
+
 ## CI Release Packaging
 
-The GitHub Actions workflow at `.github/workflows/build.yml` installs the
-curl/libpsl/OpenSSL build prerequisites, builds the static OpenSSL, libpsl, and
-curl archives, builds the native module with Android NDK `29.0.14206865`,
-uploads the generated release zip as a workflow artifact, and publishes a GitHub
-release for non-pull-request runs.
+The GitHub Actions workflow at `.github/workflows/build.yml` prepares the
+UTC date-based release metadata before compiling, passes that metadata into
+`ndk-build` as `MCGG_BUILD_*` constants, installs the curl/libpsl/OpenSSL build
+prerequisites, builds the static OpenSSL, libpsl, and curl archives, builds the
+native module with Android NDK `29.0.14206865`, uploads the generated release
+zip as a workflow artifact, and publishes a GitHub release for non-pull-request
+runs.
 
 Release assets are named with the project prefix, UTC date-based version,
 workflow run metadata, and short commit SHA. Each package includes
@@ -520,6 +546,15 @@ otherwise from the previous `v*` tag through the current commit, falling back to
 the current commit only. Commit subjects and any commit body text are included.
 Existing releases with the same generated tag are updated with the regenerated
 notes before the asset is uploaded with `--clobber`.
+
+At runtime, the overlay queries
+`https://api.github.com/repos/Yan-0001/MCGG/releases?per_page=20` through
+libcurl, filters out draft and prerelease entries, treats the first compatible
+release as the latest version, and compares it with the embedded local version
+or matching release target commit. The request uses only standard GitHub API
+headers and a project user agent. It does not send gameplay state, account data,
+device identifiers, credentials, or private runtime data, and it never downloads
+or applies release assets automatically.
 
 ## Runtime Flow
 
@@ -604,6 +639,10 @@ the following bug-prone areas:
 - SpeedHack changes global Unity time scale. It must continue to reset to
   `1.0x` when disabled, when the active battle state is gone, or when feature
   state is reset.
+- The update checker is informational only. Keep it asynchronous, keep release
+  metadata cached behind `RuntimeMutex::UpdateMutex`, keep retries throttled,
+  and do not add automatic download, deployment, forced update, bypass, or
+  gameplay-data upload behavior.
 - Function comments now cover all project-owned native function definitions in
   `jni/Main.cpp` and `jni/structures/Structures.hpp`; new helpers should keep
   that coverage intact rather than relying on section-level comments alone.
@@ -656,7 +695,8 @@ the following bug-prone areas:
 - Avoid holding `RuntimeMutex::FeatureMutex` across managed IL2CPP calls.
   Collect local data first, then publish the result under the lock.
 - Keep method and field cache changes under `RuntimeMutex::CacheMutex`, and
-  guard UI/config strings with `RuntimeMutex::UiMutex`.
+  guard UI/config strings with `RuntimeMutex::UiMutex`. Update-check release
+  metadata belongs under `RuntimeMutex::UpdateMutex`.
 - Keep shop selected-target scans bounded and snapshot-based.
 - Keep Appearance theme names and palette entries aligned when adding themes.
   Existing configs expect Catppuccin Mocha to remain theme index `1`.
@@ -776,6 +816,21 @@ The Appearance tab falls back to the default ImGui font when the embedded Noto S
 
 The default config path is resolved from the running game process and stored as `/data/data/<game-package>/files/mcgg_config.ini`. If the Settings tab reports a save or load failure, check that the process can read and write the game app data directory.
 
+### Update check stays pending or failed
+
+The Settings tab's `Updates / Changelog` section starts a detached GitHub
+Releases request and keeps cached release metadata in memory for the session.
+The Test tab Runtime Status row reports `Waiting for network check`, `Up to
+date`, `Update available`, `GitHub request failed`, `Malformed release
+metadata`, or `Unknown local version`.
+
+If the request fails, verify that the target environment can reach
+`api.github.com` over HTTPS and that Android's system certificate directory is
+available to OpenSSL. Failures are retried with backoff, and the refresh button
+can start a manual check. Unknown local version means the library was built
+without usable `MCGG_BUILD_VERSION` metadata; rebuild through `ndk-build` or CI
+so the `MCGG_BUILD_*` constants are defined.
+
 ### CI build failed
 
 The workflow runs on pushes to `master` and pull requests targeting `master`.
@@ -809,6 +864,9 @@ Check the GitHub Actions log for:
 - Curl is configured with the pinned OpenSSL `4.0.0` TLS backend, libpsl
   support, and without curl feature-disabling flags; optional features still
   depend on target libraries available to the configure step.
+- Update availability depends on public GitHub Releases network access and
+  embedded build metadata. The checker is informational and never installs or
+  deploys a newer library.
 - Termux is not maintained as an official build target.
 - Documentation intentionally excludes runtime deployment and abuse-oriented instructions.
 

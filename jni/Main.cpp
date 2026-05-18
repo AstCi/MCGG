@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,8 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+
+#include <curl/curl.h>
 
 #include "structures/Structures.hpp"
 #include "xdl.h"
@@ -41,6 +44,22 @@
 #define DO_API(ret, name, args) ret (*name) args;
 #include "Il2CppVersions/api/2019.4.33f1.h"
 #undef DO_API
+
+#ifndef MCGG_BUILD_REPOSITORY
+#define MCGG_BUILD_REPOSITORY "Yan-0001/MCGG"
+#endif
+
+#ifndef MCGG_BUILD_VERSION
+#define MCGG_BUILD_VERSION "unknown"
+#endif
+
+#ifndef MCGG_BUILD_COMMIT
+#define MCGG_BUILD_COMMIT "unknown"
+#endif
+
+#ifndef MCGG_BUILD_REF
+#define MCGG_BUILD_REF "unknown"
+#endif
 
 // Unity input and value layouts used by native hooks.
 enum class TouchPhase {
@@ -124,6 +143,44 @@ struct CardTableEntry {
     std::string name;
 };
 
+enum class UpdateCheckStatus {
+    Waiting,
+    Checking,
+    UpToDate,
+    UpdateAvailable,
+    Failed,
+    Malformed,
+    UnknownLocalVersion
+};
+
+struct ReleaseInfo {
+    std::string tag;
+    std::string name;
+    std::string publishedAt;
+    std::string targetCommitish;
+    std::string summary;
+    std::string body;
+    bool draft = false;
+    bool prerelease = false;
+};
+
+struct UpdateCheckSnapshot {
+    UpdateCheckStatus status = UpdateCheckStatus::Waiting;
+    std::string localVersion;
+    std::string localCommit;
+    std::string localRef;
+    std::string repository;
+    std::string latestVersion;
+    std::string latestName;
+    std::string latestPublishedAt;
+    std::string latestSummary;
+    std::string lastCheckText;
+    std::string lastError;
+    int failureCount = 0;
+    bool checkInProgress = false;
+    std::vector<ReleaseInfo> releases;
+};
+
 struct TableCacheCounts {
     int heroes = 0;
     int equips = 0;
@@ -173,18 +230,24 @@ namespace RuntimeConfig {
     constexpr int AutoPlayFormationCooldownMs = 1000;
     constexpr int AutoPlayLevelCooldownMs = 900;
     constexpr int AutoPlayAuctionCooldownMs = 750;
+    constexpr int UpdateCheckRefreshMs = 6 * 60 * 60 * 1000;
+    constexpr int UpdateCheckRetryBaseMs = 5 * 60 * 1000;
+    constexpr int UpdateCheckRetryMaxMs = 60 * 60 * 1000;
     constexpr int MaxShopTargetChecks = 256;
     constexpr int MaxAutoPlayFallbackEnemyManagers = 4;
     constexpr int MaxManagedDictionaryEntries = 8192;
     constexpr int MaxManagedListItems = 2048;
     constexpr int MaxManagedStringChars = 4096;
     constexpr int MaxOpponentHistoryRounds = 32;
+    constexpr size_t MaxReleaseResponseBytes = 512 * 1024;
+    constexpr size_t MaxReleaseBodyPreviewChars = 12000;
     constexpr size_t MaxInstanceFieldOffsetBytes = 1024 * 1024;
 }
 
 namespace RuntimeMutex {
     std::mutex CacheMutex;
     std::mutex FeatureMutex;
+    std::mutex UpdateMutex;
     std::recursive_mutex UiMutex;
 }
 
@@ -385,6 +448,21 @@ namespace UiState {
     std::atomic<float> ItemSpacingX{8.0f};
     std::atomic<float> ItemSpacingY{4.0f};
     std::atomic<float> IndentSpacing{21.0f};
+}
+
+namespace UpdateState {
+    UpdateCheckStatus Status = UpdateCheckStatus::Waiting;
+    bool CheckInProgress = false;
+    int FailureCount = 0;
+    std::string LatestVersion;
+    std::string LatestName;
+    std::string LatestPublishedAt;
+    std::string LatestSummary;
+    std::string LastCheckText;
+    std::string LastError;
+    std::vector<ReleaseInfo> Releases;
+    std::chrono::steady_clock::time_point LastCheckAttempt{};
+    std::chrono::steady_clock::time_point NextAllowedCheck{};
 }
 
 enum MainTabIndex {
@@ -6989,6 +7067,133 @@ void DrawValueRow(const char* label, const std::string& value) {
     DrawValueRow(label, value.c_str());
 }
 
+bool IsKnownBuildMetadata(const std::string& value);
+std::string ShortCommit(const std::string& commit);
+const char* UpdateStatusLabel(UpdateCheckStatus status);
+ImVec4 UpdateStatusColor(UpdateCheckStatus status);
+bool MaybeStartUpdateCheck(bool manual);
+UpdateCheckSnapshot GetUpdateCheckSnapshot();
+
+// Draws a compact update status line for Settings without changing runtime features.
+void DrawUpdateCompactStatus(const UpdateCheckSnapshot& snapshot) {
+    ImGui::TextUnformatted("Library update status");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        UpdateStatusColor(snapshot.status),
+        "%s",
+        UpdateStatusLabel(snapshot.status)
+    );
+}
+
+// Draws scrollable release notes for cached GitHub release metadata.
+void DrawUpdateChangelog(const std::vector<ReleaseInfo>& releases) {
+    if (releases.empty()) {
+        ImGui::TextUnformatted("Waiting for release metadata");
+        return;
+    }
+
+    if (!ImGui::BeginChild(
+            "##UpdateChangelogScroll",
+            ImVec2(0.0f, 260.0f),
+            true,
+            ImGuiWindowFlags_HorizontalScrollbar
+        )) {
+        ImGui::EndChild();
+        return;
+    }
+
+    for (const ReleaseInfo& release : releases) {
+        std::string header = release.tag;
+        if (!release.name.empty() && release.name != release.tag) {
+            header += " - ";
+            header += release.name;
+        }
+
+        ImGui::SeparatorText(header.c_str());
+        if (!release.publishedAt.empty()) {
+            ImGui::Text("Released: %s", release.publishedAt.c_str());
+        }
+
+        if (release.body.empty()) {
+            ImGui::TextUnformatted("No release notes provided");
+        } else {
+            ImGui::TextWrapped("%s", release.body.c_str());
+        }
+
+        ImGui::Spacing();
+    }
+
+    ImGui::EndChild();
+}
+
+// Draws the Settings update notification and changelog section.
+void DrawUpdateSettingsSection() {
+    MaybeStartUpdateCheck(false);
+    UpdateCheckSnapshot snapshot = GetUpdateCheckSnapshot();
+
+    ImGui::Spacing();
+    DrawUpdateCompactStatus(snapshot);
+
+    if (!ImGui::CollapsingHeader("Updates / Changelog")) {
+        return;
+    }
+
+    if (ImGui::BeginTable(
+        "##UpdateStatusTable",
+        2,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingStretchProp
+    )) {
+        ImGui::TableSetupColumn("Field");
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        DrawValueRow("Repository", snapshot.repository);
+        DrawValueRow(
+            "Current version",
+            IsKnownBuildMetadata(snapshot.localVersion) ? snapshot.localVersion : "Unknown"
+        );
+        DrawValueRow("Current commit", ShortCommit(snapshot.localCommit));
+        DrawValueRow(
+            "Current ref",
+            IsKnownBuildMetadata(snapshot.localRef) ? snapshot.localRef : "unknown"
+        );
+        DrawValueRow(
+            "Latest version",
+            snapshot.latestVersion.empty() ? "Waiting" : snapshot.latestVersion
+        );
+        DrawValueRow(
+            "Release date",
+            snapshot.latestPublishedAt.empty() ? "Waiting" : snapshot.latestPublishedAt
+        );
+        DrawValueRow(
+            "Last check",
+            snapshot.lastCheckText.empty() ? "Waiting" : snapshot.lastCheckText
+        );
+        DrawValueRow("Status", UpdateStatusLabel(snapshot.status));
+        DrawValueRow(
+            "Summary",
+            snapshot.latestSummary.empty() ? "Waiting" : snapshot.latestSummary
+        );
+
+        if (!snapshot.lastError.empty()) {
+            DrawValueRow("Failure", snapshot.lastError);
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::BeginDisabled(snapshot.checkInProgress);
+    if (ImGui::Button("Refresh update check")) {
+        MaybeStartUpdateCheck(true);
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Spacing();
+    DrawUpdateChangelog(snapshot.releases);
+}
+
 // Formats bool for readable overlay output.
 std::string FormatBool(bool value) {
     return value ? "true" : "false";
@@ -7071,6 +7276,674 @@ std::string LowerString(std::string value) {
         }
     );
     return value;
+}
+
+// Returns true when an embedded build metadata value is present and usable.
+bool IsKnownBuildMetadata(const std::string& value) {
+    std::string lower = LowerString(TrimString(value));
+    return !lower.empty() &&
+        lower != "unknown" &&
+        lower != "local" &&
+        lower != "(unknown)";
+}
+
+// Returns the current library build version compiled into the native module.
+std::string GetLocalBuildVersion() {
+    return TrimString(MCGG_BUILD_VERSION);
+}
+
+// Returns the current library commit compiled into the native module.
+std::string GetLocalBuildCommit() {
+    return TrimString(MCGG_BUILD_COMMIT);
+}
+
+// Returns the current library repository compiled into the native module.
+std::string GetReleaseRepository() {
+    std::string repository = TrimString(MCGG_BUILD_REPOSITORY);
+    return repository.empty() ? "Yan-0001/MCGG" : repository;
+}
+
+// Formats the current system time for update check diagnostics.
+std::string FormatCurrentSystemTime() {
+    time_t now = time(nullptr);
+    if (now <= 0) {
+        return "Unknown";
+    }
+
+    struct tm tmValue{};
+    if (!localtime_r(&now, &tmValue)) {
+        return "Unknown";
+    }
+
+    char buffer[32];
+    if (strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &tmValue) == 0) {
+        return "Unknown";
+    }
+
+    return buffer;
+}
+
+// Converts update status into the short label used by Settings and Test UI.
+const char* UpdateStatusLabel(UpdateCheckStatus status) {
+    switch (status) {
+        case UpdateCheckStatus::UpToDate:
+            return "Up to date";
+        case UpdateCheckStatus::UpdateAvailable:
+            return "Update available";
+        case UpdateCheckStatus::Failed:
+            return "GitHub request failed";
+        case UpdateCheckStatus::Malformed:
+            return "Malformed release metadata";
+        case UpdateCheckStatus::UnknownLocalVersion:
+            return "Unknown local version";
+        case UpdateCheckStatus::Checking:
+        case UpdateCheckStatus::Waiting:
+        default:
+            return "Waiting for network check";
+    }
+}
+
+// Coordinates update status color for the overlay runtime.
+ImVec4 UpdateStatusColor(UpdateCheckStatus status) {
+    switch (status) {
+        case UpdateCheckStatus::UpToDate:
+            return ImVec4(0.40f, 0.90f, 0.45f, 1.0f);
+        case UpdateCheckStatus::UpdateAvailable:
+            return ImVec4(0.40f, 0.70f, 1.0f, 1.0f);
+        case UpdateCheckStatus::Failed:
+        case UpdateCheckStatus::Malformed:
+        case UpdateCheckStatus::UnknownLocalVersion:
+            return ImVec4(1.0f, 0.45f, 0.35f, 1.0f);
+        case UpdateCheckStatus::Checking:
+        case UpdateCheckStatus::Waiting:
+        default:
+            return ImVec4(1.0f, 0.75f, 0.25f, 1.0f);
+    }
+}
+
+// Shortens a commit hash for compact build metadata display.
+std::string ShortCommit(const std::string& commit) {
+    if (!IsKnownBuildMetadata(commit)) {
+        return "unknown";
+    }
+
+    return commit.substr(0, std::min<size_t>(commit.size(), 12));
+}
+
+// Checks whether two commit strings refer to the same known commit.
+bool CommitMatches(const std::string& left, const std::string& right) {
+    if (!IsKnownBuildMetadata(left) || !IsKnownBuildMetadata(right)) {
+        return false;
+    }
+
+    if (left == right) {
+        return true;
+    }
+
+    size_t sharedLength = std::min(left.size(), right.size());
+    if (sharedLength < 7) {
+        return false;
+    }
+
+    return left.compare(0, sharedLength, right, 0, sharedLength) == 0;
+}
+
+// Extracts numeric tag components for release-version comparison.
+std::vector<int> ParseVersionNumbers(const std::string& version) {
+    std::vector<int> numbers;
+    long current = -1;
+
+    for (char ch : version) {
+        if (std::isdigit(static_cast<unsigned char>(ch))) {
+            if (current < 0) {
+                current = 0;
+            }
+
+            current = std::min<long>(current * 10 + (ch - '0'), 999999999);
+            continue;
+        }
+
+        if (current >= 0) {
+            numbers.push_back(static_cast<int>(current));
+            current = -1;
+        }
+    }
+
+    if (current >= 0) {
+        numbers.push_back(static_cast<int>(current));
+    }
+
+    return numbers;
+}
+
+// Compares local and remote release tags using their numeric components.
+int CompareReleaseVersions(const std::string& localVersion, const std::string& latestVersion) {
+    if (localVersion == latestVersion) {
+        return 0;
+    }
+
+    std::vector<int> localNumbers = ParseVersionNumbers(localVersion);
+    std::vector<int> latestNumbers = ParseVersionNumbers(latestVersion);
+    if (localNumbers.empty() || latestNumbers.empty()) {
+        return 0;
+    }
+
+    size_t count = std::max(localNumbers.size(), latestNumbers.size());
+    for (size_t i = 0; i < count; ++i) {
+        int localValue = i < localNumbers.size() ? localNumbers[i] : 0;
+        int latestValue = i < latestNumbers.size() ? latestNumbers[i] : 0;
+
+        if (localValue < latestValue) {
+            return -1;
+        }
+
+        if (localValue > latestValue) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+// Decodes a JSON string value enough for GitHub release metadata display.
+std::string DecodeJsonString(const std::string& value) {
+    std::string output;
+    output.reserve(value.size());
+
+    for (size_t i = 0; i < value.size(); ++i) {
+        char ch = value[i];
+        if (ch != '\\' || i + 1 >= value.size()) {
+            output += ch;
+            continue;
+        }
+
+        char escaped = value[++i];
+        switch (escaped) {
+            case '"':
+            case '\\':
+            case '/':
+                output += escaped;
+                break;
+            case 'b':
+                output += '\b';
+                break;
+            case 'f':
+                output += '\f';
+                break;
+            case 'n':
+                output += '\n';
+                break;
+            case 'r':
+                output += '\r';
+                break;
+            case 't':
+                output += '\t';
+                break;
+            case 'u': {
+                if (i + 4 >= value.size()) {
+                    output += '?';
+                    break;
+                }
+
+                int codepoint = 0;
+                bool valid = true;
+                for (size_t j = 0; j < 4; ++j) {
+                    char hex = value[++i];
+                    codepoint <<= 4;
+
+                    if (hex >= '0' && hex <= '9') {
+                        codepoint += hex - '0';
+                    } else if (hex >= 'a' && hex <= 'f') {
+                        codepoint += 10 + hex - 'a';
+                    } else if (hex >= 'A' && hex <= 'F') {
+                        codepoint += 10 + hex - 'A';
+                    } else {
+                        valid = false;
+                    }
+                }
+
+                output += valid && codepoint > 0 && codepoint < 0x80 ?
+                    static_cast<char>(codepoint) :
+                    '?';
+                break;
+            }
+            default:
+                output += escaped;
+                break;
+        }
+    }
+
+    return output;
+}
+
+// Finds a JSON object key in a small release object slice.
+size_t FindJsonKey(const std::string& object, const char* key) {
+    std::string pattern = "\"";
+    pattern += key;
+    pattern += "\"";
+    return object.find(pattern);
+}
+
+// Extracts a JSON string field from a GitHub release object.
+bool JsonStringField(
+    const std::string& object,
+    const char* key,
+    std::string& output,
+    bool allowNull = false
+) {
+    size_t keyPos = FindJsonKey(object, key);
+    if (keyPos == std::string::npos) {
+        return false;
+    }
+
+    size_t colon = object.find(':', keyPos);
+    if (colon == std::string::npos) {
+        return false;
+    }
+
+    size_t valueStart = object.find_first_not_of(" \t\r\n", colon + 1);
+    if (valueStart == std::string::npos) {
+        return false;
+    }
+
+    if (allowNull && object.compare(valueStart, 4, "null") == 0) {
+        output.clear();
+        return true;
+    }
+
+    if (object[valueStart] != '"') {
+        return false;
+    }
+
+    std::string encoded;
+    bool escaped = false;
+    for (size_t i = valueStart + 1; i < object.size(); ++i) {
+        char ch = object[i];
+        if (escaped) {
+            encoded += '\\';
+            encoded += ch;
+            escaped = false;
+            continue;
+        }
+
+        if (ch == '\\') {
+            escaped = true;
+            continue;
+        }
+
+        if (ch == '"') {
+            output = DecodeJsonString(encoded);
+            return true;
+        }
+
+        encoded += ch;
+    }
+
+    return false;
+}
+
+// Extracts a JSON boolean field from a GitHub release object.
+bool JsonBoolField(const std::string& object, const char* key, bool& output) {
+    size_t keyPos = FindJsonKey(object, key);
+    if (keyPos == std::string::npos) {
+        return false;
+    }
+
+    size_t colon = object.find(':', keyPos);
+    if (colon == std::string::npos) {
+        return false;
+    }
+
+    size_t valueStart = object.find_first_not_of(" \t\r\n", colon + 1);
+    if (valueStart == std::string::npos) {
+        return false;
+    }
+
+    if (object.compare(valueStart, 4, "true") == 0) {
+        output = true;
+        return true;
+    }
+
+    if (object.compare(valueStart, 5, "false") == 0) {
+        output = false;
+        return true;
+    }
+
+    return false;
+}
+
+// Splits the top-level GitHub releases array into individual release objects.
+std::vector<std::string> ExtractReleaseObjects(const std::string& json) {
+    std::vector<std::string> objects;
+    size_t arrayStart = json.find('[');
+    if (arrayStart == std::string::npos) {
+        return objects;
+    }
+
+    int depth = 1;
+    bool inString = false;
+    bool escaped = false;
+    size_t objectStart = std::string::npos;
+
+    for (size_t i = arrayStart + 1; i < json.size(); ++i) {
+        char ch = json[i];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch == '"') {
+            inString = true;
+            continue;
+        }
+
+        if (ch == '{' || ch == '[') {
+            if (ch == '{' && depth == 1) {
+                objectStart = i;
+            }
+
+            ++depth;
+            continue;
+        }
+
+        if (ch == '}' || ch == ']') {
+            --depth;
+
+            if (ch == '}' && depth == 1 && objectStart != std::string::npos) {
+                objects.push_back(json.substr(objectStart, i - objectStart + 1));
+                objectStart = std::string::npos;
+            }
+
+            if (depth <= 0) {
+                break;
+            }
+        }
+    }
+
+    return objects;
+}
+
+// Builds a compact first-line release summary for status display.
+std::string BuildReleaseSummary(const ReleaseInfo& release) {
+    size_t cursor = 0;
+    while (cursor < release.body.size()) {
+        size_t newline = release.body.find('\n', cursor);
+        std::string line = TrimString(release.body.substr(
+            cursor,
+            newline == std::string::npos ? std::string::npos : newline - cursor
+        ));
+
+        while (!line.empty() && (line[0] == '#' || line[0] == '-' || line[0] == '*')) {
+            line = TrimString(line.substr(1));
+        }
+
+        if (!line.empty()) {
+            if (line.size() > 220) {
+                line.resize(220);
+                line += "...";
+            }
+            return line;
+        }
+
+        if (newline == std::string::npos) {
+            break;
+        }
+
+        cursor = newline + 1;
+    }
+
+    return release.name.empty() ? "No release summary provided" : release.name;
+}
+
+// Parses GitHub release metadata needed by the update overlay.
+bool ParseGitHubReleases(const std::string& json, std::vector<ReleaseInfo>& releases) {
+    std::vector<std::string> objects = ExtractReleaseObjects(json);
+    if (objects.empty()) {
+        return false;
+    }
+
+    releases.clear();
+    releases.reserve(objects.size());
+
+    for (const std::string& object : objects) {
+        ReleaseInfo release;
+        if (!JsonStringField(object, "tag_name", release.tag)) {
+            continue;
+        }
+
+        JsonStringField(object, "name", release.name, true);
+        JsonStringField(object, "published_at", release.publishedAt, true);
+        JsonStringField(object, "target_commitish", release.targetCommitish, true);
+        JsonStringField(object, "body", release.body, true);
+        JsonBoolField(object, "draft", release.draft);
+        JsonBoolField(object, "prerelease", release.prerelease);
+
+        if (release.body.size() > RuntimeConfig::MaxReleaseBodyPreviewChars) {
+            release.body.resize(RuntimeConfig::MaxReleaseBodyPreviewChars);
+            release.body += "\n\n[Release notes clipped in overlay]";
+        }
+
+        release.summary = BuildReleaseSummary(release);
+        if (!release.draft && !release.prerelease && !release.tag.empty()) {
+            releases.push_back(std::move(release));
+        }
+    }
+
+    return !releases.empty();
+}
+
+// Stores bytes returned by libcurl with a strict in-memory response cap.
+size_t CurlWriteToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    size_t bytes = size * nmemb;
+    auto* response = reinterpret_cast<std::string*>(userdata);
+
+    if (!response ||
+        response->size() + bytes > RuntimeConfig::MaxReleaseResponseBytes) {
+        return 0;
+    }
+
+    response->append(ptr, bytes);
+    return bytes;
+}
+
+// Ensures libcurl process-level state is initialized once for update checks.
+CURLcode EnsureCurlInitialized() {
+    static std::once_flag initOnce;
+    static CURLcode initCode = CURLE_FAILED_INIT;
+
+    std::call_once(initOnce, []() {
+        initCode = curl_global_init(CURL_GLOBAL_DEFAULT);
+    });
+
+    return initCode;
+}
+
+// Fetches release metadata from GitHub without sending private runtime data.
+bool FetchGitHubReleaseJson(std::string& response, long& httpCode, std::string& error) {
+    CURLcode initCode = EnsureCurlInitialized();
+    if (initCode != CURLE_OK) {
+        error = curl_easy_strerror(initCode);
+        return false;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        error = "curl_easy_init failed";
+        return false;
+    }
+
+    std::string repository = GetReleaseRepository();
+    std::string url =
+        "https://api.github.com/repos/" + repository + "/releases?per_page=20";
+    char errorBuffer[CURL_ERROR_SIZE]{0};
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Accept: application/vnd.github+json");
+    headers = curl_slist_append(headers, "X-GitHub-Api-Version: 2022-11-28");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "MCGG-update-check");
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteToString);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+
+    CURLcode result = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (result != CURLE_OK) {
+        error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(result);
+        return false;
+    }
+
+    if (httpCode < 200 || httpCode >= 300) {
+        error = "GitHub returned HTTP " + std::to_string(httpCode);
+        return false;
+    }
+
+    return true;
+}
+
+// Computes update availability from local build metadata and release metadata.
+UpdateCheckStatus EvaluateUpdateStatus(const std::vector<ReleaseInfo>& releases) {
+    if (releases.empty()) {
+        return UpdateCheckStatus::Malformed;
+    }
+
+    const ReleaseInfo& latest = releases.front();
+    std::string localVersion = GetLocalBuildVersion();
+    std::string localCommit = GetLocalBuildCommit();
+
+    if (CommitMatches(localCommit, latest.targetCommitish)) {
+        return UpdateCheckStatus::UpToDate;
+    }
+
+    if (!IsKnownBuildMetadata(localVersion)) {
+        return UpdateCheckStatus::UnknownLocalVersion;
+    }
+
+    int versionCompare = CompareReleaseVersions(localVersion, latest.tag);
+    return versionCompare < 0 ?
+        UpdateCheckStatus::UpdateAvailable :
+        UpdateCheckStatus::UpToDate;
+}
+
+// Calculates bounded retry delay for failed update checks.
+int UpdateRetryDelayMs(int failureCount) {
+    int delay = RuntimeConfig::UpdateCheckRetryBaseMs;
+    int steps = std::clamp(failureCount - 1, 0, 4);
+    for (int i = 0; i < steps; ++i) {
+        delay = std::min(delay * 2, RuntimeConfig::UpdateCheckRetryMaxMs);
+    }
+    return delay;
+}
+
+// Runs the GitHub release check on a detached worker thread.
+void RunUpdateCheckWorker() {
+    std::string response;
+    std::string error;
+    long httpCode = 0;
+    bool requestOk = FetchGitHubReleaseJson(response, httpCode, error);
+    std::vector<ReleaseInfo> releases;
+    bool parsed = requestOk && ParseGitHubReleases(response, releases);
+    auto now = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(RuntimeMutex::UpdateMutex);
+    UpdateState::CheckInProgress = false;
+    UpdateState::LastCheckText = FormatCurrentSystemTime();
+    UpdateState::LastCheckAttempt = now;
+
+    if (!requestOk) {
+        UpdateState::Status = UpdateCheckStatus::Failed;
+        UpdateState::LastError = error.empty() ? "GitHub request failed" : error;
+        UpdateState::FailureCount = std::min(UpdateState::FailureCount + 1, 8);
+        UpdateState::NextAllowedCheck =
+            now + std::chrono::milliseconds(UpdateRetryDelayMs(UpdateState::FailureCount));
+        return;
+    }
+
+    if (!parsed) {
+        UpdateState::Status = UpdateCheckStatus::Malformed;
+        UpdateState::LastError = "GitHub release metadata did not include usable releases";
+        UpdateState::FailureCount = std::min(UpdateState::FailureCount + 1, 8);
+        UpdateState::NextAllowedCheck =
+            now + std::chrono::milliseconds(UpdateRetryDelayMs(UpdateState::FailureCount));
+        return;
+    }
+
+    UpdateState::FailureCount = 0;
+    UpdateState::LastError.clear();
+    UpdateState::Releases = std::move(releases);
+    const ReleaseInfo& latest = UpdateState::Releases.front();
+    UpdateState::LatestVersion = latest.tag;
+    UpdateState::LatestName = latest.name;
+    UpdateState::LatestPublishedAt = latest.publishedAt;
+    UpdateState::LatestSummary = latest.summary;
+    UpdateState::Status = EvaluateUpdateStatus(UpdateState::Releases);
+    UpdateState::NextAllowedCheck =
+        now + std::chrono::milliseconds(RuntimeConfig::UpdateCheckRefreshMs);
+}
+
+// Starts an update check when the cache or retry cadence allows it.
+bool MaybeStartUpdateCheck(bool manual) {
+    auto now = std::chrono::steady_clock::now();
+
+    {
+        std::lock_guard<std::mutex> lock(RuntimeMutex::UpdateMutex);
+        if (UpdateState::CheckInProgress) {
+            return false;
+        }
+
+        if (!manual && UpdateState::NextAllowedCheck.time_since_epoch().count() != 0 &&
+            now < UpdateState::NextAllowedCheck) {
+            return false;
+        }
+
+        UpdateState::CheckInProgress = true;
+        UpdateState::Status = UpdateCheckStatus::Checking;
+    }
+
+    std::thread(RunUpdateCheckWorker).detach();
+    return true;
+}
+
+// Copies update state for UI rendering without holding the update mutex during ImGui calls.
+UpdateCheckSnapshot GetUpdateCheckSnapshot() {
+    std::lock_guard<std::mutex> lock(RuntimeMutex::UpdateMutex);
+    UpdateCheckSnapshot snapshot;
+    snapshot.status = UpdateState::Status;
+    snapshot.localVersion = GetLocalBuildVersion();
+    snapshot.localCommit = GetLocalBuildCommit();
+    snapshot.localRef = TrimString(MCGG_BUILD_REF);
+    snapshot.repository = GetReleaseRepository();
+    snapshot.latestVersion = UpdateState::LatestVersion;
+    snapshot.latestName = UpdateState::LatestName;
+    snapshot.latestPublishedAt = UpdateState::LatestPublishedAt;
+    snapshot.latestSummary = UpdateState::LatestSummary;
+    snapshot.lastCheckText = UpdateState::LastCheckText;
+    snapshot.lastError = UpdateState::LastError;
+    snapshot.failureCount = UpdateState::FailureCount;
+    snapshot.checkInProgress = UpdateState::CheckInProgress;
+    snapshot.releases = UpdateState::Releases;
+    return snapshot;
 }
 
 // Parses config bool from user or config text with a safe fallback.
@@ -8328,6 +9201,7 @@ void DrawRuntimeStatus() {
         tableCounts.equips,
         tableCounts.cards
     );
+    UpdateCheckSnapshot updateSnapshot = GetUpdateCheckSnapshot();
 
     if (ImGui::BeginTable(
         "##RuntimeStatusTable",
@@ -8337,11 +9211,12 @@ void DrawRuntimeStatus() {
             ImGuiTableFlags_SizingStretchProp
     )) {
         ImGui::TableSetupColumn("Runtime");
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 170.0f);
         ImGui::TableHeadersRow();
 
         DrawValueRow("Self account", selfIdText);
         DrawValueRow("Table cache", tableText);
+        DrawValueRow("Update check", UpdateStatusLabel(updateSnapshot.status));
         DrawStatusRow("IL2CPP", IsIl2CppRuntimeReady());
         DrawStatusRow(
             "Battle data",
@@ -9008,6 +9883,8 @@ void DrawSettingsTab() {
 
             ImGui::Spacing();
             ImGui::TextUnformatted("Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls.");
+
+            DrawUpdateSettingsSection();
 
             ImGui::EndTabItem();
         }
@@ -11937,6 +12814,8 @@ ImVec2 GetValidatedMenuPosition(const ImVec2& menuSize) {
 
 // Draws the main menu overlay section without changing game state.
 void DrawMainMenu() {
+    MaybeStartUpdateCheck(false);
+
     static const MainMenuTab tabs[] = {
         {"Info", DrawInfoTab},
         {"Combat", DrawCombatTab},

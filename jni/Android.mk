@@ -44,6 +44,11 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := main
 
+MCGG_BUILD_REPOSITORY ?= Yan-0001/MCGG
+MCGG_BUILD_VERSION ?= $(shell git -C $(LOCAL_PATH)/.. describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo unknown)
+MCGG_BUILD_COMMIT ?= $(shell git -C $(LOCAL_PATH)/.. rev-parse HEAD 2>/dev/null || echo unknown)
+MCGG_BUILD_REF ?= $(shell git -C $(LOCAL_PATH)/.. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+
 LOCAL_CFLAGS := \
     -Oz \
     -DNDEBUG \
@@ -56,6 +61,11 @@ LOCAL_CFLAGS := \
     -DIMGUI_DISABLE_DEMO_WINDOWS \
     -DIMGUI_DISABLE_DEBUG_TOOLS \
     -DIMGUI_USE_WCHAR32 \
+    -DCURL_STATICLIB \
+    -DMCGG_BUILD_REPOSITORY=\"$(MCGG_BUILD_REPOSITORY)\" \
+    -DMCGG_BUILD_VERSION=\"$(MCGG_BUILD_VERSION)\" \
+    -DMCGG_BUILD_COMMIT=\"$(MCGG_BUILD_COMMIT)\" \
+    -DMCGG_BUILD_REF=\"$(MCGG_BUILD_REF)\" \
     -DUNITY_VERSION_MAJOR=2019 \
     -DUNITY_VERSION_MINOR=4 \
     -DUNITY_VERSION_PATCH=33 \
