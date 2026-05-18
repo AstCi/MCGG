@@ -243,10 +243,19 @@ outputs, and vendored Markdown under `jni/Il2CppVersions/`, `jni/imgui/`, and
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use short, imperative summaries such as `Add enemy predictor and
-project documentation`. Keep commit messages direct and focused on the change.
-Release notes are generated from commit subjects and body text, so include
-enough context in commits for them to stand alone in automated releases.
+All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Use short typed commit messages:
+
+```text
+feat: add enemy predictor and project documentation
+docs: update contribution guide
+fix(autoplay): add freeze safeguards
+perf(shop): throttle automation actions
+refactor: stabilize MCGG feature runtime
+```
+
+Keep commit messages direct and focused on the change. Release notes are
+generated from commit subjects and body text, so include enough context in
+commits for them to stand alone in automated releases.
 
 Pull requests should include a clear description, the build command result,
 affected files, and any relevant notes about IL2CPP signatures or runtime hooks.

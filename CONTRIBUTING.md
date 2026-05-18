@@ -304,15 +304,30 @@ enough context to stand alone in release notes.
 
 ## Commit Messages
 
-Use short typed commit messages when possible:
+All commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Use short typed commit messages when possible:
 
 ```text
-feat/main: add player sorting
-fix/main: guard missing battle data
-perf/main: optimize player table rendering
-docs/readme: update setup guide
-chore/repo: ignore build outputs
+feat(main): add player sorting
+fix(main): guard missing battle data
+perf(main): optimize player table rendering
+docs(readme): update setup guide
+chore(repo): ignore build outputs
 ```
+
+Accepted commit types:
+
+- `feat`: new feature or feature area addition
+- `fix`: bug fix or correctness fix
+- `perf`: performance improvement
+- `refactor`: code behavior-preserving refactor
+- `docs`: documentation-only changes
+- `build`: build system or NDK configuration changes
+- `ci`: CI workflow or release packaging changes
+- `chore`: maintenance, merge commits, or submodule updates
+- `revert`: revert of a previous commit
+- `test`: test diagnostics or test-tab improvements
+
+Scope is optional but recommended for clarity. Common scopes include `main`, `ui`, `shop`, `arena`, `autoplay`, `hud`, `appearance`, `test`, and `readme`.
 
 ## Pull Requests
 
