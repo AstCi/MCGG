@@ -28,10 +28,12 @@ namespace Unity {
     inline constexpr float Deg2Rad = static_cast<float>(M_PI) / 180.0f;
     inline constexpr float Rad2Deg = 180.0f / static_cast<float>(M_PI);
 
+    // Clamps a number so it stays between 0 and 1.
     inline float Clamp01(float value) {
         return std::clamp(value, 0.0f, 1.0f);
     }
 
+    // Checks that every numeric value involved is neither infinity nor NaN.
     inline bool IsFinite(float value) {
         return std::isfinite(value);
     }
@@ -42,21 +44,28 @@ namespace Unity {
             float data[4];
         };
 
+        // Creates a default Color value.
         constexpr Color() : r(0.0f), g(0.0f), b(0.0f), a(1.0f) {}
+        // Creates a Color value from the supplied components.
         constexpr Color(float r, float g, float b) : r(r), g(g), b(b), a(1.0f) {}
+        // Creates a Color value from the supplied components.
         constexpr Color(float r, float g, float b, float a) : r(r), g(g), b(b), a(a) {}
         explicit Color(Vector4 v);
 
         static Color HSVToRGB(float h, float s, float v, bool hdr = true);
         static Color Lerp(Color a, Color b, float t);
 
+        // Returns this color with its red, green, and blue channels multiplied.
         Color RGBMultiplied(float multiplier) const { return {r * multiplier, g * multiplier, b * multiplier, a}; }
+        // Returns this color with its red, green, and blue channels multiplied.
         Color RGBMultiplied(Color multiplier) const { return {r * multiplier.r, g * multiplier.g, b * multiplier.b, a}; }
 
+        // Checks whether two Color values have the same components.
         friend bool operator==(const Color& lhs, const Color& rhs) {
             return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
         }
 
+        // Checks whether two Color values differ.
         friend bool operator!=(const Color& lhs, const Color& rhs) {
             return !(lhs == rhs);
         }
@@ -78,7 +87,9 @@ namespace Unity {
             uint32_t rgba;
         };
 
+        // Creates a default Color32 value.
         constexpr Color32() : r(0), g(0), b(0), a(255) {}
+        // Creates a Color32 value from the supplied components.
         constexpr Color32(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) : r(r), g(g), b(b), a(a) {}
     };
 
@@ -88,69 +99,111 @@ namespace Unity {
             float data[2];
         };
 
+        // Creates a default Vector2 value.
         constexpr Vector2() : x(0.0f), y(0.0f) {}
+        // Creates a Vector2 value from the supplied components.
         constexpr Vector2(float x, float y) : x(x), y(y) {}
 
+        // Returns direct access to the raw component array.
         float* GetPtr() { return data; }
+        // Returns direct access to the raw component array.
         const float* GetPtr() const { return data; }
 
+        // Returns one Vector2 component by index.
         float& operator[](int index) { return data[index]; }
+        // Returns one Vector2 component by index.
         const float& operator[](int index) const { return data[index]; }
 
         static float Angle(Vector2 from, Vector2 to);
         static Vector2 ClampMagnitude(Vector2 vector, float maxLength);
+        // Returns how much of one vector lies in another vector direction.
         static float Component(Vector2 a, Vector2 b) { return Dot(a, b) / Magnitude(b); }
+        // Measures the straight-line distance between two values.
         static float Distance(Vector2 a, Vector2 b) { return Magnitude(a - b); }
+        // Returns the dot product, which shows how closely two directions align.
         static float Dot(Vector2 lhs, Vector2 rhs) { return lhs.x * rhs.x + lhs.y * rhs.y; }
         static Vector2 FromPolar(float radius, float theta);
+        // Moves between two values while clamping the blend amount to a safe range.
         static Vector2 Lerp(Vector2 from, Vector2 to, float t) { return LerpUnclamped(from, to, Clamp01(t)); }
+        // Moves between two values using the blend amount exactly as supplied.
         static Vector2 LerpUnclamped(Vector2 from, Vector2 to, float t) { return (to - from) * t + from; }
+        // Returns the length of the vector.
         static float Magnitude(Vector2 vector) { return std::sqrt(SqrMagnitude(vector)); }
         static Vector2 Max(Vector2 lhs, Vector2 rhs);
         static Vector2 Min(Vector2 lhs, Vector2 rhs);
         static Vector2 MoveTowards(Vector2 current, Vector2 target, float maxDistanceDelta);
         static Vector2 Normalize(Vector2 vector);
         static void OrthoNormalize(Vector2& normal, Vector2& tangent);
+        // Returns a vector turned 90 degrees from the input direction.
         static Vector2 Perpendicular(Vector2 direction) { return {-direction.y, direction.x}; }
         static Vector2 Project(Vector2 a, Vector2 b);
         static Vector2 Reflect(Vector2 direction, Vector2 normal);
+        // Returns the part of one vector that does not point along another vector.
         static Vector2 Reject(Vector2 a, Vector2 b) { return a - Project(a, b); }
         static Vector2 RotateTowards(Vector2 current, Vector2 target, float maxRadiansDelta, float maxMagnitudeDelta);
+        // Multiplies matching components from two values.
         static Vector2 Scale(Vector2 a, Vector2 b) { return a * b; }
         static Vector2 Slerp(Vector2 a, Vector2 b, float t);
         static Vector2 SlerpUnclamped(Vector2 a, Vector2 b, float t);
         static Vector2 SmoothDamp(Vector2 current, Vector2 target, Vector2& currentVelocity, float smoothTime, float maxSpeed, float deltaTime);
+        // Returns the squared length, avoiding a square-root when only comparisons are needed.
         static float SqrMagnitude(Vector2 vector) { return vector.x * vector.x + vector.y * vector.y; }
         static void ToPolar(Vector2 vector, float& radius, float& theta);
 
+        // Converts this value to length one while keeping its direction.
         void Normalize() { *this = Normalize(*this); }
+        // Multiplies matching components from two values.
         void Scale(Vector2 scale) { *this = *this * scale; }
+        // Returns this vector length.
         float magnitude() const { return Magnitude(*this); }
+        // Returns a normalized copy of this value.
         Vector2 normalized() const { return Normalize(*this); }
+        // Returns this vector squared length.
         float sqrMagnitude() const { return SqrMagnitude(*this); }
 
+        // Checks whether two Vector2 values have the same components.
         bool operator==(Vector2 value) const { return x == value.x && y == value.y; }
+        // Checks whether two Vector2 values differ.
         bool operator!=(Vector2 value) const { return !(*this == value); }
+        // Adds another value into this Vector2 in place.
         Vector2& operator+=(float value) { x += value; y += value; return *this; }
+        // Subtracts another value from this Vector2 in place.
         Vector2& operator-=(float value) { x -= value; y -= value; return *this; }
+        // Multiplies this Vector2 in place.
         Vector2& operator*=(float value) { x *= value; y *= value; return *this; }
+        // Divides this Vector2 in place.
         Vector2& operator/=(float value) { float inv = 1.0f / value; x *= inv; y *= inv; return *this; }
+        // Adds another value into this Vector2 in place.
         Vector2& operator+=(Vector2 value) { x += value.x; y += value.y; return *this; }
+        // Subtracts another value from this Vector2 in place.
         Vector2& operator-=(Vector2 value) { x -= value.x; y -= value.y; return *this; }
         operator Vector3() const;
 
+        // Returns the sum of two Vector2 values.
         friend Vector2 operator+(Vector2 lhs, float rhs) { return lhs += rhs; }
+        // Returns the difference between two Vector2 values.
         friend Vector2 operator-(Vector2 lhs, float rhs) { return lhs -= rhs; }
+        // Returns a multiplied Vector2 value.
         friend Vector2 operator*(Vector2 lhs, float rhs) { return lhs *= rhs; }
+        // Returns a divided Vector2 value.
         friend Vector2 operator/(Vector2 lhs, float rhs) { return lhs /= rhs; }
+        // Returns the sum of two Vector2 values.
         friend Vector2 operator+(float lhs, Vector2 rhs) { return rhs + lhs; }
+        // Returns the difference between two Vector2 values.
         friend Vector2 operator-(float lhs, Vector2 rhs) { return {lhs - rhs.x, lhs - rhs.y}; }
+        // Returns a multiplied Vector2 value.
         friend Vector2 operator*(float lhs, Vector2 rhs) { return rhs * lhs; }
+        // Returns a divided Vector2 value.
         friend Vector2 operator/(float lhs, Vector2 rhs) { return {lhs / rhs.x, lhs / rhs.y}; }
+        // Returns the sum of two Vector2 values.
         friend Vector2 operator+(Vector2 lhs, Vector2 rhs) { return {lhs.x + rhs.x, lhs.y + rhs.y}; }
+        // Returns the difference between two Vector2 values.
         friend Vector2 operator-(Vector2 lhs, Vector2 rhs) { return {lhs.x - rhs.x, lhs.y - rhs.y}; }
+        // Returns a multiplied Vector2 value.
         friend Vector2 operator*(Vector2 lhs, Vector2 rhs) { return {lhs.x * rhs.x, lhs.y * rhs.y}; }
+        // Returns a divided Vector2 value.
         friend Vector2 operator/(Vector2 lhs, Vector2 rhs) { return {lhs.x / rhs.x, lhs.y / rhs.y}; }
+        // Returns this Vector2 with every component negated.
         Vector2 operator-() const { return {-x, -y}; }
 
         static const Vector2 positiveInfinity;
@@ -169,7 +222,9 @@ namespace Unity {
             int data[2];
         };
 
+        // Creates a default Vector2Int value.
         constexpr Vector2Int() : x(0), y(0) {}
+        // Creates a Vector2Int value from the supplied components.
         constexpr Vector2Int(int x, int y) : x(x), y(y) {}
     };
 
@@ -179,30 +234,45 @@ namespace Unity {
             float data[3];
         };
 
+        // Creates a default Vector3 value.
         constexpr Vector3() : x(0.0f), y(0.0f), z(0.0f) {}
+        // Creates a Vector3 value from the supplied components.
         constexpr Vector3(float x, float y, float z) : x(x), y(y), z(z) {}
 
         operator Vector4() const;
+        // Converts this value into Vector2.
         operator Vector2() const { return {x, y}; }
+        // Treats the first two Vector3 components as a writable Vector2 view.
         operator Vector2&() { return *reinterpret_cast<Vector2*>(this); }
 
+        // Returns direct access to the raw component array.
         float* GetPtr() { return data; }
+        // Returns direct access to the raw component array.
         const float* GetPtr() const { return data; }
 
+        // Returns one Vector3 component by index.
         float& operator[](int index) { return data[index]; }
+        // Returns one Vector3 component by index.
         const float& operator[](int index) const { return data[index]; }
 
         static float Angle(Vector3 from, Vector3 to);
+        // Measures the angle between two normalized directions.
         static float AngleBetween(Vector3 from, Vector3 to) { return Angle(Normalize(from), Normalize(to)); }
         static Vector3 ClampMagnitude(Vector3 vector, float maxLength);
         static Vector3 Cross(Vector3 lhs, Vector3 rhs);
+        // Returns how much of one vector lies in another vector direction.
         static float Component(Vector3 a, Vector3 b) { return Dot(a, b) / Magnitude(b); }
+        // Measures the straight-line distance between two values.
         static float Distance(Vector3 a, Vector3 b) { return Magnitude(a - b); }
+        // Returns the dot product, which shows how closely two directions align.
         static float Dot(Vector3 lhs, Vector3 rhs) { return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z; }
         static Vector3 FromSpherical(float radius, float theta, float phi);
         static Vector3 FromString(const std::string& value);
+        // Moves between two values while clamping the blend amount to a safe range.
         static Vector3 Lerp(Vector3 from, Vector3 to, float t) { return LerpUnclamped(from, to, Clamp01(t)); }
+        // Moves between two values using the blend amount exactly as supplied.
         static Vector3 LerpUnclamped(Vector3 from, Vector3 to, float t) { return (to - from) * t + from; }
+        // Returns the length of the vector.
         static float Magnitude(Vector3 vector) { return std::sqrt(SqrMagnitude(vector)); }
         static Vector3 Max(Vector3 lhs, Vector3 rhs);
         static Vector3 Min(Vector3 lhs, Vector3 rhs);
@@ -219,42 +289,71 @@ namespace Unity {
         static Vector3 ProjectOnPlane(Vector3 vector, Vector3 planeNormal);
         static Vector3 Reflect(Vector3 direction, Vector3 normal);
         static Vector3 RotateTowards(Vector3 current, Vector3 target, float maxRadiansDelta, float maxMagnitudeDelta);
+        // Multiplies matching components from two values.
         static Vector3 Scale(Vector3 a, Vector3 b) { return a * b; }
         static float SignedAngle(Vector3 from, Vector3 to, Vector3 axis);
         static Vector3 Slerp(Vector3 a, Vector3 b, float t);
         static Vector3 SlerpUnclamped(Vector3 a, Vector3 b, float t);
         static Vector3 SmoothDamp(Vector3 current, Vector3 target, Vector3& currentVelocity, float smoothTime, float maxSpeed, float deltaTime);
+        // Returns the squared length, avoiding a square-root when only comparisons are needed.
         static float SqrMagnitude(Vector3 vector) { return vector.x * vector.x + vector.y * vector.y + vector.z * vector.z; }
         static void ToSpherical(Vector3 vector, float& radius, float& theta, float& phi);
 
+        // Converts this value to length one while keeping its direction.
         void Normalize() { *this = Normalize(*this); }
+        // Multiplies matching components from two values.
         void Scale(Vector3 scale) { *this = *this * scale; }
+        // Returns a perpendicular direction for this vector.
         Vector3 orthogonal() const { return Orthogonal(*this); }
+        // Returns this vector length.
         float magnitude() const { return Magnitude(*this); }
+        // Returns a normalized copy of this value.
         Vector3 normalized() const { return Normalize(*this); }
+        // Returns this Euler vector wrapped into the expected angle range.
         Vector3 normalizedEuler(bool is180 = true) const { return NormalizeEuler(*this, is180); }
+        // Returns this vector squared length.
         float sqrMagnitude() const { return SqrMagnitude(*this); }
 
+        // Checks whether two Vector3 values have the same components.
         bool operator==(Vector3 value) const { return x == value.x && y == value.y && z == value.z; }
+        // Checks whether two Vector3 values differ.
         bool operator!=(Vector3 value) const { return !(*this == value); }
+        // Adds another value into this Vector3 in place.
         Vector3& operator+=(Vector3 value) { x += value.x; y += value.y; z += value.z; return *this; }
+        // Subtracts another value from this Vector3 in place.
         Vector3& operator-=(Vector3 value) { x -= value.x; y -= value.y; z -= value.z; return *this; }
+        // Multiplies this Vector3 in place.
         Vector3& operator*=(float value) { x *= value; y *= value; z *= value; return *this; }
+        // Divides this Vector3 in place.
         Vector3& operator/=(float value) { float inv = 1.0f / value; x *= inv; y *= inv; z *= inv; return *this; }
+        // Multiplies this Vector3 in place.
         Vector3& operator*=(int value) { return *this *= static_cast<float>(value); }
+        // Divides this Vector3 in place.
         Vector3& operator/=(int value) { return *this /= static_cast<float>(value); }
+        // Divides this Vector3 in place.
         Vector3& operator/=(Vector3 value) { x /= value.x; y /= value.y; z /= value.z; return *this; }
 
+        // Returns the sum of two Vector3 values.
         friend Vector3 operator+(Vector3 lhs, Vector3 rhs) { return lhs += rhs; }
+        // Returns the difference between two Vector3 values.
         friend Vector3 operator-(Vector3 lhs, Vector3 rhs) { return lhs -= rhs; }
+        // Returns a multiplied Vector3 value.
         friend Vector3 operator*(Vector3 lhs, float rhs) { return lhs *= rhs; }
+        // Returns a multiplied Vector3 value.
         friend Vector3 operator*(Vector3 lhs, int rhs) { return lhs *= rhs; }
+        // Returns a multiplied Vector3 value.
         friend Vector3 operator*(float lhs, Vector3 rhs) { return rhs * lhs; }
+        // Returns a multiplied Vector3 value.
         friend Vector3 operator*(int lhs, Vector3 rhs) { return rhs * lhs; }
+        // Returns a multiplied Vector3 value.
         friend Vector3 operator*(Vector3 lhs, Vector3 rhs) { return {lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z}; }
+        // Returns a divided Vector3 value.
         friend Vector3 operator/(Vector3 lhs, float rhs) { return lhs /= rhs; }
+        // Returns a divided Vector3 value.
         friend Vector3 operator/(Vector3 lhs, int rhs) { return lhs /= rhs; }
+        // Returns a divided Vector3 value.
         friend Vector3 operator/(Vector3 lhs, Vector3 rhs) { return lhs /= rhs; }
+        // Returns this Vector3 with every component negated.
         Vector3 operator-() const { return {-x, -y, -z}; }
 
         static constexpr float kEpsilon = 1E-05f;
@@ -277,7 +376,9 @@ namespace Unity {
             int data[3];
         };
 
+        // Creates a default Vector3Int value.
         constexpr Vector3Int() : x(0), y(0), z(0) {}
+        // Creates a Vector3Int value from the supplied components.
         constexpr Vector3Int(int x, int y, int z) : x(x), y(y), z(z) {}
     };
 
@@ -287,43 +388,71 @@ namespace Unity {
             float data[4];
         };
 
+        // Creates a default Vector4 value.
         constexpr Vector4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
+        // Creates a Vector4 value from the supplied components.
         constexpr Vector4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
+        // Creates a Vector4 value from the supplied components.
         constexpr Vector4(Vector3 value, float w) : x(value.x), y(value.y), z(value.z), w(w) {}
         explicit Vector4(Color value);
 
+        // Returns direct access to the raw component array.
         float* GetPtr() { return data; }
+        // Returns direct access to the raw component array.
         const float* GetPtr() const { return data; }
 
+        // Returns one Vector4 component by index.
         float& operator[](int index) { return data[index]; }
+        // Returns one Vector4 component by index.
         const float& operator[](int index) const { return data[index]; }
 
+        // Checks whether two values are close enough to be treated as equal.
         static bool CompareApproximately(Vector4 a, Vector4 b, float maxDistance = Vector3::kEpsilon) {
             return SqrMagnitude(b - a) <= maxDistance * maxDistance;
         }
 
+        // Returns how much of one vector lies in another vector direction.
         static float Component(Vector4 a, Vector4 b) { return Dot(a, b) / Magnitude(b); }
+        // Measures the straight-line distance between two values.
         static float Distance(Vector4 a, Vector4 b) { return Magnitude(a - b); }
+        // Returns the dot product, which shows how closely two directions align.
         static float Dot(Vector4 lhs, Vector4 rhs) { return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z + lhs.w * rhs.w; }
+        // Checks that every numeric value involved is neither infinity nor NaN.
         static bool IsFinite(Vector4 value) { return Unity::IsFinite(value.x) && Unity::IsFinite(value.y) && Unity::IsFinite(value.z) && Unity::IsFinite(value.w); }
+        // Moves between two values while clamping the blend amount to a safe range.
         static Vector4 Lerp(Vector4 from, Vector4 to, float t) { return LerpUnclamped(from, to, Clamp01(t)); }
+        // Moves between two values using the blend amount exactly as supplied.
         static Vector4 LerpUnclamped(Vector4 from, Vector4 to, float t) { return (to - from) * t + from; }
+        // Returns the length of the vector.
         static float Magnitude(Vector4 value) { return std::sqrt(Dot(value, value)); }
         static Vector4 Normalize(Vector4 value);
+        // Projects one vector onto another direction.
         static Vector4 Project(Vector4 a, Vector4 b) { return b * (Dot(a, b) / Dot(b, b)); }
+        // Returns the squared length, avoiding a square-root when only comparisons are needed.
         static float SqrMagnitude(Vector4 value) { return Dot(value, value); }
 
+        // Converts this value to length one while keeping its direction.
         void Normalize() { *this = Normalize(*this); }
+        // Checks whether two Vector4 values have the same components.
         bool operator==(Vector4 value) const { return x == value.x && y == value.y && z == value.z && w == value.w; }
+        // Checks whether two Vector4 values differ.
         bool operator!=(Vector4 value) const { return !(*this == value); }
+        // Converts this value into Vector3.
         operator Vector3() const { return {x, y, z}; }
 
+        // Returns a multiplied Vector4 value.
         friend Vector4 operator*(Vector4 lhs, Vector4 rhs) { return {lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z, lhs.w * rhs.w}; }
+        // Returns a multiplied Vector4 value.
         friend Vector4 operator*(Vector4 lhs, float rhs) { return {lhs.x * rhs, lhs.y * rhs, lhs.z * rhs, lhs.w * rhs}; }
+        // Returns the sum of two Vector4 values.
         friend Vector4 operator+(Vector4 lhs, Vector4 rhs) { return {lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z, lhs.w + rhs.w}; }
+        // Returns the difference between two Vector4 values.
         friend Vector4 operator-(Vector4 lhs, Vector4 rhs) { return {lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z, lhs.w - rhs.w}; }
+        // Returns a divided Vector4 value.
         friend Vector4 operator/(Vector4 lhs, float rhs) { float inv = 1.0f / rhs; return {lhs.x * inv, lhs.y * inv, lhs.z * inv, lhs.w * inv}; }
+        // Returns a divided Vector4 value.
         friend Vector4 operator/(Vector4 lhs, Vector4 rhs) { return {lhs.x / rhs.x, lhs.y / rhs.y, lhs.z / rhs.z, lhs.w / rhs.w}; }
+        // Returns this Vector4 with every component negated.
         Vector4 operator-() const { return {-x, -y, -z, -w}; }
 
         static const Vector4 positiveInfinity;
@@ -338,30 +467,46 @@ namespace Unity {
             float data[4];
         };
 
+        // Creates a default Quaternion value.
         constexpr Quaternion() : x(0.0f), y(0.0f), z(0.0f), w(1.0f) {}
+        // Creates a Quaternion value from the supplied components.
         explicit Quaternion(const float values[]) : x(values[0]), y(values[1]), z(values[2]), w(values[3]) {}
+        // Creates a Quaternion value from the supplied components.
         constexpr Quaternion(Vector3 vector, float scalar) : x(vector.x), y(vector.y), z(vector.z), w(scalar) {}
+        // Creates a Quaternion value from the supplied components.
         constexpr Quaternion(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
+        // Creates a quaternion rotation from yaw, pitch, and roll angles.
         Quaternion(float yaw, float pitch, float roll) { *this = FromEuler(yaw, pitch, roll); }
 
+        // Returns the up direction after applying this rotation.
         static Vector3 Up(Quaternion value) { return value * Vector3::up; }
+        // Returns the down direction after applying this rotation.
         static Vector3 Down(Quaternion value) { return value * Vector3::down; }
+        // Returns the left direction after applying this rotation.
         static Vector3 Left(Quaternion value) { return value * Vector3::left; }
+        // Returns the right direction after applying this rotation.
         static Vector3 Right(Quaternion value) { return value * Vector3::right; }
+        // Returns the forward direction after applying this rotation.
         static Vector3 Forward(Quaternion value) { return value * Vector3::forward; }
+        // Returns the backward direction after applying this rotation.
         static Vector3 Back(Quaternion value) { return value * Vector3::back; }
         static float Angle(Quaternion a, Quaternion b);
+        // Returns the opposite rotation axis while keeping the same scalar part.
         static Quaternion Conjugate(Quaternion rotation) { return {-rotation.x, -rotation.y, -rotation.z, rotation.w}; }
+        // Returns the dot product, which shows how closely two directions align.
         static float Dot(Quaternion lhs, Quaternion rhs) { return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z + lhs.w * rhs.w; }
         static Quaternion FromAngleAxis(float angle, Vector3 axis);
+        // Builds a quaternion rotation from Euler angles.
         static Quaternion FromEuler(Vector3 rotation) { return FromEuler(rotation.x, rotation.y, rotation.z); }
         static Quaternion FromEuler(float yaw, float pitch, float roll, bool fromDeg = true);
         static Quaternion FromToRotation(Vector3 fromVector, Vector3 toVector);
         static Quaternion Inverse(Quaternion rotation);
         static Quaternion Lerp(Quaternion a, Quaternion b, float t);
         static Quaternion LerpUnclamped(Quaternion a, Quaternion b, float t);
+        // Builds a rotation that faces a forward direction.
         static Quaternion LookRotation(Vector3 forward) { return LookRotation(forward, Vector3::up); }
         static Quaternion LookRotation(Vector3 forward, Vector3 upwards);
+        // Returns the quaternion length.
         static float Norm(Quaternion rotation) { return std::sqrt(Dot(rotation, rotation)); }
         static Quaternion Normalize(Quaternion rotation);
         static Quaternion RotateTowards(Quaternion from, Quaternion to, float maxRadiansDelta);
@@ -371,24 +516,39 @@ namespace Unity {
         static Vector3 ToEuler(Quaternion value, bool toDeg = true);
         static Vector3 RotateVectorByQuaternion(Quaternion lhs, Vector3 rhs);
 
+        // Returns this quaternion as Euler angles.
         Vector3 eulerAngles() const { return ToEuler(*this); }
+        // Returns a normalized copy of this value.
         Quaternion normalized() const { return Normalize(*this); }
 
+        // Adds another value into this Quaternion in place.
         Quaternion& operator+=(Quaternion value) { x += value.x; y += value.y; z += value.z; w += value.w; return *this; }
+        // Subtracts another value from this Quaternion in place.
         Quaternion& operator-=(Quaternion value) { x -= value.x; y -= value.y; z -= value.z; w -= value.w; return *this; }
         Quaternion& operator*=(Quaternion value);
+        // Multiplies this Quaternion in place.
         Quaternion& operator*=(float value) { x *= value; y *= value; z *= value; w *= value; return *this; }
         Quaternion& operator/=(Quaternion value);
+        // Divides this Quaternion in place.
         Quaternion& operator/=(float value) { x /= value; y /= value; z /= value; w /= value; return *this; }
+        // Returns this Quaternion with every component negated.
         Quaternion operator-() const { return {-x, -y, -z, -w}; }
+        // Returns a multiplied Quaternion value.
         Quaternion operator*(float value) const { return {x * value, y * value, z * value, w * value}; }
 
+        // Returns the sum of two Quaternion values.
         friend Quaternion operator+(Quaternion lhs, Quaternion rhs) { return lhs += rhs; }
+        // Returns the difference between two Quaternion values.
         friend Quaternion operator-(Quaternion lhs, Quaternion rhs) { return lhs -= rhs; }
+        // Returns a multiplied Quaternion value.
         friend Quaternion operator*(Quaternion lhs, Quaternion rhs) { return lhs *= rhs; }
+        // Returns a multiplied Quaternion value.
         friend Quaternion operator*(float lhs, Quaternion rhs) { return rhs *= lhs; }
+        // Returns a divided Quaternion value.
         friend Quaternion operator/(Quaternion lhs, Quaternion rhs) { return lhs /= rhs; }
+        // Returns a divided Quaternion value.
         friend Quaternion operator/(Quaternion lhs, float rhs) { return lhs /= rhs; }
+        // Rotates a vector by a quaternion using operator syntax.
         friend Vector3 operator*(Quaternion lhs, Vector3 rhs) { return RotateVectorByQuaternion(lhs, rhs); }
 
         static const Quaternion identity;
@@ -431,8 +591,10 @@ namespace Unity {
 
     inline const Quaternion Quaternion::identity{0.0f, 0.0f, 0.0f, 1.0f};
 
+    // Creates a color from a Vector4 component value.
     inline Color::Color(Vector4 value) : r(value.x), g(value.y), b(value.z), a(value.w) {}
 
+    // Converts hue, saturation, and value color data into red, green, and blue channels.
     inline Color Color::HSVToRGB(float h, float s, float v, bool hdr) {
         if (s == 0.0f) return {v, v, v};
         if (v == 0.0f) return {0.0f, 0.0f, 0.0f};
@@ -461,6 +623,7 @@ namespace Unity {
         return {Clamp01(result.r), Clamp01(result.g), Clamp01(result.b), result.a};
     }
 
+    // Moves between two values while clamping the blend amount to a safe range.
     inline Color Color::Lerp(Color a, Color b, float t) {
         t = Clamp01(t);
         return {
@@ -471,29 +634,35 @@ namespace Unity {
         };
     }
 
+    // Measures the angle between two directions.
     inline float Vector2::Angle(Vector2 from, Vector2 to) {
         float denominatorSq = SqrMagnitude(from) * SqrMagnitude(to);
         if (denominatorSq == 0.0f) return 0.0f;
         return std::acos(std::clamp(Dot(from, to) * (1.0f / std::sqrt(denominatorSq)), -1.0f, 1.0f));
     }
 
+    // Limits a vector so its length does not exceed the requested maximum.
     inline Vector2 Vector2::ClampMagnitude(Vector2 vector, float maxLength) {
         float length = Magnitude(vector);
         return length > maxLength ? vector * (maxLength / length) : vector;
     }
 
+    // Builds a two-dimensional vector from radius and angle values.
     inline Vector2 Vector2::FromPolar(float radius, float theta) {
         return {radius * std::cos(theta), radius * std::sin(theta)};
     }
 
+    // Returns the largest component values from two inputs.
     inline Vector2 Vector2::Max(Vector2 lhs, Vector2 rhs) {
         return {std::max(lhs.x, rhs.x), std::max(lhs.y, rhs.y)};
     }
 
+    // Returns the smallest component values from two inputs.
     inline Vector2 Vector2::Min(Vector2 lhs, Vector2 rhs) {
         return {std::min(lhs.x, rhs.x), std::min(lhs.y, rhs.y)};
     }
 
+    // Moves a value toward a target without stepping farther than allowed.
     inline Vector2 Vector2::MoveTowards(Vector2 current, Vector2 target, float maxDistanceDelta) {
         Vector2 delta = target - current;
         float distance = Magnitude(delta);
@@ -501,25 +670,30 @@ namespace Unity {
         return current + delta * (maxDistanceDelta / distance);
     }
 
+    // Converts this value to length one while keeping its direction.
     inline Vector2 Vector2::Normalize(Vector2 vector) {
         float magnitude = Magnitude(vector);
         return magnitude == 0.0f ? zero : vector * (1.0f / magnitude);
     }
 
+    // Makes direction vectors perpendicular and normalized for stable orientation math.
     inline void Vector2::OrthoNormalize(Vector2& normal, Vector2& tangent) {
         normal = Normalize(normal);
         tangent = Normalize(Reject(tangent, normal));
     }
 
+    // Projects one vector onto another direction.
     inline Vector2 Vector2::Project(Vector2 a, Vector2 b) {
         float sqrMagnitude = SqrMagnitude(b);
         return sqrMagnitude == 0.0f ? zero : b * (Dot(a, b) / sqrMagnitude);
     }
 
+    // Reflects a direction away from a surface normal.
     inline Vector2 Vector2::Reflect(Vector2 direction, Vector2 normal) {
         return direction - 2.0f * Project(direction, normal);
     }
 
+    // Rotates a value toward a target while respecting the requested limit.
     inline Vector2 Vector2::RotateTowards(Vector2 current, Vector2 target, float maxRadiansDelta, float maxMagnitudeDelta) {
         float currentMagnitude = Magnitude(current);
         float targetMagnitude = Magnitude(target);
@@ -536,12 +710,14 @@ namespace Unity {
         return (current * std::cos(maxRadiansDelta) + Perpendicular(current) * std::sin(maxRadiansDelta) * axis) * newMagnitude;
     }
 
+    // Spherically interpolates between two directions with a clamped blend amount.
     inline Vector2 Vector2::Slerp(Vector2 a, Vector2 b, float t) {
         if (t < 0.0f) return a;
         if (t > 1.0f) return b;
         return SlerpUnclamped(a, b, t);
     }
 
+    // Spherically interpolates between two directions using the exact blend amount.
     inline Vector2 Vector2::SlerpUnclamped(Vector2 a, Vector2 b, float t) {
         float magA = Magnitude(a);
         float magB = Magnitude(b);
@@ -554,6 +730,7 @@ namespace Unity {
         return (a * std::cos(theta) + relative * std::sin(theta)) * (magA + (magB - magA) * t);
     }
 
+    // Smoothly moves a value toward a target while tracking velocity.
     inline Vector2 Vector2::SmoothDamp(Vector2 current, Vector2 target, Vector2& currentVelocity, float smoothTime, float maxSpeed, float deltaTime) {
         smoothTime = std::max(0.0001f, smoothTime);
         float omega = 2.0f / smoothTime;
@@ -575,19 +752,23 @@ namespace Unity {
         return output;
     }
 
+    // Splits a two-dimensional vector into radius and angle values.
     inline void Vector2::ToPolar(Vector2 vector, float& radius, float& theta) {
         radius = Magnitude(vector);
         theta = std::atan2(vector.y, vector.x);
     }
 
+    // Converts this value into Vector3.
     inline Vector2::operator Vector3() const {
         return {x, y, 0.0f};
     }
 
+    // Converts this value into Vector4.
     inline Vector3::operator Vector4() const {
         return {x, y, z, 0.0f};
     }
 
+    // Returns a vector perpendicular to two input directions.
     inline Vector3 Vector3::Cross(Vector3 lhs, Vector3 rhs) {
         return {
             lhs.y * rhs.z - lhs.z * rhs.y,
@@ -596,17 +777,20 @@ namespace Unity {
         };
     }
 
+    // Measures the angle between two directions.
     inline float Vector3::Angle(Vector3 from, Vector3 to) {
         float denominatorSq = SqrMagnitude(from) * SqrMagnitude(to);
         if (denominatorSq == 0.0f) return 0.0f;
         return std::acos(std::clamp(Dot(from, to) * (1.0f / std::sqrt(denominatorSq)), -1.0f, 1.0f));
     }
 
+    // Limits a vector so its length does not exceed the requested maximum.
     inline Vector3 Vector3::ClampMagnitude(Vector3 vector, float maxLength) {
         float length = Magnitude(vector);
         return length > maxLength ? vector * (maxLength / length) : vector;
     }
 
+    // Builds a three-dimensional vector from spherical coordinates.
     inline Vector3 Vector3::FromSpherical(float radius, float theta, float phi) {
         return {
             radius * std::sin(theta) * std::cos(phi),
@@ -615,6 +799,7 @@ namespace Unity {
         };
     }
 
+    // Parses a comma-separated string into a three-dimensional vector.
     inline Vector3 Vector3::FromString(const std::string& value) {
         std::vector<float> values;
         std::stringstream stream(value);
@@ -628,14 +813,17 @@ namespace Unity {
         return values.size() == 3 ? Vector3(values[0], values[1], values[2]) : zero;
     }
 
+    // Returns the largest component values from two inputs.
     inline Vector3 Vector3::Max(Vector3 lhs, Vector3 rhs) {
         return {std::max(lhs.x, rhs.x), std::max(lhs.y, rhs.y), std::max(lhs.z, rhs.z)};
     }
 
+    // Returns the smallest component values from two inputs.
     inline Vector3 Vector3::Min(Vector3 lhs, Vector3 rhs) {
         return {std::min(lhs.x, rhs.x), std::min(lhs.y, rhs.y), std::min(lhs.z, rhs.z)};
     }
 
+    // Moves a value toward a target without stepping farther than allowed.
     inline Vector3 Vector3::MoveTowards(Vector3 current, Vector3 target, float maxDistanceDelta) {
         Vector3 delta = target - current;
         float distance = Magnitude(delta);
@@ -643,11 +831,13 @@ namespace Unity {
         return current + delta * (maxDistanceDelta / distance);
     }
 
+    // Converts this value to length one while keeping its direction.
     inline Vector3 Vector3::Normalize(Vector3 vector) {
         float magnitude = Magnitude(vector);
         return magnitude == 0.0f ? zero : vector * (1.0f / magnitude);
     }
 
+    // Wraps an angle into the expected Unity range.
     inline float Vector3::NormalizeAngle(float value, bool is180) {
         float res = std::fmod(value, 360.0f);
         if (res > 180.0f) res -= 360.0f;
@@ -657,6 +847,7 @@ namespace Unity {
         return res < 0.0f ? res + 360.0f : res;
     }
 
+    // Wraps Euler rotation components into the expected Unity range.
     inline Vector3 Vector3::NormalizeEuler(Vector3 vector, bool is180) {
         return {
             NormalizeAngle(vector.x, is180),
@@ -665,10 +856,12 @@ namespace Unity {
         };
     }
 
+    // Returns a stable direction perpendicular to the input vector.
     inline Vector3 Vector3::Orthogonal(Vector3 vector) {
         return vector.z < vector.x ? Vector3(vector.y, -vector.x, 0.0f) : Vector3(0.0f, -vector.z, vector.y);
     }
 
+    // Makes direction vectors perpendicular and normalized for stable orientation math.
     inline void Vector3::OrthoNormalize(Vector3& normal, Vector3& tangent) {
         Vector3 n = normal;
         Vector3 t = tangent;
@@ -684,6 +877,7 @@ namespace Unity {
         tangent = t;
     }
 
+    // Makes direction vectors perpendicular and normalized for stable orientation math.
     inline void Vector3::OrthoNormalize(Vector3& normal, Vector3& tangent, Vector3& binormal) {
         Vector3 n = normal;
         Vector3 t = tangent;
@@ -705,6 +899,7 @@ namespace Unity {
         binormal = b;
     }
 
+    // Quickly normalizes three perpendicular direction vectors.
     inline void Vector3::OrthoNormalizeFast(Vector3& normal, Vector3& tangent, Vector3& binormal) {
         Vector3 n = Normalize(normal);
         Vector3 t = Normalize(tangent - Dot(n, tangent) * n);
@@ -715,6 +910,7 @@ namespace Unity {
         binormal = b;
     }
 
+    // Returns a quick perpendicular unit vector for the supplied normal.
     inline Vector3 Vector3::OrthoNormalVectorFast(const Vector3& normal) {
         constexpr float oneOverSqrt2 = 0.7071067811865475244f;
         if (std::fabs(normal.z) > oneOverSqrt2) {
@@ -726,22 +922,26 @@ namespace Unity {
         return {-normal.y * scale, normal.x * scale, 0.0f};
     }
 
+    // Projects one vector onto another direction.
     inline Vector3 Vector3::Project(Vector3 vector, Vector3 onNormal) {
         float sqrMagnitude = Dot(onNormal, onNormal);
         if (sqrMagnitude < kEpsilon) return zero;
         return onNormal * (Dot(vector, onNormal) / sqrMagnitude);
     }
 
+    // Projects a vector onto the plane described by a normal direction.
     inline Vector3 Vector3::ProjectOnPlane(Vector3 vector, Vector3 planeNormal) {
         float sqrMagnitude = Dot(planeNormal, planeNormal);
         if (sqrMagnitude < kEpsilon) return vector;
         return vector - planeNormal * (Dot(vector, planeNormal) / sqrMagnitude);
     }
 
+    // Reflects a direction away from a surface normal.
     inline Vector3 Vector3::Reflect(Vector3 direction, Vector3 normal) {
         return direction - 2.0f * Dot(normal, direction) * normal;
     }
 
+    // Rotates a value toward a target while respecting the requested limit.
     inline Vector3 Vector3::RotateTowards(Vector3 current, Vector3 target, float maxRadiansDelta, float maxMagnitudeDelta) {
         float currentMagnitude = Magnitude(current);
         float targetMagnitude = Magnitude(target);
@@ -759,17 +959,20 @@ namespace Unity {
         return (current * std::cos(maxRadiansDelta) + Cross(axis, current) * std::sin(maxRadiansDelta)) * newMagnitude;
     }
 
+    // Measures the signed angle around a chosen axis.
     inline float Vector3::SignedAngle(Vector3 from, Vector3 to, Vector3 axis) {
         float sign = Dot(axis, Cross(from, to)) >= 0.0f ? 1.0f : -1.0f;
         return Angle(from, to) * sign;
     }
 
+    // Spherically interpolates between two directions with a clamped blend amount.
     inline Vector3 Vector3::Slerp(Vector3 a, Vector3 b, float t) {
         if (t < 0.0f) return a;
         if (t > 1.0f) return b;
         return SlerpUnclamped(a, b, t);
     }
 
+    // Spherically interpolates between two directions using the exact blend amount.
     inline Vector3 Vector3::SlerpUnclamped(Vector3 a, Vector3 b, float t) {
         float magA = Magnitude(a);
         float magB = Magnitude(b);
@@ -782,6 +985,7 @@ namespace Unity {
         return (a * std::cos(theta) + relative * std::sin(theta)) * (magA + (magB - magA) * t);
     }
 
+    // Smoothly moves a value toward a target while tracking velocity.
     inline Vector3 Vector3::SmoothDamp(Vector3 current, Vector3 target, Vector3& currentVelocity, float smoothTime, float maxSpeed, float deltaTime) {
         smoothTime = std::max(0.0001f, smoothTime);
         float omega = 2.0f / smoothTime;
@@ -803,6 +1007,7 @@ namespace Unity {
         return output;
     }
 
+    // Splits a vector into radius and spherical angle values.
     inline void Vector3::ToSpherical(Vector3 vector, float& radius, float& theta, float& phi) {
         radius = Magnitude(vector);
         if (radius == 0.0f) {
@@ -815,13 +1020,16 @@ namespace Unity {
     }
 
 
+    // Creates a Vector4 from a color component value.
     inline Vector4::Vector4(Color value) : x(value.r), y(value.g), z(value.b), w(value.a) {}
 
+    // Converts this value to length one while keeping its direction.
     inline Vector4 Vector4::Normalize(Vector4 value) {
         float magnitude = Magnitude(value);
         return magnitude > Vector3::kEpsilon ? value * (1.0f / magnitude) : zero;
     }
 
+    // Multiplies this Quaternion in place.
     inline Quaternion& Quaternion::operator*=(Quaternion value) {
         float newX = w * value.x + x * value.w + y * value.z - z * value.y;
         float newY = w * value.y + y * value.w + z * value.x - x * value.z;
@@ -834,6 +1042,7 @@ namespace Unity {
         return *this;
     }
 
+    // Divides this Quaternion in place.
     inline Quaternion& Quaternion::operator/=(Quaternion value) {
         float newX = w / value.x + x / value.w + y / value.z - z / value.y;
         float newY = w / value.y + y / value.w + z / value.x - x / value.z;
@@ -846,10 +1055,12 @@ namespace Unity {
         return *this;
     }
 
+    // Measures the angle between two quaternion rotations.
     inline float Quaternion::Angle(Quaternion a, Quaternion b) {
         return std::acos(std::min(std::fabs(Dot(a, b)), 1.0f)) * 2.0f;
     }
 
+    // Builds a quaternion rotation around an axis.
     inline Quaternion Quaternion::FromAngleAxis(float angle, Vector3 axis) {
         float magnitude = Vector3::Magnitude(axis);
         if (magnitude == 0.0f) return identity;
@@ -857,6 +1068,7 @@ namespace Unity {
         return {axis.x * scale, axis.y * scale, axis.z * scale, std::cos(angle * 0.5f)};
     }
 
+    // Builds a quaternion rotation from Euler angles.
     inline Quaternion Quaternion::FromEuler(float yaw, float pitch, float roll, bool fromDeg) {
         if (fromDeg) {
             yaw *= Deg2Rad;
@@ -879,6 +1091,7 @@ namespace Unity {
         };
     }
 
+    // Builds the rotation needed to turn one direction into another.
     inline Quaternion Quaternion::FromToRotation(Vector3 fromVector, Vector3 toVector) {
         float dot = Vector3::Dot(fromVector, toVector);
         float magnitude = std::sqrt(Vector3::SqrMagnitude(fromVector) * Vector3::SqrMagnitude(toVector));
@@ -889,22 +1102,26 @@ namespace Unity {
         return Normalize(Quaternion(Vector3::Cross(fromVector, toVector), dot + magnitude));
     }
 
+    // Returns the rotation that undoes the supplied rotation.
     inline Quaternion Quaternion::Inverse(Quaternion rotation) {
         float norm = Norm(rotation);
         return norm == 0.0f ? identity : Conjugate(rotation) / (norm * norm);
     }
 
+    // Moves between two values while clamping the blend amount to a safe range.
     inline Quaternion Quaternion::Lerp(Quaternion a, Quaternion b, float t) {
         if (t < 0.0f) return Normalize(a);
         if (t > 1.0f) return Normalize(b);
         return LerpUnclamped(a, b, t);
     }
 
+    // Moves between two values using the blend amount exactly as supplied.
     inline Quaternion Quaternion::LerpUnclamped(Quaternion a, Quaternion b, float t) {
         Quaternion result = Dot(a, b) >= 0.0f ? a * (1.0f - t) + b * t : a * (1.0f - t) - b * t;
         return Normalize(result);
     }
 
+    // Builds a rotation that faces a forward direction.
     inline Quaternion Quaternion::LookRotation(Vector3 forward, Vector3 upwards) {
         forward = Vector3::Normalize(forward);
         upwards = Vector3::Normalize(upwards);
@@ -946,11 +1163,13 @@ namespace Unity {
         return result;
     }
 
+    // Converts this value to length one while keeping its direction.
     inline Quaternion Quaternion::Normalize(Quaternion rotation) {
         float norm = Norm(rotation);
         return norm == 0.0f ? identity : rotation / norm;
     }
 
+    // Rotates one quaternion toward another while respecting the requested limit.
     inline Quaternion Quaternion::RotateTowards(Quaternion from, Quaternion to, float maxRadiansDelta) {
         float angle = Angle(from, to);
         if (angle == 0.0f) return to;
@@ -958,12 +1177,14 @@ namespace Unity {
         return SlerpUnclamped(from, to, std::min(1.0f, maxRadiansDelta / angle));
     }
 
+    // Spherically interpolates between two rotations with a clamped blend amount.
     inline Quaternion Quaternion::Slerp(Quaternion a, Quaternion b, float t) {
         if (t < 0.0f) return Normalize(a);
         if (t > 1.0f) return Normalize(b);
         return SlerpUnclamped(a, b, t);
     }
 
+    // Spherically interpolates between two rotations using the exact blend amount.
     inline Quaternion Quaternion::SlerpUnclamped(Quaternion a, Quaternion b, float t) {
         float dot = Dot(a, b);
         if (dot < 0.0f) {
@@ -979,6 +1200,7 @@ namespace Unity {
         return LerpUnclamped(a, b, t);
     }
 
+    // Splits a quaternion into angle and axis values.
     inline void Quaternion::ToAngleAxis(Quaternion rotation, float& angle, Vector3& axis) {
         if (rotation.w > 1.0f) rotation = Normalize(rotation);
         angle = 2.0f * std::acos(rotation.w);
@@ -986,6 +1208,7 @@ namespace Unity {
         axis = scale < 0.00001f ? Vector3::right : Vector3(rotation.x / scale, rotation.y / scale, rotation.z / scale);
     }
 
+    // Converts a quaternion rotation into Euler angles.
     inline Vector3 Quaternion::ToEuler(Quaternion value, bool toDeg) {
         Vector3 rotation{};
         float xy = value.x * value.y;
@@ -1016,6 +1239,7 @@ namespace Unity {
         return toDeg ? rotation * Rad2Deg : rotation;
     }
 
+    // Rotates a vector by the supplied quaternion.
     inline Vector3 Quaternion::RotateVectorByQuaternion(Quaternion lhs, Vector3 rhs) {
         float x2 = lhs.x * 2.0f;
         float y2 = lhs.y * 2.0f;
@@ -1062,7 +1286,9 @@ namespace StructureUtils {
     struct DataIterator {
         T* value = nullptr;
 
+        // Creates a default DataIterator value.
         constexpr DataIterator() = default;
+        // Creates an iterator that points at the supplied data item.
         constexpr explicit DataIterator(T* value) : value(value) {}
 
         // Returns true when the iterator points at a valid value.
@@ -1882,7 +2108,9 @@ namespace Unity {
             float data[4];
         };
 
+        // Creates a default Rect value.
         constexpr Rect() : x(0.0f), y(0.0f), w(0.0f), h(0.0f) {}
+        // Creates a Rect value from the supplied components.
         constexpr Rect(float x, float y, float w, float h) : x(x), y(y), w(w), h(h) {}
 
         // Returns a writable pointer to the rectangle data.
@@ -1967,8 +2195,10 @@ namespace Unity {
     struct Matrix3x3 {
         float m_Data[9]{};
 
+        // Creates a default Matrix3x3 value.
         Matrix3x3() = default;
 
+        // Creates a Matrix3x3 value from the supplied components.
         Matrix3x3(
             float m00,
             float m01,
@@ -2044,12 +2274,15 @@ namespace Unity {
 
         float m_Data[16]{};
 
+        // Creates a default Matrix4x4 value.
         Matrix4x4() = default;
 
+        // Creates a 4x4 identity matrix.
         explicit Matrix4x4(InitIdentity) {
             SetIdentity();
         }
 
+        // Creates a 4x4 matrix by copying sixteen float values.
         explicit Matrix4x4(const float data[16]) {
             std::memcpy(m_Data, data, sizeof(m_Data));
         }

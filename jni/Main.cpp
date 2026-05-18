@@ -1345,6 +1345,7 @@ void* GetFirstMethodFromName(
     return methods.empty() ? nullptr : methods[0];
 }
 
+// Resolves a managed method once and stores its callable pointer for later use.
 template <typename T>
 bool ResolveOriginal(
     T& target,
@@ -1370,6 +1371,7 @@ bool ResolveOriginal(
     return target != nullptr;
 }
 
+// Resolves a managed method and installs a hook while preserving the original pointer.
 template <typename T>
 bool HookResolvedMethod(
     T& original,
@@ -1482,6 +1484,7 @@ bool IsIl2CppRuntimeReady() {
     return il2cpp_domain_get() != nullptr;
 }
 
+// Checks whether a managed array pointer and length are safe for bounded native reads.
 template <typename T>
 bool IsManagedArrayValid(
     const MonoStructures::Array<T>* array,
@@ -1495,6 +1498,7 @@ bool IsManagedArrayValid(
     return capacity <= static_cast<il2cpp_array_size_t>(maxItems);
 }
 
+// Returns validated managed-list data and size for safe native iteration.
 template <typename T>
 bool TryGetManagedListData(
     const MonoStructures::List<T>* list,
@@ -1539,6 +1543,7 @@ bool TryGetManagedListData(
     return true;
 }
 
+// Returns validated managed-array data and size for safe native iteration.
 template <typename T>
 bool TryGetManagedArrayData(
     const MonoStructures::Array<T>* array,
@@ -1579,6 +1584,7 @@ bool TryGetManagedArrayData(
     return true;
 }
 
+// Returns validated dictionary entry storage and a bounded scan limit.
 template <typename TKey, typename TValue>
 bool TryGetDictionaryEntries(
     const MonoStructures::Dictionary<TKey, TValue>* dictionary,
@@ -1631,6 +1637,7 @@ bool TryGetDictionaryEntries(
     return true;
 }
 
+// Copies active managed dictionary entries into a native vector for lock-free use.
 template <typename TKey, typename TValue>
 std::vector<std::pair<TKey, TValue>> CopyDictionaryEntries(
     const MonoStructures::Dictionary<TKey, TValue>* dictionary,
@@ -1723,6 +1730,7 @@ void ResolveFeatureBindings() {
 
     struct BindingResolveGuard {
         std::atomic<bool>& flag;
+        // Releases the single-flight binding-resolution flag when this pass exits.
         ~BindingResolveGuard() {
             flag.store(false);
         }
@@ -2835,6 +2843,7 @@ uint64_t GetMirrorOriginAccountId(void* maybeMirrorManager) {
     );
 }
 
+// Looks up an account pairing in a managed dictionary without exposing raw slots to callers.
 uint64_t LookupPairInDictionary(
     MonoStructures::Dictionary<uint64_t, uint64_t>* pairDict,
     uint64_t accountId
@@ -2937,6 +2946,7 @@ uint64_t GetCurrentOpponentFromManager(void* battleManager) {
     return GetCurrentOpponentFromManagerDetailed(battleManager).accountId;
 }
 
+// Finds the best current-opponent signal for an account, trying exact APIs before fallbacks.
 CurrentOpponentLookup GetCurrentOpponentForAccount(
     uint64_t accountId,
     void* battleManager,
@@ -3024,6 +3034,7 @@ bool IsRealPlayerPairingMode(void* invasionManager) {
     return true;
 }
 
+// Builds a simple round-robin pairing guess when no live opponent data is available.
 uint64_t PredictRoundRobinOpponent(
     std::vector<uint64_t> aliveAccounts,
     uint64_t selfAccountId,
@@ -3072,6 +3083,7 @@ uint64_t PredictRoundRobinOpponent(
     return 0;
 }
 
+// Reads the dump-backed invader order and filters it to currently alive accounts.
 std::vector<uint64_t> GetInvaderAccountOrder(
     void* invasionManager,
     const std::vector<uint64_t>& aliveAccounts
@@ -3903,6 +3915,7 @@ bool IsValidShopItemData(const MCLogicHeroShopItemData& shopData, int slot) {
     return true;
 }
 
+// Compares a shop buy request with the last request so repeat cooldowns can be enforced.
 bool IsSameShopBuyAttempt(
     uint64_t accountId,
     int slot,
@@ -3918,6 +3931,7 @@ bool IsSameShopBuyAttempt(
         FeatureState::LastShopBuyWasFree == isFreeBuy;
 }
 
+// Checks whether a shop purchase is outside both global and repeat-buy cooldowns.
 bool CanAttemptShopBuy(
     uint64_t accountId,
     int slot,
@@ -3946,6 +3960,7 @@ bool CanAttemptShopBuy(
     return true;
 }
 
+// Records a shop buy attempt so later ticks can throttle repeated requests.
 void MarkShopBuyAttempt(
     uint64_t accountId,
     int slot,
@@ -3985,6 +4000,7 @@ void MarkShopRefreshAttempt(std::chrono::steady_clock::time_point now) {
     FeatureState::LastShopRefreshAttempt = now;
 }
 
+// Scans visible shop slots for free, selected, or recommended heroes worth buying.
 bool HasWorthwhileShopTarget(
     uint64_t selfAccountId,
     std::chrono::steady_clock::time_point now
@@ -4258,6 +4274,7 @@ void ApplyPlayerHpFields(void* playerData, int hpValue, bool useMaxHp) {
     }
 }
 
+// Writes battle-manager power overrides for force-win and combat-value assists.
 void ApplyBattleManagerPowerFields(
     void* battleManager,
     bool forceWin,
@@ -4863,6 +4880,7 @@ bool HeroHasGroup(const HeroTableEntry& hero, int groupId) {
     return std::find(hero.groups.begin(), hero.groups.end(), groupId) != hero.groups.end();
 }
 
+// Scores a hero candidate for Auto-Play using table metadata and current targets.
 int ScoreHeroForAutoPlay(
     int heroId,
     int star,
@@ -5028,6 +5046,7 @@ std::vector<AutoPlayBoardUnit> CollectAutoPlayBoardUnits(void* battleManager) {
     return units;
 }
 
+// Checks whether another live unit already occupies a board cell.
 bool IsBoardCellOccupied(
     const std::vector<AutoPlayBoardUnit>& units,
     int x,
@@ -5067,6 +5086,7 @@ int AutoPlayNearbyColumnValue(const std::array<int, 8>& values, int x) {
         AutoPlayColumnValue(values, x + 1);
 }
 
+// Summarizes allied and enemy board positions used by formation scoring.
 AutoPlayFormationStats BuildAutoPlayFormationStats(
     const std::vector<AutoPlayBoardUnit>& selfUnits,
     const std::vector<AutoPlayBoardUnit>& enemyUnits
@@ -5121,6 +5141,7 @@ AutoPlayFormationStats BuildAutoPlayFormationStats(
     return stats;
 }
 
+// Rates one destination cell for a unit using role, cover, and enemy pressure.
 int ScoreBoardCellForUnit(
     const AutoPlayBoardUnit& unit,
     int x,
@@ -5192,6 +5213,7 @@ int ScoreBoardCellForUnit(
     return score;
 }
 
+// Chooses the best bounded formation move and strategic focus for the current board.
 AutoPlayBoardPlan BuildAutoPlayBoardPlan(
     const AutoPlaySnapshot& snapshot,
     const std::vector<AutoPlayBoardUnit>& selfUnits,
@@ -5309,6 +5331,7 @@ void ApplyAutoPlayShopTargets(const AutoPlayBoardPlan& plan, const AutoPlaySnaps
     SetShopHeroTarget(targetHero, state);
 }
 
+// Verifies a board cell is valid and not occupied before attempting a move.
 bool IsLikelyFreeBoardCell(
     const std::vector<AutoPlayBoardUnit>& selfUnits,
     int x,
@@ -5330,6 +5353,7 @@ bool IsLikelyFreeBoardCell(
     return true;
 }
 
+// Attempts one high-value Auto-Play formation move when the cooldown allows it.
 bool TryAutoPlaySmartFormation(
     const AutoPlaySnapshot& snapshot,
     const AutoPlayBoardPlan& plan,
@@ -5469,6 +5493,7 @@ int ScoreAutoPlayCard(int cardId, const AutoPlayBoardPlan& plan, const AutoPlayS
     return score;
 }
 
+// Publishes the best Go Go Card choice for the current Auto-Play plan.
 void ApplyAutoPlayGoGoCardChoice(
     const AutoPlaySnapshot& snapshot,
     const AutoPlayBoardPlan& plan
@@ -5610,6 +5635,7 @@ int ScoreAuctionRewardItem(void* rewardItem, const AutoPlayBoardPlan& plan, cons
     return score;
 }
 
+// Evaluates auction slots and bids only when the gold plan allows spending.
 bool TryAutoPlayAuction(
     const AutoPlaySnapshot& snapshot,
     const AutoPlayBoardPlan& plan,
@@ -6193,6 +6219,7 @@ void PublishAutoPlayGoldPlan(const AutoPlayGoldPlan& plan) {
     FeatureState::AutoPlayHoldInterest = plan.holdForInterest;
 }
 
+// Applies Auto-Play ownership of Shop, Combat, and Arena assist toggles.
 void ApplyAutoPlayPolicy(
     const AutoPlaySnapshot& snapshot,
     int strategy,
@@ -6275,6 +6302,7 @@ void StopAutoPlayRuntime(uint64_t selfAccountId) {
     FeatureState::AutoPlayWasRunning = false;
 }
 
+// Starts or refreshes the built-in AI on cooldown without replaying it every tick.
 void RunBuiltInAutoPlayAI(
     uint64_t selfAccountId,
     const AutoPlaySnapshot& snapshot,
@@ -6329,6 +6357,7 @@ void RunBuiltInAutoPlayAI(
     }
 }
 
+// Triggers a level-up only when population pressure, budget, and cooldown all allow it.
 void TryAutoPlayLevelUp(
     const AutoPlaySnapshot& snapshot,
     const AutoPlayGoldPlan& goldPlan,
@@ -8303,6 +8332,7 @@ bool DrawAtomicCheckbox(const char* label, std::atomic<bool>& value) {
     return true;
 }
 
+// Draws a combo box backed by an atomic integer without exposing unlocked UI state.
 bool DrawAtomicCombo(
     const char* label,
     std::atomic<int>& value,
@@ -8319,6 +8349,7 @@ bool DrawAtomicCombo(
     return true;
 }
 
+// Draws an integer input backed by an atomic value and publishes only committed edits.
 bool DrawAtomicInputInt(
     const char* label,
     std::atomic<int>& value,
@@ -8336,6 +8367,7 @@ bool DrawAtomicInputInt(
     return true;
 }
 
+// Draws a float slider backed by an atomic value and publishes only committed edits.
 bool DrawAtomicSliderFloat(
     const char* label,
     std::atomic<float>& value,
@@ -8353,6 +8385,7 @@ bool DrawAtomicSliderFloat(
     return true;
 }
 
+// Draws a float input backed by an atomic value and publishes only committed edits.
 bool DrawAtomicInputFloat(
     const char* label,
     std::atomic<float>& value,
@@ -9123,6 +9156,7 @@ void DrawTestBindingRows() {
     ImGui::EndTable();
 }
 
+// Draws read-only round and phase diagnostics for the Test tab.
 void DrawTestRoundRows(
     uint64_t selfAccountId,
     uint64_t targetAccountId,
@@ -10071,6 +10105,7 @@ void ResetOpponentPredictionHistoryIfNeeded(uint64_t selfAccountId) {
     PredictionCache::HistorySelfAccountId = selfAccountId;
 }
 
+// Stores one round of observed opponent data for prediction history.
 void RememberOpponentObservation(
     const CurrentOpponentObservation& observation,
     uint32_t round
@@ -10266,6 +10301,7 @@ bool ContainsAccountId(const std::vector<uint64_t>& accounts, uint64_t accountId
     return std::find(accounts.begin(), accounts.end(), accountId) != accounts.end();
 }
 
+// Uses recent opponent cycles to guess who should be next in the pairing queue.
 uint64_t PredictHistoryQueueOpponent(
     uint64_t selfAccountId,
     const std::vector<uint64_t>& orderedAliveAccounts
@@ -10319,6 +10355,7 @@ uint64_t PredictHistoryQueueOpponent(
     return bestAccountId;
 }
 
+// Refreshes per-player current-opponent observations used by predictions and HUD text.
 void RefreshPredictionOpponentCache(
     uint64_t selfAccountId,
     void* selfManager,
@@ -10400,6 +10437,7 @@ void TickOpponentPredictionHistory(uint64_t selfAccountId) {
     RefreshPredictionOpponentCache(selfAccountId, selfManager, invasionManager, players);
 }
 
+// Returns the strongest exact next-opponent signal before weighted scoring runs.
 uint64_t FindExactPredictedOpponent(
     uint64_t selfAccountId,
     void* selfManager,
@@ -11966,6 +12004,7 @@ namespace Hooks {
         }
     }
 
+    // Forces free-buy checks to succeed when free economy assistance is enabled.
     bool MCLogicBattleData_ILOGIC_IsCurrFreeBuy(
         void* instance,
         uint64_t accountId,
@@ -12017,6 +12056,7 @@ namespace Hooks {
             0;
     }
 
+    // Masks recorded self losses when HP-loss prevention is active.
     bool MCLogicBattleData_ILOGIC_GetBattleResultHistory(
         void* instance,
         uint64_t accountId,
@@ -12035,6 +12075,7 @@ namespace Hooks {
             false;
     }
 
+    // Allows upgrade checks to pass when free economy assistance is active.
     bool MCLogicBattleData_ILOGIC_CanUpgrade(
         void* instance,
         uint64_t accountId,
@@ -12083,6 +12124,7 @@ namespace Hooks {
             false;
     }
 
+    // Suppresses self HP loss when prevention is enabled, then forwards safe changes.
     void MCLogicBattleManager_OnModifyPlayerBlood(
         void* instance,
         int reduceHp,
@@ -12105,6 +12147,7 @@ namespace Hooks {
         }
     }
 
+    // Forces selected self fight results to win before forwarding to the original method.
     void MCLogicBattleManager_OnFightOver(
         void* instance,
         bool failed,
@@ -12126,6 +12169,7 @@ namespace Hooks {
         }
     }
 
+    // Keeps regular active-synergy checks satisfied when synergy forcing is enabled.
     bool MCBondUtil_CheckRelationActive_Config(
         void* config,
         int curActiveCount,
@@ -12144,6 +12188,7 @@ namespace Hooks {
             false;
     }
 
+    // Keeps special-condition synergy checks satisfied when synergy forcing is enabled.
     bool MCBondUtil_CheckRelationActive_Special(
         void* specialCondition,
         int needCount,

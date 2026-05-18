@@ -65,7 +65,7 @@ Target default yang didukung:
 
 ## Konteks Game
 
-Riset eksternal yang dicek pada 2026-05-17 menjaga konteks proyek tetap selaras
+Riset eksternal yang dicek pada 2026-05-18 menjaga konteks proyek tetap selaras
 dengan game live tanpa menganggap saran meta saat ini sebagai kebenaran native
 yang stabil.
 
@@ -73,10 +73,11 @@ Referensi publik utama:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   mengidentifikasi game ini sebagai judul strategi multiplayer auto-chess dari
-  Vizta Games, mencantumkan 10M+ download, serta mengarah ke website resmi dan
-  kanal YouTube. Tanggal update store dapat berbeda berdasarkan region atau
-  cache, jadi gunakan listing untuk identitas produk dan link, bukan asumsi
-  native binding.
+  Vizta Games, saat ini mencantumkan 50M+ download dan update store 14 Apr
+  2026 pada region yang dicek, serta mengarah ke website resmi dan kanal
+  YouTube. Jumlah download dan tanggal update store dapat berbeda berdasarkan
+  region atau cache, jadi gunakan listing untuk identitas produk dan link,
+  bukan asumsi native binding.
 - [Website resmi](https://magicchessgogo.com/) menjelaskan loop inti sebagai
   recruit dan upgrade hero terinspirasi MLBB, membentuk lineup untuk battle
   8-player, memakai skill Commander, memilih Go Go Cards pada tahap penting,
@@ -265,6 +266,9 @@ Secara umum, proyek ini berisi:
   opponent, unit board, auction, dan strategi yang dipakai overlay serta tick
   fitur yang di-throttle.
 - Local reference artifacts untuk validasi signature method, field, dan type.
+- Komentar tingkat fungsi dijaga pada runtime function milik proyek di
+  `jni/Main.cpp` dan helper shared layout di `jni/structures/Structures.hpp`
+  agar review binding dan layout berikutnya dimulai dari intent yang eksplisit.
 
 Sebagian besar logic fitur tetap berada di `jni/Main.cpp` agar native entry point, runtime state, dan retry behavior mudah diperiksa. Refactor besar sebaiknya tetap mempertahankan lifecycle binding yang ada, kecuali refactor tersebut memang secara eksplisit mengubah desain tersebut.
 
@@ -566,6 +570,9 @@ area yang rawan bug berikut:
 - SpeedHack mengubah time scale Unity global. Fitur ini harus tetap reset ke
   `1.0x` saat dinonaktifkan, saat state battle aktif hilang, atau saat feature
   state di-reset.
+- Komentar fungsi kini mencakup semua definisi native function milik proyek di
+  `jni/Main.cpp` dan `jni/structures/Structures.hpp`; helper baru harus menjaga
+  coverage tersebut, bukan hanya mengandalkan komentar section.
 
 ## Catatan Development
 
@@ -575,7 +582,9 @@ area yang rawan bug berikut:
   memakai akses offset, dan pertahankan helper raw IL2CPP/static untuk field
   static atau setter yang membutuhkan behavior runtime-managed.
 - Pertahankan runtime code fitur di `jni/Main.cpp` kecuali refactor memang diminta secara eksplisit.
-- Gunakan section lokal yang jelas dan komentar singkat di sekitar IL2CPP call yang berisiko.
+- Gunakan section lokal yang jelas dan jaga komentar fungsi tetap sesuai,
+  terutama di sekitar IL2CPP call berisiko, hook, layout value-type, dan batas
+  timing.
 - Pertahankan urutan boot saat ini: process gate, setup thread, hook
   `eglSwapBuffers` lebih awal, tunggu `liblogic.so`, resolve export IL2CPP,
   attach setup thread, hook `GetTouch`, lalu inisialisasi overlay di render

@@ -65,16 +65,17 @@ The default supported target is:
 
 ## Game Context
 
-External research checked on 2026-05-17 keeps the project context aligned with
+External research checked on 2026-05-18 keeps the project context aligned with
 the live game without treating current meta advice as stable native truth.
 
 Primary public references:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   identifies the game as an auto-chess, multiplayer strategy title by Vizta
-  Games, lists 10M+ downloads, and points to the official website and YouTube
-  channel. Store update dates can vary by region or cache, so use the listing
-  for product identity and links rather than native binding assumptions.
+  Games, currently lists 50M+ downloads and an Apr 14, 2026 store update in the
+  checked region, and points to the official website and YouTube channel. Store
+  counts and update dates can vary by region or cache, so use the listing for
+  product identity and links rather than native binding assumptions.
 - [Official website](https://magicchessgogo.com/) describes the core loop as
   recruiting and upgrading MLBB-inspired heroes, forming lineups for 8-player
   battles, using Commander skills, selecting Go Go Cards at key stages, and
@@ -259,6 +260,9 @@ At a high level, the project contains:
   opponent, board-unit, auction, and strategy data used by the overlay and
   throttled feature ticks.
 - Local reference artifacts used for method, field, and type signature validation.
+- Function-level comments are kept on project-owned runtime functions in
+  `jni/Main.cpp` and shared layout helpers in `jni/structures/Structures.hpp`
+  so future binding and layout reviews can start from explicit intent.
 
 The project keeps most feature logic in `jni/Main.cpp` to make native entry points, runtime state, and retry behavior easy to inspect. Broader refactors should preserve the existing binding lifecycle unless the refactor explicitly changes that design.
 
@@ -554,6 +558,9 @@ the following bug-prone areas:
 - SpeedHack changes global Unity time scale. It must continue to reset to
   `1.0x` when disabled, when the active battle state is gone, or when feature
   state is reset.
+- Function comments now cover all project-owned native function definitions in
+  `jni/Main.cpp` and `jni/structures/Structures.hpp`; new helpers should keep
+  that coverage intact rather than relying on section-level comments alone.
 
 ## Development Notes
 
@@ -563,7 +570,9 @@ the following bug-prone areas:
   benefit from offset access, and keep raw IL2CPP/static helpers for static
   fields or runtime-managed setter behavior.
 - Keep feature runtime code in `jni/Main.cpp` unless a refactor is explicitly requested.
-- Use clear local sections and concise comments around risky IL2CPP calls.
+- Use clear local sections and keep the concise function comments current,
+  especially around risky IL2CPP calls, hooks, value-type layouts, and timing
+  boundaries.
 - Preserve the current boot order: process gate, setup thread, early
   `eglSwapBuffers` hook, `liblogic.so` wait, IL2CPP export resolution, setup
   thread attach, `GetTouch` hook, then render-thread overlay initialization.

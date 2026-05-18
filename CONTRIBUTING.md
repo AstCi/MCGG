@@ -54,7 +54,10 @@ git lfs pull
   mechanics rather than seasonal tier claims. Current public references describe
   MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
   skills, Go Go Cards, economy/interest decisions, synergies, equipment,
-  auctions, board placement, and round-specific supplies.
+  auctions, board placement, and round-specific supplies. Public context was
+  last checked on 2026-05-18; Google Play showed 50M+ downloads and an Apr 14,
+  2026 store update in the checked region, but those store values should remain
+  product context rather than native binding assumptions.
 - Prediction research should treat public scouting and positioning advice as
   weak heuristics. Runtime current-opponent data, invader order, recent-cycle
   learning, cycle-gap distance, and local history should drive predictions
@@ -182,7 +185,10 @@ Follow the existing C++ style in `jni/Main.cpp`:
 - Use 4-space indentation.
 - Prefer explicit pointer types.
 - Keep helper code small and direct.
-- Add short comments above non-obvious functions or risky blocks.
+- Keep the existing short comment above each project-owned native function in
+  `jni/Main.cpp` and `jni/structures/Structures.hpp`; add extra block comments
+  only where risky IL2CPP calls, hooks, value-type layouts, or timing-sensitive
+  behavior need more context.
 - Keep existing UI element names, method names, and hook names stable unless a
   rename is part of the requested change.
 - Keep appearance changes local to the existing theme/font setup unless a

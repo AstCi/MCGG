@@ -36,14 +36,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Diagnostics**: Runtime Status and Test tabs expose binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
-- **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects.
+- **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects. Function-level comments document the shared layout helpers so offset and value-type reviews do not rely on names alone.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
 
 ### Game Context From External Research
 
-- Current external research was checked on 2026-05-17 using the Google Play
+- Current external research was checked on 2026-05-18 using the Google Play
   listing, official website, official YouTube channel, and gameplay/guide
   material.
+- Google Play currently identifies the title as a Vizta Games strategy
+  auto-chess game, shows 50M+ downloads and an Apr 14, 2026 store update in the
+  checked region, and links to the official site and YouTube channel. Treat
+  those figures as product context because store metadata can vary by
+  region/cache.
 - Public sources frame MCGG as an 8-player auto-battler built around recruiting,
   merging, deploying, and repositioning MLBB-inspired heroes while managing
   gold, level, population, HP, equipment, synergies, Commander skills, Go Go
@@ -137,9 +142,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   IL2CPP/static helpers for static fields or cases that need runtime-managed
   setter behavior.
 - **HUD diagnostics**: Keep the next-enemy HUD as lightweight foreground text near the bottom center. Reuse throttled prediction/current-opponent data and avoid rebuilding prediction tables every render frame.
-- **Outside comments**: Keep external boundary functions, hooks, and top-level
-  runtime helpers documented with concise comments that explain their contract
-  or safety boundary, not line-by-line narration.
+- **Function comments**: Keep the current function-level comment coverage for
+  `jni/Main.cpp` and `jni/structures/Structures.hpp`. Comments should explain a
+  function's contract, safety boundary, or layout meaning, not narrate obvious
+  line-by-line control flow.
 - **Test diagnostics**: Keep Test additions read-only unless explicitly requested otherwise, and verify class names, method names, parameter counts, return types, and fields against `dump/dump.cs`.
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.
 - **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Wait for non-delayed, non-spectate, operable shop panel state before buy or refresh UI calls. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.
@@ -165,7 +171,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   the controller.
 - **Arena round control**: Preserve the separate Arena tick and bounded Skip Round cooldown. Verify `MCLogicBattleData.get_logicRoundMgr`, `LogicRoundMgr.SetRound(UInt32)`, and `LogicRoundMgr.NextRound(Boolean)` against `dump/dump.cs`. Automatic skip should wait out fight/result phases and avoid repeating the same source/target request.
 - **Arena SpeedHack**: Use `UnityEngine.Time.set_timeScale(Single)` and reset time scale to normal when the feature is disabled, leaves active battle state, or feature state is reset.
-- **Comments**: Add concise comments before risky IL2CPP calls, hook signatures, value-type layouts, or timing-sensitive blocks.
+- **Comments**: Preserve concise comments before project-owned function
+  definitions and add extra notes only for risky IL2CPP calls, hook signatures,
+  value-type layouts, or timing-sensitive blocks.
 - **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`) unless explicitly requested.
 - **Appearance**: Keep theme/font changes in the existing appearance setup and preserve fallback to the default ImGui font when Noto Sans CJK is unavailable. When adding themes, keep `kAppearanceThemes` and `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme index `1` for existing configs.
 - **Settings**: Keep persistence in the project config file under the game app data directory; do not re-enable ImGui `.ini` persistence unless explicitly requested.
