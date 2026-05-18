@@ -33,6 +33,12 @@ git lfs install
 git lfs pull
 ```
 
+Build the pinned OpenSSL, libpsl, and curl submodules before the native module:
+
+```sh
+bash jni/build-curl-android.sh
+```
+
 ## Development Guidelines
 
 - Keep source changes focused on the requested feature or fix.
@@ -46,6 +52,12 @@ git lfs pull
 - Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
   intentionally changes.
+- Keep the curl, libpsl, and OpenSSL submodules pinned and use
+  `jni/build-curl-android.sh` to generate `obj/curl-install/lib/libcurl.a`,
+  `obj/libpsl-install/lib/libpsl.a`, `obj/openssl-install/lib/libssl.a`, and
+  `obj/openssl-install/lib/libcrypto.a` before native builds. Curl should be
+  configured with the pinned OpenSSL `4.0.0` TLS backend, libpsl support, and
+  without curl feature-disabling flags.
 - Keep `jni/Application.mk` app-wide stability flags aligned with the current
   release profile: stack protector, fortify, conservative alias/overflow/null
   check behavior, unwind tables, hidden inline visibility, RELRO, immediate
@@ -141,9 +153,12 @@ git lfs pull
 - Keep Settings save/load behavior scoped to the project config file under the
   running game package directory, normally
   `/data/data/<game-package>/files/mcgg_config.ini`.
-- Do not commit generated `libs/` or `obj/` output.
+- Do not commit generated `libs/` or `obj/` output, including curl/libpsl/OpenSSL
+  build output under `obj/curl-*`, `obj/libpsl-*`, `obj/openssl-*`, and related
+  install dirs.
 - Do not edit vendored directories such as `jni/Il2CppVersions/`, `jni/imgui/`,
-  or `jni/xDL/` unless the change explicitly requires it.
+  `jni/xDL/`, `jni/curl/`, `jni/libpsl/`, or `jni/openssl/` unless the change
+  explicitly requires it.
 
 Current user-facing overlay areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. Auto-Play includes adaptive strategy pressure,
@@ -273,12 +288,17 @@ Use this checklist when looking for hidden bugs or logic flaws:
 Run this before submitting native code changes:
 
 ```sh
+bash jni/build-curl-android.sh
 ndk-build -C jni
 ```
 
-The expected output is:
+The expected outputs are:
 
 ```text
+obj/openssl-install/lib/libssl.a
+obj/openssl-install/lib/libcrypto.a
+obj/libpsl-install/lib/libpsl.a
+obj/curl-install/lib/libcurl.a
 libs/arm64-v8a/libmain.so
 ```
 
@@ -292,9 +312,10 @@ submitting documentation-only repository refreshes.
 ## Release Workflow
 
 The `.github/workflows/build.yml` workflow runs for pushes to `master`, pull
-requests targeting `master`, and manual dispatches. It builds with Android NDK
-`29.0.14206865`, packages `libs/`, writes `BUILD_INFO.txt`, and uploads the zip
-as a workflow artifact.
+requests targeting `master`, and manual dispatches. It installs the curl,
+libpsl, and OpenSSL build prerequisites, builds the static OpenSSL, libpsl, and
+curl archives, builds with Android NDK `29.0.14206865`, packages `libs/`, writes
+`BUILD_INFO.txt`, and uploads the zip as a workflow artifact.
 
 For non-pull-request runs, the workflow publishes or updates a GitHub release.
 Release notes are generated from Git history and include commit descriptions

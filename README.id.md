@@ -340,6 +340,8 @@ Pastikan tool berikut sudah tersedia sebelum build:
 - Git LFS
 - Android SDK
 - Android NDK r29
+- Autotools untuk build submodule curl dan libpsl: `autoconf`, `automake`,
+  `autopoint`, `gettext`, `libtool`, `pkg-config`, dan `perl`
 - `ndk-build` tersedia di `PATH`
 - Environment target Android `arm64-v8a`
 
@@ -376,6 +378,7 @@ git lfs pull
 Build dari root repository:
 
 ```sh
+bash jni/build-curl-android.sh
 ndk-build -C jni
 ```
 
@@ -390,13 +393,23 @@ libs/arm64-v8a/libmain.so
 Command build standar:
 
 ```sh
+bash jni/build-curl-android.sh
 ndk-build -C jni
 ```
+
+`jni/build-curl-android.sh` membangun submodule OpenSSL `4.0.0` yang dipin
+terlebih dahulu, lalu membangun libpsl dan submodule curl yang dipin sebagai
+static library `arm64-v8a` di `obj/libpsl-install/lib/libpsl.a` dan
+`obj/curl-install/lib/libcurl.a`. Script ini juga menginstal header curl di
+`obj/curl-install/include/`. `jni/Android.mk` menautkan archive prebuilt itu ke
+module `main`, jadi jalankan ulang script ini setelah membersihkan `obj/` atau
+setelah mengubah submodule curl, libpsl, atau OpenSSL.
 
 Untuk clean rebuild:
 
 ```sh
 ndk-build -C jni clean
+bash jni/build-curl-android.sh
 ndk-build -C jni
 ```
 
@@ -420,11 +433,15 @@ ndk-build --version
 .github/workflows/            Workflow build GitHub Actions
 jni/Android.mk                Konfigurasi build native module
 jni/Application.mk            Pengaturan ABI, platform, STL, dan NDK
+jni/build-curl-android.sh     Script build static OpenSSL, libpsl, dan curl untuk Android
 jni/Main.cpp                  Hook setup, helper IL2CPP, runtime state, dan overlay ImGui
 jni/structures/Structures.hpp Helper type Unity, Mono, delegate, event, dan collection
+jni/curl/                     Submodule curl yang dipin untuk static libcurl
 jni/dobby/                    Header Dobby dan static library arm64
 jni/Il2CppVersions/           Header Unity IL2CPP dan deklarasi API
 jni/imgui/                    Source Dear ImGui
+jni/libpsl/                   Submodule libpsl yang dipin untuk dukungan public suffix curl
+jni/openssl/                  Submodule OpenSSL 4.0.0 yang dipin untuk TLS curl
 jni/xDL/                      Utility dynamic loader Android xDL
 libs/                         Output generated native shared library
 obj/                          Output intermediate build NDK
@@ -437,8 +454,19 @@ obj/                          Output intermediate build NDK
 Native module didefinisikan di `jni/Android.mk`:
 
 ```make
+LOCAL_MODULE := ssl
+LOCAL_MODULE := crypto
+LOCAL_MODULE := psl
+LOCAL_MODULE := curl
+...
 LOCAL_MODULE := main
 ```
+
+Module `ssl`, `crypto`, `psl`, dan `curl` adalah archive static prebuilt yang
+dibuat oleh `jni/build-curl-android.sh` di bawah `obj/openssl-install/`,
+`obj/libpsl-install/`, dan `obj/curl-install/`. Curl dikonfigurasi dengan
+backend TLS OpenSSL dan dukungan libpsl, dan script tidak mengirim flag yang
+menonaktifkan fitur curl.
 
 Target Android aktif dikonfigurasi di `jni/Application.mk`:
 
@@ -481,9 +509,11 @@ Pastikan nilai tersebut tetap selaras dengan header Unity di `jni/Il2CppVersions
 
 ## Packaging Rilis CI
 
-Workflow GitHub Actions di `.github/workflows/build.yml` membangun native module
-dengan Android NDK `29.0.14206865`, mengunggah zip rilis sebagai workflow
-artifact, dan memublikasikan GitHub release untuk run yang bukan pull request.
+Workflow GitHub Actions di `.github/workflows/build.yml` menginstal prerequisite
+build curl/libpsl/OpenSSL, membangun archive static OpenSSL, libpsl, dan curl,
+membangun native module dengan Android NDK `29.0.14206865`, mengunggah zip rilis
+sebagai workflow artifact, dan memublikasikan GitHub release untuk run yang
+bukan pull request.
 
 Nama asset rilis memakai prefix proyek, versi berbasis tanggal UTC, metadata
 workflow run, dan short commit SHA. Setiap package menyertakan
@@ -651,6 +681,9 @@ area yang rawan bug berikut:
 - Pertahankan default ABI sebagai `arm64-v8a`.
 - Jaga kompatibilitas Unity tetap selaras dengan `2019.4.33f1`.
 - Jaga mode bahasa native tetap selaras dengan `c++26` kecuali konfigurasi build memang diubah secara sengaja.
+- Pertahankan submodule curl, libpsl, dan OpenSSL tetap dipin, lalu rebuild
+  `obj/openssl-install/`, `obj/libpsl-install/`, serta `obj/curl-install/` dengan
+  `jni/build-curl-android.sh` sebelum menjalankan `ndk-build`.
 - Jangan commit output generated `obj/` atau `libs/`.
 - Hindari menambahkan instruksi deployment runtime atau instruksi yang berorientasi penyalahgunaan ke dokumentasi proyek.
 
@@ -687,6 +720,22 @@ Lalu cek:
 ```sh
 which ndk-build
 ```
+
+### `libcurl.a`, `libpsl.a`, atau static library OpenSSL hilang
+
+`ndk-build` mengharapkan static library generated di
+`obj/curl-install/lib/libcurl.a`, `obj/libpsl-install/lib/libpsl.a`,
+`obj/openssl-install/lib/libssl.a`, dan `obj/openssl-install/lib/libcrypto.a`.
+Jika file tersebut belum ada, inisialisasi submodule dan rebuild:
+
+```sh
+git submodule update --init --recursive
+bash jni/build-curl-android.sh
+```
+
+Build curl/libpsl membutuhkan `autoconf`, `automake`, `autopoint`, `gettext`,
+`libtool`, `pkg-config`, dan `perl` karena checkout Git yang dipin dibangun dari
+source.
 
 ### Output ABI salah
 
@@ -755,6 +804,8 @@ Periksa log GitHub Actions untuk:
 - Mismatch versi Android NDK.
 - Submodule belum tersedia.
 - File Git LFS belum ter-pull.
+- Tool build curl/libpsl/OpenSSL atau static library generated di bawah `obj/`
+  belum tersedia.
 - Compile error di `jni/Main.cpp` atau native source pihak ketiga.
 - Include path yang salah di `jni/Android.mk`.
 
@@ -773,6 +824,9 @@ Periksa log GitHub Actions untuk:
 - Prediksi opponent bersifat probabilistik saat data current-pair belum tersedia;
   data live `m_CurPairDict` tetap menjadi prioritas saat runtime mengeksposnya.
 - Font Noto Sans CJK embedded menambah ukuran input source native dan waktu build atlas font.
+- Curl dikonfigurasi dengan backend TLS OpenSSL `4.0.0` yang dipin, dukungan
+  libpsl, dan tanpa flag yang menonaktifkan fitur curl; fitur opsional tetap
+  bergantung pada library target yang tersedia saat langkah configure.
 - Termux tidak dikelola sebagai target build resmi.
 - Dokumentasi sengaja tidak menyertakan instruksi deployment runtime dan instruksi yang berorientasi penyalahgunaan.
 
@@ -811,6 +865,9 @@ Repository ini dapat menyertakan atau mereferensikan komponen pihak ketiga seper
 
 - Dear ImGui
 - Dobby
+- curl / libcurl
+- libpsl
+- OpenSSL
 - xDL
 - Header Unity IL2CPP atau deklarasi kompatibilitas
 - Android NDK dan platform headers

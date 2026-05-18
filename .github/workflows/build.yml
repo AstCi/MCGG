@@ -30,6 +30,17 @@ jobs:
         with:
           packages: "tools platform-tools ndk;${{ env.ANDROID_NDK_VERSION }}"
 
+      - name: Install curl and libpsl build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq autoconf automake autopoint gettext libtool pkg-config perl
+
+      - name: Build OpenSSL, libpsl, and curl static libraries
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          export NDK="$SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+          bash jni/build-curl-android.sh
+
       - name: Build with ndk-build
         run: |
           SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"

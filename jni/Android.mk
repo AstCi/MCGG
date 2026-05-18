@@ -10,6 +10,38 @@ include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
+LOCAL_MODULE := crypto
+
+LOCAL_SRC_FILES := $(LOCAL_PATH)/../obj/openssl-install/lib/libcrypto.a
+
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := ssl
+
+LOCAL_SRC_FILES := $(LOCAL_PATH)/../obj/openssl-install/lib/libssl.a
+
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := psl
+
+LOCAL_SRC_FILES := $(LOCAL_PATH)/../obj/libpsl-install/lib/libpsl.a
+
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+
+LOCAL_MODULE := curl
+
+LOCAL_SRC_FILES := $(LOCAL_PATH)/../obj/curl-install/lib/libcurl.a
+
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+
 LOCAL_MODULE := main
 
 LOCAL_CFLAGS := \
@@ -47,11 +79,14 @@ LOCAL_LDFLAGS := \
 
 LOCAL_LDLIBS := \
     -llog \
+    -ldl \
+    -lz \
     -landroid \
     -lEGL \
     -lGLESv3
 
 LOCAL_C_INCLUDES := \
+    $(LOCAL_PATH)/../obj/curl-install/include/ \
     $(LOCAL_PATH)/xDL/xdl/src/main/cpp/include/ \
     $(LOCAL_PATH)/xDL/xdl/src/main/cpp/ \
     $(LOCAL_PATH)/imgui/ \
@@ -70,6 +105,10 @@ LOCAL_SRC_FILES := \
     $(wildcard $(LOCAL_PATH)/*.c*)
 
 LOCAL_STATIC_LIBRARIES := \
+    curl \
+    psl \
+    ssl \
+    crypto \
     dobby
 
 include $(BUILD_SHARED_LIBRARY)

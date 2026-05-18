@@ -7,15 +7,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build & Setup
 - **Initialize submodules**: `git submodule update --init --recursive`
 - **Pull LFS assets**: `git lfs pull`
+- **Build OpenSSL, libpsl, and curl static libraries**: `bash jni/build-curl-android.sh`
 - **Build native library**: `ndk-build -C jni`
 - **Build Output**: `libs/arm64-v8a/libmain.so`
 
 ### Verification
-- There is no unit test framework. Verification is a successful build: `ndk-build -C jni`.
+- There is no unit test framework. Verification is a successful curl and native
+  build: `bash jni/build-curl-android.sh` then `ndk-build -C jni`.
 - For IL2CPP changes, verify method signatures and field offsets against `dump/dump.cs`.
 - Run `git diff --check` for native or mixed code changes.
 - For documentation-only edits, inspect the Markdown diff before finishing.
-- The GitHub Actions release workflow is `.github/workflows/build.yml`; it builds with Android NDK `29.0.14206865`, packages `libs/`, and publishes release notes that include commit descriptions.
+- The GitHub Actions release workflow is `.github/workflows/build.yml`; it
+  installs curl/libpsl/OpenSSL build tools, builds the static OpenSSL, libpsl, and curl
+  archives, builds with Android NDK `29.0.14206865`, packages `libs/`, and
+  publishes release notes that include commit descriptions.
 - `jni/Application.mk` carries app-wide stability flags for stack protection,
   fortify checks, conservative alias/overflow/null-check behavior, unwind
   tables, hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
@@ -35,6 +40,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   preserve IL2CPP write barriers.
 - **Diagnostics**: The Test tab houses Runtime Status plus binding readiness, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history.
 - **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
+- **curl Build**: `jni/curl`, `jni/libpsl`, and `jni/openssl` are pinned
+  submodules built by `jni/build-curl-android.sh` into `obj/curl-install/`,
+  `obj/libpsl-install/`, and `obj/openssl-install/`. `jni/Android.mk` links
+  `libcurl.a`, `libpsl.a`, `libssl.a`, and `libcrypto.a` as prebuilt static
+  libraries before the main module build.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects. Function-level comments document the shared layout helpers so offset and value-type reviews do not rely on names alone.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
@@ -104,6 +114,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `-fvisibility-inlines-hidden`, `-Wl,-z,relro`, `-Wl,-z,now`, and
   `-Wl,--as-needed`
 - **Native C Flags**: `-Oz` and `-DNDEBUG` by default; `NDK_DEBUG=1` adds `-O0`
+- **curl Static Library**: pinned curl submodule at `jni/curl`, pinned libpsl
+  submodule at `jni/libpsl`, pinned OpenSSL `4.0.0` submodule at `jni/openssl`,
+  generated archives at `obj/curl-install/lib/libcurl.a`,
+  `obj/libpsl-install/lib/libpsl.a`, `obj/openssl-install/lib/libssl.a`, and
+  `obj/openssl-install/lib/libcrypto.a`. Curl is configured with OpenSSL TLS,
+  libpsl support, and without curl feature-disabling flags.
 
 ### Runtime Audit Focus
 
@@ -181,6 +197,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   definitions and add extra notes only for risky IL2CPP calls, hook signatures,
   value-type layouts, or timing-sensitive blocks.
 - **Commit Messages**: Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Use short typed messages such as `feat(autoplay): add gold interest planning`, `fix(ui): resolve main menu tab switching`, or `docs: update runtime audit guidance`. Accepted types: `feat`, `fix`, `perf`, `refactor`, `docs`, `build`, `ci`, `chore`, `revert`, `test`. Common scopes: `main`, `ui`, `shop`, `arena`, `autoplay`, `hud`, `appearance`, `test`, `readme`. Release notes are generated from commit subjects and body text, so include enough context for commits to stand alone.
-- **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`) unless explicitly requested.
+- **Scope**: Do not modify vendored directories (`jni/imgui/`, `jni/xDL/`, `jni/dobby/`, `jni/Il2CppVersions/`, `jni/curl/`, `jni/libpsl/`, `jni/openssl/`) unless explicitly requested.
 - **Appearance**: Keep theme/font changes in the existing appearance setup and preserve fallback to the default ImGui font when Noto Sans CJK is unavailable. When adding themes, keep `kAppearanceThemes` and `Issue707ThemePalette` entries aligned and preserve Catppuccin Mocha at theme index `1` for existing configs.
 - **Settings**: Keep persistence in the project config file under the game app data directory; do not re-enable ImGui `.ini` persistence unless explicitly requested.

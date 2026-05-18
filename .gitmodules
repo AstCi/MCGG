@@ -7,3 +7,12 @@
 [submodule "jni/xDL"]
 	path = jni/xDL
 	url = https://github.com/hexhacking/xDL
+[submodule "jni/curl"]
+	path = jni/curl
+	url = https://github.com/curl/curl.git
+[submodule "jni/openssl"]
+	path = jni/openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "jni/libpsl"]
+	path = jni/libpsl
+	url = https://github.com/rockdaboot/libpsl.git

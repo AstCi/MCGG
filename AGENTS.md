@@ -25,8 +25,11 @@ so process loading is not blocked by hook delays.
 `dump/dump.cs` is the IL2CPP signature reference. Use it before changing native
 method pointers, hook signatures, value-type layouts, or field offsets.
 Vendored or external components live under `jni/dobby/`, `jni/imgui/`,
-`jni/xDL/`, and `jni/Il2CppVersions/`. Build output is written to `libs/` and
-`obj/`; do not treat these as source modules.
+`jni/xDL/`, `jni/curl/`, `jni/libpsl/`, `jni/openssl/`, and
+`jni/Il2CppVersions/`. The project-owned `jni/build-curl-android.sh` script
+builds OpenSSL, libpsl, and curl into `obj/openssl-install/`,
+`obj/libpsl-install/`, and `obj/curl-install/` before `ndk-build`. Build output
+is written to `libs/` and `obj/`; do not treat these as source modules.
 
 ## Game Context & External Research
 
@@ -79,6 +82,16 @@ git lfs pull
 Downloads Git LFS-managed files such as large dumps or binary assets.
 
 ```sh
+./jni/build-curl-android.sh
+```
+
+Builds the pinned OpenSSL `4.0.0`, libpsl, and curl submodules as static Android
+libraries at `obj/openssl-install/`, `obj/libpsl-install/lib/libpsl.a`, and
+`obj/curl-install/lib/libcurl.a`. Run this before `ndk-build` after a fresh
+clone, after cleaning `obj/`, or after changing the curl, libpsl, or OpenSSL
+submodules.
+
+```sh
 ndk-build -C jni
 ```
 
@@ -91,11 +104,15 @@ hardening and stability flags: stack protector, `_FORTIFY_SOURCE=2`,
 no-strict-aliasing/overflow assumptions, preserved null checks, unwind tables,
 hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
 
-`.github/workflows/build.yml` is the CI release workflow. It builds with Android
-NDK `29.0.14206865`, packages the generated `libs/` output with
-`BUILD_INFO.txt`, uploads the zip as a workflow artifact, and publishes or
-updates GitHub releases whose notes include commit descriptions from Git
-history.
+The curl build script configures curl with the pinned OpenSSL `4.0.0` TLS
+backend and libpsl support, and should not pass curl feature-disabling flags.
+
+`.github/workflows/build.yml` is the CI release workflow. It installs the curl
+and libpsl autotools prerequisites, builds the static OpenSSL, libpsl, and curl
+archives, builds with Android NDK `29.0.14206865`, packages the generated
+`libs/` output with `BUILD_INFO.txt`, uploads the zip as a workflow artifact,
+and publishes or updates GitHub releases whose notes include commit descriptions
+from Git history.
 
 ## Coding Style & Naming Conventions
 
@@ -192,6 +209,7 @@ There is no dedicated unit test framework in this repository. For native changes
 the required verification is a successful:
 
 ```sh
+./jni/build-curl-android.sh
 ndk-build -C jni
 ```
 
@@ -238,8 +256,8 @@ git diff --check
 
 For repository-wide documentation refreshes, update only top-level Markdown
 files unless explicitly asked to edit submodules. Leave `goal.md`, generated
-outputs, and vendored Markdown under `jni/Il2CppVersions/`, `jni/imgui/`, and
-`jni/xDL/` untouched.
+outputs, and vendored Markdown under `jni/Il2CppVersions/`, `jni/imgui/`,
+`jni/xDL/`, `jni/curl/`, `jni/libpsl/`, and `jni/openssl/` untouched.
 
 ## Commit & Pull Request Guidelines
 
