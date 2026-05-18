@@ -408,12 +408,14 @@ ndk-build -C jni
 ```
 
 `jni/build-curl-android.sh` membangun submodule OpenSSL `4.0.0` yang dipin
-terlebih dahulu, lalu membangun libpsl dan submodule curl yang dipin sebagai
-static library `arm64-v8a` di `obj/libpsl-install/lib/libpsl.a` dan
-`obj/curl-install/lib/libcurl.a`. Script ini juga menginstal header curl di
-`obj/curl-install/include/`. `jni/Android.mk` menautkan archive prebuilt itu ke
-module `main`, jadi jalankan ulang script ini setelah membersihkan `obj/` atau
-setelah mengubah submodule curl, libpsl, atau OpenSSL.
+terlebih dahulu, lalu membangun rilis libpsl `0.21.5` yang dipin dari
+`https://github.com/rockdaboot/libpsl/releases/tag/0.21.5` dan submodule curl
+yang dipin sebagai static library `arm64-v8a` di
+`obj/libpsl-install/lib/libpsl.a` dan `obj/curl-install/lib/libcurl.a`. Script
+ini juga menginstal header curl di `obj/curl-install/include/`. `jni/Android.mk`
+menautkan archive prebuilt itu ke module `main`, jadi jalankan ulang script ini
+setelah membersihkan `obj/` atau setelah mengubah submodule curl, libpsl, atau
+OpenSSL.
 
 Untuk clean rebuild:
 
@@ -450,7 +452,7 @@ jni/curl/                     Submodule curl yang dipin untuk static libcurl
 jni/dobby/                    Header Dobby dan static library arm64
 jni/Il2CppVersions/           Header Unity IL2CPP dan deklarasi API
 jni/imgui/                    Source Dear ImGui
-jni/libpsl/                   Submodule libpsl yang dipin untuk dukungan public suffix curl
+jni/libpsl/                   Submodule libpsl 0.21.5 yang dipin untuk dukungan public suffix curl
 jni/openssl/                  Submodule OpenSSL 4.0.0 yang dipin untuk TLS curl
 jni/xDL/                      Utility dynamic loader Android xDL
 libs/                         Output generated native shared library
@@ -475,8 +477,8 @@ LOCAL_MODULE := main
 Module `ssl`, `crypto`, `psl`, dan `curl` adalah archive static prebuilt yang
 dibuat oleh `jni/build-curl-android.sh` di bawah `obj/openssl-install/`,
 `obj/libpsl-install/`, dan `obj/curl-install/`. Curl dikonfigurasi dengan
-backend TLS OpenSSL dan dukungan libpsl, dan script tidak mengirim flag yang
-menonaktifkan fitur curl.
+backend TLS OpenSSL dan dukungan public suffix libpsl `0.21.5` yang dipin, dan
+script tidak mengirim flag yang menonaktifkan fitur curl.
 
 Target Android aktif dikonfigurasi di `jni/Application.mk`:
 
@@ -536,9 +538,10 @@ indikator update di Settings dan diagnostik Runtime Status di Test.
 Workflow GitHub Actions di `.github/workflows/build.yml` menyiapkan metadata
 rilis berbasis tanggal UTC sebelum compile, meneruskannya ke `ndk-build` sebagai
 constant `MCGG_BUILD_*`, menginstal prerequisite build curl/libpsl/OpenSSL,
-membangun archive static OpenSSL, libpsl, dan curl, membangun native module
-dengan Android NDK `29.0.14206865`, mengunggah zip rilis sebagai workflow
-artifact, dan memublikasikan GitHub release untuk run yang bukan pull request.
+membangun archive static OpenSSL, libpsl `0.21.5` yang dipin, dan curl,
+membangun native module dengan Android NDK `29.0.14206865`, mengunggah zip rilis
+sebagai workflow artifact, dan memublikasikan GitHub release untuk run yang
+bukan pull request.
 
 Nama asset rilis memakai prefix proyek, versi berbasis tanggal UTC, metadata
 workflow run, dan short commit SHA. Setiap package menyertakan
@@ -720,7 +723,7 @@ area yang rawan bug berikut:
 - Pertahankan default ABI sebagai `arm64-v8a`.
 - Jaga kompatibilitas Unity tetap selaras dengan `2019.4.33f1`.
 - Jaga mode bahasa native tetap selaras dengan `c++26` kecuali konfigurasi build memang diubah secara sengaja.
-- Pertahankan submodule curl, libpsl, dan OpenSSL tetap dipin, lalu rebuild
+- Pertahankan submodule curl, libpsl `0.21.5`, dan OpenSSL tetap dipin, lalu rebuild
   `obj/openssl-install/`, `obj/libpsl-install/`, serta `obj/curl-install/` dengan
   `jni/build-curl-android.sh` sebelum menjalankan `ndk-build`.
 - Jangan commit output generated `obj/` atau `libs/`.
@@ -879,8 +882,9 @@ Periksa log GitHub Actions untuk:
   data live `m_CurPairDict` tetap menjadi prioritas saat runtime mengeksposnya.
 - Font Noto Sans CJK embedded menambah ukuran input source native dan waktu build atlas font.
 - Curl dikonfigurasi dengan backend TLS OpenSSL `4.0.0` yang dipin, dukungan
-  libpsl, dan tanpa flag yang menonaktifkan fitur curl; fitur opsional tetap
-  bergantung pada library target yang tersedia saat langkah configure.
+  libpsl `0.21.5` yang dipin, dan tanpa flag yang menonaktifkan fitur curl;
+  fitur opsional tetap bergantung pada library target yang tersedia saat
+  langkah configure.
 - Ketersediaan update bergantung pada akses network publik ke GitHub Releases
   dan metadata build embedded. Checker ini hanya informatif dan tidak pernah
   menginstal atau men-deploy library yang lebih baru.

@@ -27,7 +27,7 @@ method pointers, hook signatures, value-type layouts, or field offsets.
 Vendored or external components live under `jni/dobby/`, `jni/imgui/`,
 `jni/xDL/`, `jni/curl/`, `jni/libpsl/`, `jni/openssl/`, and
 `jni/Il2CppVersions/`. The project-owned `jni/build-curl-android.sh` script
-builds OpenSSL, libpsl, and curl into `obj/openssl-install/`,
+builds OpenSSL, pinned libpsl `0.21.5`, and curl into `obj/openssl-install/`,
 `obj/libpsl-install/`, and `obj/curl-install/` before `ndk-build`. Build output
 is written to `libs/` and `obj/`; do not treat these as source modules.
 
@@ -85,11 +85,13 @@ Downloads Git LFS-managed files such as large dumps or binary assets.
 ./jni/build-curl-android.sh
 ```
 
-Builds the pinned OpenSSL `4.0.0`, libpsl, and curl submodules as static Android
-libraries at `obj/openssl-install/`, `obj/libpsl-install/lib/libpsl.a`, and
-`obj/curl-install/lib/libcurl.a`. Run this before `ndk-build` after a fresh
-clone, after cleaning `obj/`, or after changing the curl, libpsl, or OpenSSL
-submodules.
+Builds the pinned OpenSSL `4.0.0`, libpsl `0.21.5`, and curl submodules as
+static Android libraries at `obj/openssl-install/`,
+`obj/libpsl-install/lib/libpsl.a`, and `obj/curl-install/lib/libcurl.a`. The
+libpsl submodule should track
+`https://github.com/rockdaboot/libpsl/releases/tag/0.21.5`. Run this before
+`ndk-build` after a fresh clone, after cleaning `obj/`, or after changing the
+curl, libpsl, or OpenSSL submodules.
 
 ```sh
 ndk-build -C jni
@@ -105,16 +107,17 @@ no-strict-aliasing/overflow assumptions, preserved null checks, unwind tables,
 hidden inline visibility, RELRO, immediate binding, and `--as-needed`.
 
 The curl build script configures curl with the pinned OpenSSL `4.0.0` TLS
-backend and libpsl support, and should not pass curl feature-disabling flags.
+backend and pinned libpsl `0.21.5` support, and should not pass curl
+feature-disabling flags.
 
 `.github/workflows/build.yml` is the CI release workflow. It installs the curl
-and libpsl autotools prerequisites, builds the static OpenSSL, libpsl, and curl
-archives, prepares UTC date-based release metadata before compilation, passes
-the generated `MCGG_BUILD_*` metadata constants into `ndk-build`, builds with
-Android NDK `29.0.14206865`, packages the generated `libs/` output with
-`BUILD_INFO.txt`, uploads the zip as a workflow artifact, and publishes or
-updates GitHub releases whose notes include commit descriptions from Git
-history.
+and libpsl autotools prerequisites, builds the static OpenSSL, pinned libpsl
+`0.21.5`, and curl archives, prepares UTC date-based release metadata before
+compilation, passes the generated `MCGG_BUILD_*` metadata constants into
+`ndk-build`, builds with Android NDK `29.0.14206865`, packages the generated
+`libs/` output with `BUILD_INFO.txt`, uploads the zip as a workflow artifact,
+and publishes or updates GitHub releases whose notes include commit descriptions
+from Git history.
 
 ## Coding Style & Naming Conventions
 

@@ -33,7 +33,8 @@ git lfs install
 git lfs pull
 ```
 
-Build the pinned OpenSSL, libpsl, and curl submodules before the native module:
+Build the pinned OpenSSL, libpsl `0.21.5`, and curl submodules before the
+native module:
 
 ```sh
 bash jni/build-curl-android.sh
@@ -52,12 +53,14 @@ bash jni/build-curl-android.sh
 - Keep Unity compatibility aligned with `2019.4.33f1`.
 - Keep native language mode aligned with `c++26` unless the build configuration
   intentionally changes.
-- Keep the curl, libpsl, and OpenSSL submodules pinned and use
+- Keep the curl, libpsl `0.21.5`, and OpenSSL submodules pinned and use
   `jni/build-curl-android.sh` to generate `obj/curl-install/lib/libcurl.a`,
   `obj/libpsl-install/lib/libpsl.a`, `obj/openssl-install/lib/libssl.a`, and
   `obj/openssl-install/lib/libcrypto.a` before native builds. Curl should be
-  configured with the pinned OpenSSL `4.0.0` TLS backend, libpsl support, and
-  without curl feature-disabling flags.
+  configured with the pinned OpenSSL `4.0.0` TLS backend, pinned libpsl
+  `0.21.5` support from
+  `https://github.com/rockdaboot/libpsl/releases/tag/0.21.5`, and without curl
+  feature-disabling flags.
 - Keep build metadata embedded through `MCGG_BUILD_REPOSITORY`,
   `MCGG_BUILD_VERSION`, `MCGG_BUILD_COMMIT`, and `MCGG_BUILD_REF`. CI prepares
   the release version before compiling and passes those constants into
@@ -326,9 +329,10 @@ submitting documentation-only repository refreshes.
 
 The `.github/workflows/build.yml` workflow runs for pushes to `master`, pull
 requests targeting `master`, and manual dispatches. It installs the curl,
-libpsl, and OpenSSL build prerequisites, builds the static OpenSSL, libpsl, and
-curl archives, builds with Android NDK `29.0.14206865`, packages `libs/`, writes
-`BUILD_INFO.txt`, and uploads the zip as a workflow artifact.
+libpsl, and OpenSSL build prerequisites, builds the static OpenSSL, pinned
+libpsl `0.21.5`, and curl archives, builds with Android NDK `29.0.14206865`,
+packages `libs/`, writes `BUILD_INFO.txt`, and uploads the zip as a workflow
+artifact.
 
 For non-pull-request runs, the workflow publishes or updates a GitHub release.
 Release notes are generated from Git history and include commit descriptions

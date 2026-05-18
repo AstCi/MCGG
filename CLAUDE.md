@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build & Setup
 - **Initialize submodules**: `git submodule update --init --recursive`
 - **Pull LFS assets**: `git lfs pull`
-- **Build OpenSSL, libpsl, and curl static libraries**: `bash jni/build-curl-android.sh`
+- **Build OpenSSL, libpsl `0.21.5`, and curl static libraries**: `bash jni/build-curl-android.sh`
 - **Build native library**: `ndk-build -C jni`
 - **Build Output**: `libs/arm64-v8a/libmain.so`
 
@@ -20,8 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The GitHub Actions release workflow is `.github/workflows/build.yml`; it
   prepares release metadata before compilation, passes `MCGG_BUILD_*` constants
   into `ndk-build`, installs curl/libpsl/OpenSSL build tools, builds the static
-  OpenSSL, libpsl, and curl archives, builds with Android NDK `29.0.14206865`,
-  packages `libs/`, and publishes release notes that include commit
+  OpenSSL, pinned libpsl `0.21.5`, and curl archives, builds with Android NDK
+  `29.0.14206865`, packages `libs/`, and publishes release notes that include commit
   descriptions.
 - `jni/Application.mk` carries app-wide stability flags for stack protection,
   fortify checks, conservative alias/overflow/null-check behavior, unwind
@@ -52,9 +52,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   data and must not download, deploy, inject, bypass, or force updates.
 - **curl Build**: `jni/curl`, `jni/libpsl`, and `jni/openssl` are pinned
   submodules built by `jni/build-curl-android.sh` into `obj/curl-install/`,
-  `obj/libpsl-install/`, and `obj/openssl-install/`. `jni/Android.mk` links
-  `libcurl.a`, `libpsl.a`, `libssl.a`, and `libcrypto.a` as prebuilt static
-  libraries before the main module build.
+  `obj/libpsl-install/`, and `obj/openssl-install/`. The libpsl submodule is
+  pinned to upstream release `0.21.5` from
+  `https://github.com/rockdaboot/libpsl/releases/tag/0.21.5`.
+  `jni/Android.mk` links `libcurl.a`, `libpsl.a`, `libssl.a`, and `libcrypto.a`
+  as prebuilt static libraries before the main module build.
 - **CI Releases**: `.github/workflows/build.yml` creates UTC date-based release tags before build, embeds that version into the native library, packages `libs/` with `BUILD_INFO.txt`, and generates release notes from commit subjects and body text in the push range or release-tag fallback.
 - **Memory Mapping**: `jni/structures/Structures.hpp` defines the layout of Unity/Mono types to allow native interaction with managed objects. Function-level comments document the shared layout helpers so offset and value-type reviews do not rely on names alone.
 - **Reference**: `dump/dump.cs` serves as the source of truth for the target game's internal C# structure.
@@ -129,11 +131,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   Local builds use Git-derived fallbacks when available; CI overrides them with
   the generated release metadata.
 - **curl Static Library**: pinned curl submodule at `jni/curl`, pinned libpsl
-  submodule at `jni/libpsl`, pinned OpenSSL `4.0.0` submodule at `jni/openssl`,
+  `0.21.5` submodule at `jni/libpsl`, pinned OpenSSL `4.0.0` submodule at
+  `jni/openssl`,
   generated archives at `obj/curl-install/lib/libcurl.a`,
   `obj/libpsl-install/lib/libpsl.a`, `obj/openssl-install/lib/libssl.a`, and
   `obj/openssl-install/lib/libcrypto.a`. Curl is configured with OpenSSL TLS,
-  libpsl support, and without curl feature-disabling flags.
+  pinned libpsl `0.21.5` support, and without curl feature-disabling flags.
 
 ### Runtime Audit Focus
 
