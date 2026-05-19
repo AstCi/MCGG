@@ -109,6 +109,12 @@ bash jni/build-curl-android.sh
   panel state, shop diagnostic reader readiness, behavior API state, Auto-Play
   state, auction state, GogoCard state, board formation state, and opponent
   prediction behavior after feature changes.
+- Route new user-facing overlay menu labels through the native i18n table in
+  `jni/Main.cpp`. Add both English and Indonesian copy for new menu controls,
+  preserve hidden ImGui ID suffixes such as `##id`, and attach a tooltip for
+  each interactive menu item by using the existing localized menu wrappers.
+  Runtime data, table row values, and diagnostics may fall back to English when
+  they are dynamic or dump-derived.
 - In the Test prediction table, `Will fight` is the local player's opponent
   probability. Only the exact local current opponent should be forced to
   `100%`; other rows should stay weighted even when their `Current enemy`

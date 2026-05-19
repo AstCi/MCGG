@@ -45,7 +45,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   fields stay on static IL2CPP APIs, and managed-object pointer writes should
   preserve IL2CPP write barriers.
 - **Diagnostics**: The Test tab houses Runtime Status plus binding readiness, update-check status, Auto-Play readiness, Recommendation Lineup readiness, managed reference refresh, Battle Power readiness, round state, Arena round-manager readiness, achievement readiness, Unity timeScale readiness, player economy/rank/shop state, grouped shop diagnostic reader readiness, battle manager fields, battle bridge state, shop panel state, behavior API state, all manager entries, and opponent prediction signals. Shop diagnostics become ready when any core shop diagnostic reader resolves, while individual rows keep their own `Waiting` states. In the prediction table, `Will fight` is local-player opponent probability; `Current enemy` is the observed opponent for that row; `Recent` comes from the per-player opponent history, while the seven-round cycle-pattern signal is folded into the weighted prediction.
-- **Configuration**: Settings saves and loads visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
+- **Configuration**: Settings saves and loads visual, menu language, window, HUD, Auto-Play, Combat, Shop, and Arena controls from `/data/data/<game-package>/files/mcgg_config.ini`.
 - **Updates / Changelog**: Settings includes an informational GitHub Releases
   checker. It uses embedded `MCGG_BUILD_REPOSITORY`, `MCGG_BUILD_VERSION`,
   `MCGG_BUILD_COMMIT`, and `MCGG_BUILD_REF` metadata, queries public releases
@@ -118,8 +118,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   cooldown clocks. Direct `StartAI` coordination is opt-in, skipped during
   fight/fight-result/monster phases, and may be refreshed only on a long
   interval to recover if the game drops its internal AI state.
-- **Appearance**: ImGui Dark, Catppuccin Mocha, and Dear ImGui issue #707-inspired theme selection plus Default/Noto Sans CJK font selection.
-- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, GitHub release update/changelog status, and save/load configuration, including Auto-Play state.
+- **Appearance**: ImGui Dark, Catppuccin Mocha, Dear ImGui issue #707-inspired theme selection, Default/Noto Sans CJK font selection, English/Indonesian menu language selection, and localized tooltips for interactive overlay controls.
+- **Settings**: menu size, fixed position, mobile-friendly TabBar helpers, next-enemy HUD text, font scale, style tuning, GitHub release update/changelog status, and save/load configuration, including language and Auto-Play state.
 - **Shop**: auto-buy free heroes, auto-buy selected targets, auto-buy Recommendation Lineup heroes, Scavenger expensive-hero forcing after automatic regular-shop refreshes, auto-refresh, pause-refresh conditions, keep-gold threshold, manual target counts, Recommendation Lineup target counts, and shop-panel operability gates before buy/refresh UI actions.
 - **Arena**: hero spawn, equipment grant, GogoCard forcing, Battle Power controls, active synergy forcing, level/population 99, outside-map placement, enemy HP 1, achievement task forcing, passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, fight/result-aware Skip Round, and SpeedHack with reset-to-normal handling.
 - **Test**: Runtime Status, manual binding retry, account inspection, fight prediction, binding, round, player, manager, bridge, shop UI, behavior API, and all-manager diagnostics. Only the exact local current opponent should be locked to `100%` in `Will fight`; every player's enemy history and dump-backed invader order should remain available for weighted predictions.
@@ -210,6 +210,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `jni/Main.cpp` and `jni/structures/Structures.hpp`. Comments should explain a
   function's contract, safety boundary, or layout meaning, not narrate obvious
   line-by-line control flow.
+- **Overlay i18n**: Route new user-facing menu labels through the native
+  `MenuI18nEntry` table and localized wrappers. Add English and Indonesian copy
+  plus a tooltip for each interactive tab, button, checkbox, combo, slider,
+  input, or table-row control, and preserve hidden ImGui ID suffixes such as
+  `##id`. Dynamic runtime diagnostics can remain English when they are not
+  stable menu copy.
 - **Test diagnostics**: Keep Test additions read-only unless explicitly requested otherwise, and verify class names, method names, parameter counts, return types, and fields against `dump/dump.cs`.
 - **Mobile menu**: Keep mobile accessibility helpers compatible with the main ImGui TabBar. Helper controls may select tabs, but the TabBar should remain visible.
 - **Shop automation**: Preserve the single-threaded, throttled frame-tick model. Use existing atomic toggles/counters and selected-target snapshot helpers. Scavenger expensive-hero forcing may run immediately from `MCBattleBridge.OnRefreshShop` only for automatic regular-shop refreshes; keep it bounded to five shop slots, require active count 2+, and respect affordability plus keep-gold. Wait for non-delayed, non-spectate, operable shop panel state before buy or refresh UI calls. Avoid unbounded scans, immediate retry loops, or holding locks across managed calls in the hot path unless a future design explicitly requires them.

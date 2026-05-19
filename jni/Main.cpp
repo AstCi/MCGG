@@ -459,6 +459,7 @@ namespace UiState {
     std::atomic<int> MainTabIndex{0};
     std::atomic<int> ThemeIndex{1};
     std::atomic<int> FontIndex{1};
+    std::atomic<int> LanguageIndex{0};
     std::atomic<bool> ShopShowSelectedOnly{false};
     std::atomic<bool> ShowNextEnemyHud{false};
     std::atomic<bool> MoveFromTitleBarOnly{true};
@@ -549,6 +550,379 @@ constexpr const char* kAppearanceThemes[] = {
 constexpr int kAppearanceThemeCount =
     static_cast<int>(sizeof(kAppearanceThemes) / sizeof(kAppearanceThemes[0]));
 constexpr int kIssue707ThemeOffset = 2;
+
+constexpr int kLanguageEnglish = 0;
+constexpr int kLanguageIndonesian = 1;
+
+constexpr const char* kMenuLanguages[] = {
+    "English",
+    "Bahasa Indonesia"
+};
+
+constexpr int kMenuLanguageCount =
+    static_cast<int>(sizeof(kMenuLanguages) / sizeof(kMenuLanguages[0]));
+
+struct MenuI18nEntry {
+    const char* key;
+    const char* en;
+    const char* id;
+    const char* tooltipEn;
+    const char* tooltipId;
+};
+
+static const MenuI18nEntry kMenuI18nEntries[] = {
+    {"English", "English", "Inggris", "Use English menu text.", "Gunakan teks menu bahasa Inggris."},
+    {"Bahasa Indonesia", "Bahasa Indonesia", "Bahasa Indonesia", "Use Indonesian menu text.", "Gunakan teks menu bahasa Indonesia."},
+    {"Info", "Info", "Info", "Show match overview, GGC rounds, and current enemies.", "Tampilkan ringkasan match, round GGC, dan enemy saat ini."},
+    {"Combat", "Combat", "Combat", "Open combat visibility and battle power controls.", "Buka kontrol visibilitas combat dan battle power."},
+    {"Auto-Play", "Auto-Play", "Auto-Play", "Configure the bounded Auto-Play controller.", "Atur controller Auto-Play yang dibatasi."},
+    {"Shop", "Shop", "Shop", "Configure shop buying, refreshing, and hero targets.", "Atur pembelian shop, refresh, dan target hero."},
+    {"Arena", "Arena", "Arena", "Open arena helpers for heroes, items, cards, rounds, and battle power.", "Buka helper arena untuk hero, item, card, round, dan battle power."},
+    {"Appearance", "Appearance", "Tampilan", "Adjust theme, font, and menu language.", "Atur theme, font, dan bahasa menu."},
+    {"Settings", "Settings", "Pengaturan", "Save configuration and adjust window behavior.", "Simpan konfigurasi dan atur perilaku window."},
+    {"Test", "Test", "Test", "Open read-only runtime diagnostics.", "Buka diagnostik runtime read-only."},
+    {"Prev", "Prev", "Sebelumnya", "Switch to the previous overlay tab.", "Pindah ke tab overlay sebelumnya."},
+    {"Next", "Next", "Berikutnya", "Switch to the next overlay tab.", "Pindah ke tab overlay berikutnya."},
+    {"Config", "Config", "Konfig", "Save, load, and review configuration state.", "Simpan, load, dan tinjau state konfigurasi."},
+    {"Window", "Window", "Window", "Adjust overlay size, position, HUD, and window interaction.", "Atur ukuran overlay, posisi, HUD, dan interaksi window."},
+    {"Style", "Style", "Style", "Tune font scale, opacity, spacing, borders, and rounding.", "Atur skala font, opacity, spacing, border, dan rounding."},
+    {"State", "State", "State", "Reset feature state or clear selected runtime lists.", "Reset state fitur atau bersihkan daftar runtime yang dipilih."},
+    {"Predict", "Predict", "Prediksi", "Inspect weighted next-opponent prediction rows.", "Periksa baris prediksi next-opponent berbobot."},
+    {"Bindings", "Bindings", "Binding", "Inspect resolved native and managed binding readiness.", "Periksa kesiapan binding native dan managed."},
+    {"Round", "Round", "Round", "Inspect round state or configure round helpers.", "Periksa state round atau atur helper round."},
+    {"Player", "Player", "Player", "Inspect player economy, rank, and shop state.", "Periksa economy, rank, dan state shop player."},
+    {"Manager", "Manager", "Manager", "Inspect the selected battle manager.", "Periksa battle manager yang dipilih."},
+    {"Bridge", "Bridge", "Bridge", "Inspect battle bridge state.", "Periksa state battle bridge."},
+    {"Shop UI", "Shop UI", "UI Shop", "Inspect shop panel readiness and diagnostic readers.", "Periksa kesiapan panel shop dan reader diagnostik."},
+    {"Behavior", "Behavior", "Behavior", "Inspect behavior API state.", "Periksa state behavior API."},
+    {"Managers", "Managers", "Manager", "Inspect all detected battle managers.", "Periksa semua battle manager yang terdeteksi."},
+    {"Automation", "Automation", "Automasi", "Configure automated shop decisions.", "Atur keputusan shop otomatis."},
+    {"Hero Targets", "Hero Targets", "Target Hero", "Select heroes and target counts for shop automation.", "Pilih hero dan jumlah target untuk automasi shop."},
+    {"Heroes", "Heroes", "Hero", "Spawn heroes from the loaded hero table.", "Spawn hero dari tabel hero yang sudah dimuat."},
+    {"Items", "Items", "Item", "Grant equipment from the loaded item table.", "Berikan equipment dari tabel item yang sudah dimuat."},
+    {"GogoCards", "GogoCards", "GogoCard", "Force selected Go Go Cards.", "Paksa Go Go Card yang dipilih."},
+    {"Battle Power", "Battle Power", "Battle Power", "Configure fight result and battle value helpers.", "Atur helper hasil fight dan battle value."},
+    {"Other", "Other", "Lainnya", "Configure arena economy, synergy, placement, and pool helpers.", "Atur helper economy, synergy, placement, dan pool arena."},
+    {"Refresh update check", "Refresh update check", "Refresh check update", "Start a manual GitHub release metadata refresh.", "Mulai refresh manual metadata rilis GitHub."},
+    {"Save configuration", "Save configuration", "Simpan konfigurasi", "Write the current overlay settings to the config file.", "Tulis pengaturan overlay saat ini ke file config."},
+    {"Load configuration", "Load configuration", "Load konfigurasi", "Read settings from the selected config file.", "Baca pengaturan dari file config yang dipilih."},
+    {"Reset visuals", "Reset visuals", "Reset visual", "Restore default appearance and window settings.", "Kembalikan tampilan dan window ke default."},
+    {"Capture current menu size", "Capture current menu size", "Ambil ukuran menu saat ini", "Store the current menu size in Settings.", "Simpan ukuran menu saat ini di Settings."},
+    {"Capture current position", "Capture current position", "Ambil posisi saat ini", "Store the current menu position and enable fixed positioning.", "Simpan posisi menu saat ini dan aktifkan posisi tetap."},
+    {"Reset feature state", "Reset feature state", "Reset state fitur", "Disable runtime assists and restore feature defaults.", "Matikan assist runtime dan kembalikan default fitur."},
+    {"Clear shop hero targets", "Clear shop hero targets", "Bersihkan target hero shop", "Remove all selected shop hero targets.", "Hapus semua target hero shop yang dipilih."},
+    {"Retry test bindings", "Retry test bindings", "Coba ulang binding test", "Request a new binding resolve pass and reference refresh.", "Minta ulang proses resolve binding dan refresh reference."},
+    {"Use self", "Use self", "Pakai self", "Inspect the local account.", "Periksa account lokal."},
+    {"Use opponent", "Use opponent", "Pakai opponent", "Inspect the current opponent account.", "Periksa account opponent saat ini."},
+    {"Clear account", "Clear account", "Bersihkan account", "Clear the manual account override.", "Bersihkan override account manual."},
+    {"Clear hero targets", "Clear hero targets", "Bersihkan target hero", "Deselect every tracked shop hero.", "Batalkan pilihan semua hero shop yang dilacak."},
+    {"Spawn", "Spawn", "Spawn", "Create the selected hero with the configured star level.", "Buat hero yang dipilih dengan star level terkonfigurasi."},
+    {"Grant", "Grant", "Berikan", "Grant the selected equipment.", "Berikan equipment yang dipilih."},
+    {"Select", "Select", "Pilih", "Use this card slot for the selected Go Go Card.", "Gunakan slot card ini untuk Go Go Card yang dipilih."},
+    {"Clear card 1", "Clear card 1", "Bersihkan card 1", "Clear the first forced Go Go Card slot.", "Bersihkan slot Go Go Card paksa pertama."},
+    {"Clear card 2", "Clear card 2", "Bersihkan card 2", "Clear the second forced Go Go Card slot.", "Bersihkan slot Go Go Card paksa kedua."},
+    {"Apply Skip Round now", "Apply Skip Round now", "Terapkan Skip Round sekarang", "Request an immediate round skip to the target round.", "Minta skip round langsung ke target round."},
+    {"Reset time scale", "Reset time scale", "Reset time scale", "Disable SpeedHack and restore Unity time scale to 1.0x.", "Matikan SpeedHack dan kembalikan time scale Unity ke 1.0x."},
+    {"Spawn all heroes with selected cost", "Spawn all heroes with selected cost", "Spawn semua hero dengan cost terpilih", "Spawn every loaded hero matching the cost filter.", "Spawn semua hero yang cocok dengan filter cost."},
+    {"Grant 999999 gold", "Grant 999999 gold", "Berikan 999999 gold", "Grant a large amount of gold to the local player.", "Berikan gold besar ke player lokal."},
+    {"Language", "Language", "Bahasa", "Select the overlay menu language.", "Pilih bahasa menu overlay."},
+    {"Theme", "Theme", "Theme", "Select the overlay color theme.", "Pilih theme warna overlay."},
+    {"Font", "Font", "Font", "Select the overlay font.", "Pilih font overlay."},
+    {"Auto-play", "Auto-play", "Auto-play", "Enable the Auto-Play controller.", "Aktifkan controller Auto-Play."},
+    {"Adaptive strategy", "Adaptive strategy", "Strategi adaptif", "Let Auto-Play change strategy from live pressure.", "Izinkan Auto-Play mengubah strategi dari tekanan live."},
+    {"Use built-in battle AI", "Use built-in battle AI", "Gunakan battle AI bawaan", "Coordinate the game's built-in AI only during safe phases.", "Koordinasikan AI bawaan game hanya pada fase aman."},
+    {"Manage shop", "Manage shop", "Kelola shop", "Allow Auto-Play to own shop buying and refresh assists.", "Izinkan Auto-Play mengelola assist beli dan refresh shop."},
+    {"Manage economy and level", "Manage economy and level", "Kelola economy dan level", "Allow Auto-Play to level up and set economy assists from its gold plan.", "Izinkan Auto-Play level up dan mengatur assist economy dari rencana gold."},
+    {"Manage combat power", "Manage combat power", "Kelola combat power", "Allow Auto-Play to coordinate Combat battle power assists.", "Izinkan Auto-Play mengoordinasikan assist Combat battle power."},
+    {"Use arena assists", "Use arena assists", "Gunakan assist arena", "Allow Auto-Play to coordinate selected Arena assists.", "Izinkan Auto-Play mengoordinasikan assist Arena tertentu."},
+    {"Use smart formation", "Use smart formation", "Gunakan formasi pintar", "Allow bounded role-aware board repositioning.", "Izinkan reposition board role-aware yang dibatasi."},
+    {"Use auction scoring", "Use auction scoring", "Gunakan scoring auction", "Allow Auto-Play to score auction slots and bid on the best option.", "Izinkan Auto-Play menilai slot auction dan menawar opsi terbaik."},
+    {"Use GogoCard scoring", "Use GogoCard scoring", "Gunakan scoring GogoCard", "Allow Auto-Play to choose Go Go Cards from runtime scoring.", "Izinkan Auto-Play memilih Go Go Card dari scoring runtime."},
+    {"AI difficulty", "AI difficulty", "Difficulty AI", "Set the difficulty passed to the built-in battle AI.", "Atur difficulty yang dikirim ke battle AI bawaan."},
+    {"Minimum reserve gold", "Minimum reserve gold", "Reserve gold minimum", "Keep this much gold before spending when the feature honors reserves.", "Simpan gold sebanyak ini sebelum spending saat fitur memakai reserve."},
+    {"Target level", "Target level", "Target level", "Set the maximum level Auto-Play should chase.", "Atur level maksimum yang dikejar Auto-Play."},
+    {"Manual strategy", "Manual strategy", "Strategi manual", "Choose a fixed strategy when adaptive strategy is disabled.", "Pilih strategi tetap saat strategi adaptif dimatikan."},
+    {"Economy", "Economy", "Ekonomi", "Favor interest and long-term gold efficiency.", "Prioritaskan interest dan efisiensi gold jangka panjang."},
+    {"Balanced", "Balanced", "Seimbang", "Balance gold preservation with board strength.", "Seimbangkan simpan gold dengan kekuatan board."},
+    {"Aggressive", "Aggressive", "Agresif", "Spend harder to stabilize or pressure opponents.", "Spend lebih keras untuk stabilisasi atau menekan opponent."},
+    {"Invisible Scout - hide spectate switching", "Invisible Scout - hide spectate switching", "Invisible Scout - sembunyikan perpindahan spectate", "Hide spectator switching while scouting.", "Sembunyikan perpindahan spectate saat scouting."},
+    {"Force defend win", "Force defend win", "Paksa defend menang", "Force defensive fight resolution toward a win.", "Paksa resolusi fight defensif agar menang."},
+    {"Prevent self HP loss", "Prevent self HP loss", "Cegah HP sendiri berkurang", "Block local HP loss from fight resolution.", "Blokir pengurangan HP lokal dari resolusi fight."},
+    {"Boost self attack ratio", "Boost self attack ratio", "Boost attack ratio sendiri", "Apply the configured attack ratio to local combat.", "Terapkan attack ratio terkonfigurasi ke combat lokal."},
+    {"Self attack ratio %", "Self attack ratio %", "Attack ratio sendiri %", "Set the local attack ratio percentage.", "Atur persentase attack ratio lokal."},
+    {"Self fight value", "Self fight value", "Fight value sendiri", "Set the local fight value override.", "Atur override fight value lokal."},
+    {"Cripple enemy boards", "Cripple enemy boards", "Lemahkan board enemy", "Apply low combat values to enemy boards.", "Terapkan nilai combat rendah ke board enemy."},
+    {"Enemy attack ratio %", "Enemy attack ratio %", "Attack ratio enemy %", "Set the enemy attack ratio percentage.", "Atur persentase attack ratio enemy."},
+    {"Menu width", "Menu width", "Lebar menu", "Set the overlay window width.", "Atur lebar window overlay."},
+    {"Menu height", "Menu height", "Tinggi menu", "Set the overlay window height.", "Atur tinggi window overlay."},
+    {"Use fixed menu position", "Use fixed menu position", "Gunakan posisi menu tetap", "Pin the overlay to saved coordinates.", "Kunci overlay ke koordinat tersimpan."},
+    {"Menu position X", "Menu position X", "Posisi menu X", "Set the saved overlay X coordinate.", "Atur koordinat X overlay tersimpan."},
+    {"Menu position Y", "Menu position Y", "Posisi menu Y", "Set the saved overlay Y coordinate.", "Atur koordinat Y overlay tersimpan."},
+    {"Show next enemy HUD", "Show next enemy HUD", "Tampilkan HUD enemy berikutnya", "Draw the predicted next enemy near the lower screen edge.", "Gambar prediksi enemy berikutnya dekat bawah layar."},
+    {"Move from title bar only", "Move from title bar only", "Pindah hanya dari title bar", "Restrict window dragging to the title bar.", "Batasi drag window hanya dari title bar."},
+    {"Resize from edges", "Resize from edges", "Resize dari tepi", "Allow resizing by dragging window edges.", "Izinkan resize dengan menarik tepi window."},
+    {"Font size scale", "Font size scale", "Skala ukuran font", "Scale overlay text size.", "Skalakan ukuran teks overlay."},
+    {"Window opacity", "Window opacity", "Opacity window", "Set overall overlay opacity.", "Atur opacity keseluruhan overlay."},
+    {"Window border", "Window border", "Border window", "Set window border thickness.", "Atur ketebalan border window."},
+    {"Frame border", "Frame border", "Border frame", "Set input and button border thickness.", "Atur ketebalan border input dan tombol."},
+    {"Scrollbar size", "Scrollbar size", "Ukuran scrollbar", "Set scrollbar thickness.", "Atur ketebalan scrollbar."},
+    {"Window rounding", "Window rounding", "Rounding window", "Set window corner rounding.", "Atur rounding sudut window."},
+    {"Child rounding", "Child rounding", "Rounding child", "Set child panel corner rounding.", "Atur rounding sudut child panel."},
+    {"Frame rounding", "Frame rounding", "Rounding frame", "Set input and button corner rounding.", "Atur rounding sudut input dan tombol."},
+    {"Popup rounding", "Popup rounding", "Rounding popup", "Set popup corner rounding.", "Atur rounding sudut popup."},
+    {"Scrollbar rounding", "Scrollbar rounding", "Rounding scrollbar", "Set scrollbar corner rounding.", "Atur rounding sudut scrollbar."},
+    {"Grab rounding", "Grab rounding", "Rounding grab", "Set slider grab corner rounding.", "Atur rounding grab slider."},
+    {"Tab rounding", "Tab rounding", "Rounding tab", "Set tab corner rounding.", "Atur rounding sudut tab."},
+    {"Frame padding X", "Frame padding X", "Padding frame X", "Set horizontal padding inside framed controls.", "Atur padding horizontal di dalam kontrol ber-frame."},
+    {"Frame padding Y", "Frame padding Y", "Padding frame Y", "Set vertical padding inside framed controls.", "Atur padding vertikal di dalam kontrol ber-frame."},
+    {"Item spacing X", "Item spacing X", "Spacing item X", "Set horizontal spacing between controls.", "Atur jarak horizontal antar kontrol."},
+    {"Item spacing Y", "Item spacing Y", "Spacing item Y", "Set vertical spacing between controls.", "Atur jarak vertikal antar kontrol."},
+    {"Indent spacing", "Indent spacing", "Spacing indent", "Set indentation width.", "Atur lebar indent."},
+    {"Auto-buy free heroes", "Auto-buy free heroes", "Auto-buy hero gratis", "Buy free shop heroes when available.", "Beli hero shop gratis saat tersedia."},
+    {"Auto-buy selected targets", "Auto-buy selected targets", "Auto-buy target terpilih", "Buy tracked heroes until their target counts are met.", "Beli hero terlacak sampai jumlah target terpenuhi."},
+    {"Force Scavenger to Always Get Expensive Heroes", "Force Scavenger to Always Get Expensive Heroes", "Paksa Scavenger selalu dapat hero mahal", "After automatic refreshes, clear cheaper slots when Scavenger is active.", "Setelah refresh otomatis, bersihkan slot lebih murah saat Scavenger aktif."},
+    {"Auto-buy recommendation heroes", "Auto-buy recommendation heroes", "Auto-buy hero rekomendasi", "Buy the current Recommendation Lineup hero.", "Beli hero Recommendation Lineup saat ini."},
+    {"Recommendation target count", "Recommendation target count", "Jumlah target rekomendasi", "Stop recommendation buying after this owned count.", "Hentikan pembelian rekomendasi setelah jumlah owned ini."},
+    {"Auto-refresh shop", "Auto-refresh shop", "Auto-refresh shop", "Refresh shop while worthwhile targets are missing.", "Refresh shop saat target bernilai belum muncul."},
+    {"Pause refresh when free hero appears", "Pause refresh when free hero appears", "Pause refresh saat hero gratis muncul", "Stop refreshing while a free hero is visible.", "Hentikan refresh saat hero gratis terlihat."},
+    {"Pause refresh when selected target appears", "Pause refresh when selected target appears", "Pause refresh saat target terpilih muncul", "Stop refreshing while a tracked target is visible.", "Hentikan refresh saat target terlacak terlihat."},
+    {"Pause refresh when recommendation hero appears", "Pause refresh when recommendation hero appears", "Pause refresh saat hero rekomendasi muncul", "Stop refreshing while the Recommendation Lineup hero is visible.", "Hentikan refresh saat hero Recommendation Lineup terlihat."},
+    {"Keep gold reserve", "Keep gold reserve", "Pertahankan reserve gold", "Do not buy or refresh below the configured reserve.", "Jangan beli atau refresh hingga di bawah reserve terkonfigurasi."},
+    {"Show tracked heroes only", "Show tracked heroes only", "Tampilkan hanya hero terlacak", "Filter the hero table to selected shop targets.", "Filter tabel hero ke target shop yang dipilih."},
+    {"Target Count", "Target Count", "Jumlah Target", "Set the desired owned count for this hero.", "Atur jumlah owned yang diinginkan untuk hero ini."},
+    {"Track", "Track", "Lacak", "Track this hero for selected-target shop automation.", "Lacak hero ini untuk automasi shop target terpilih."},
+    {"Spawn star level", "Spawn star level", "Star level spawn", "Set the star level used by hero spawn actions.", "Atur star level untuk aksi spawn hero."},
+    {"Grant enhanced item", "Grant enhanced item", "Berikan item enhanced", "Grant enhanced equipment instead of the base item.", "Berikan equipment enhanced, bukan item dasar."},
+    {"Force selected GogoCards", "Force selected GogoCards", "Paksa GogoCard terpilih", "Force the selected Go Go Card IDs when card data is available.", "Paksa ID Go Go Card terpilih saat data card tersedia."},
+    {"Skip Round", "Skip Round", "Skip Round", "Enable automatic round skipping toward the target round.", "Aktifkan skip round otomatis menuju target round."},
+    {"Target round", "Target round", "Target round", "Set the round that Skip Round should reach.", "Atur round yang harus dicapai Skip Round."},
+    {"SpeedHack", "SpeedHack", "SpeedHack", "Enable Unity timeScale control for Arena only.", "Aktifkan kontrol timeScale Unity hanya untuk Arena."},
+    {"Time scale", "Time scale", "Time scale", "Set the Unity time scale while SpeedHack is enabled.", "Atur time scale Unity saat SpeedHack aktif."},
+    {"Force all synergies active", "Force all synergies active", "Paksa semua synergy aktif", "Treat all synergy checks as active while enabled.", "Anggap semua pengecekan synergy aktif saat dinyalakan."},
+    {"Force level and population 99", "Force level and population 99", "Paksa level dan population 99", "Raise local level and population helpers to 99.", "Naikkan helper level dan population lokal ke 99."},
+    {"Allow outside-map placement", "Allow outside-map placement", "Izinkan placement di luar map", "Relax placement checks for out-of-map positions.", "Longgarkan pengecekan placement untuk posisi luar map."},
+    {"Set all enemy HP to 1", "Set all enemy HP to 1", "Set semua HP enemy ke 1", "Pressure enemy HP values down to 1.", "Tekan nilai HP enemy menjadi 1."},
+    {"Force Complete Achievements Task", "Force Complete Achievements Task", "Paksa task achievement selesai", "Force achievement result and round counters while bindings are ready.", "Paksa result achievement dan counter round saat binding siap."},
+    {"Maintain target gold", "Maintain target gold", "Pertahankan target gold", "Keep local gold near the configured target.", "Pertahankan gold lokal mendekati target."},
+    {"Target gold", "Target gold", "Target gold", "Set the passive gold target.", "Atur target gold pasif."},
+    {"Free shop and upgrades", "Free shop and upgrades", "Shop dan upgrade gratis", "Treat shop purchases and level upgrades as free.", "Anggap pembelian shop dan upgrade level gratis."},
+    {"Unlimited hero pool", "Unlimited hero pool", "Hero pool unlimited", "Bypass hero pool availability limits.", "Lewati batas ketersediaan hero pool."},
+    {"Disable shop lock", "Disable shop lock", "Matikan shop lock", "Bypass shop lock checks.", "Lewati pengecekan shop lock."},
+    {"Hero cost filter", "Hero cost filter", "Filter cost hero", "Choose which hero cost to use for spawn-all.", "Pilih cost hero untuk spawn-all."},
+    {"Ready", "Ready", "Siap", "", ""},
+    {"Waiting", "Waiting", "Menunggu", "", ""},
+    {"Unknown", "Unknown", "Tidak diketahui", "", ""},
+    {"Waiting for network check", "Waiting for network check", "Menunggu check jaringan", "", ""},
+    {"Up to date", "Up to date", "Sudah terbaru", "", ""},
+    {"Update available", "Update available", "Update tersedia", "", ""},
+    {"GitHub request failed", "GitHub request failed", "Request GitHub gagal", "", ""},
+    {"Malformed release metadata", "Malformed release metadata", "Metadata rilis tidak valid", "", ""},
+    {"Unknown local version", "Unknown local version", "Versi lokal tidak diketahui", "", ""},
+    {"Library update status", "Library update status", "Status update library", "", ""},
+    {"Updates / Changelog", "Updates / Changelog", "Update / Changelog", "Show GitHub release status and cached release notes.", "Tampilkan status rilis GitHub dan catatan rilis cache."},
+    {"Field", "Field", "Field", "", ""},
+    {"Value", "Value", "Nilai", "", ""},
+    {"Runtime Status", "Runtime Status", "Status Runtime", "Show binding, cache, and feature readiness.", "Tampilkan kesiapan binding, cache, dan fitur."},
+    {"Runtime", "Runtime", "Runtime", "", ""},
+    {"State", "State", "State", "", ""},
+    {"Signal", "Signal", "Sinyal", "", ""},
+    {"Repository", "Repository", "Repository", "", ""},
+    {"Current version", "Current version", "Versi saat ini", "", ""},
+    {"Current commit", "Current commit", "Commit saat ini", "", ""},
+    {"Current ref", "Current ref", "Ref saat ini", "", ""},
+    {"Latest version", "Latest version", "Versi terbaru", "", ""},
+    {"Release date", "Release date", "Tanggal rilis", "", ""},
+    {"Last check", "Last check", "Check terakhir", "", ""},
+    {"Status", "Status", "Status", "", ""},
+    {"Summary", "Summary", "Ringkasan", "", ""},
+    {"Failure", "Failure", "Kegagalan", "", ""},
+    {"GGC", "GGC", "GGC", "", ""},
+    {"Players", "Players", "Player", "", ""},
+    {"Hero", "Hero", "Hero", "", ""},
+    {"Cost", "Cost", "Cost", "", ""},
+    {"Action", "Action", "Aksi", "", ""},
+    {"Item", "Item", "Item", "", ""},
+    {"Card", "Card", "Card", "", ""},
+    {"Card 1", "Card 1", "Card 1", "", ""},
+    {"Card 2", "Card 2", "Card 2", "", ""},
+    {"Quality", "Quality", "Kualitas", "", ""},
+    {"Current enemy", "Current enemy", "Enemy saat ini", "", ""},
+    {"Policy", "Policy", "Policy", "", ""},
+    {"Strategy", "Strategy", "Strategi", "", ""},
+    {"Learned rounds: %d  Strategy changes: %d", "Learned rounds: %d  Strategy changes: %d", "Round dipelajari: %d  Perubahan strategi: %d", "", ""},
+    {"Typography", "Typography", "Tipografi", "", ""},
+    {"Rounding", "Rounding", "Rounding", "", ""},
+    {"Spacing", "Spacing", "Spacing", "", ""},
+    {"Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls.", "Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls.", "State tersimpan mencakup pengaturan visual, window dan HUD, serta kontrol Auto-Play, Combat, Shop, dan Arena.", "", ""},
+    {"Recommendation Lineup", "Recommendation Lineup", "Recommendation Lineup", "", ""},
+    {"Current recommendation", "Current recommendation", "Rekomendasi saat ini", "", ""},
+    {"Current recommendation: Waiting", "Current recommendation: Waiting", "Rekomendasi saat ini: Menunggu", "", ""},
+    {"Showing %d / %d heroes", "Showing %d / %d heroes", "Menampilkan %d / %d hero", "", ""},
+    {"Showing %d / %d items", "Showing %d / %d items", "Menampilkan %d / %d item", "", ""},
+    {"Showing %d / %d cards", "Showing %d / %d cards", "Menampilkan %d / %d card", "", ""},
+    {"Card 1: %d  Card 2: %d", "Card 1: %d  Card 2: %d", "Card 1: %d  Card 2: %d", "", ""},
+    {"Current round", "Current round", "Round saat ini", "", ""},
+    {"Default", "Default", "Default", "", ""},
+    {"Configuration file path", "Configuration file path", "Path file konfigurasi", "Edit the config file path used by save and load.", "Edit path file config yang dipakai save dan load."},
+    {"Account ID to inspect (empty = self)", "Account ID to inspect (empty = self)", "Account ID untuk diperiksa (kosong = self)", "Enter an account ID for Test diagnostics.", "Masukkan account ID untuk diagnostik Test."},
+    {"No release notes provided", "No release notes provided", "Tidak ada release notes", "", ""},
+    {"Waiting for release metadata", "Waiting for release metadata", "Menunggu metadata rilis", "", ""},
+    {"Waiting for IL2CPP runtime", "Waiting for IL2CPP runtime", "Menunggu runtime IL2CPP", "", ""},
+    {"Waiting for GGC data", "Waiting for GGC data", "Menunggu data GGC", "", ""},
+    {"No GGC qualities detected", "No GGC qualities detected", "Tidak ada kualitas GGC terdeteksi", "", ""},
+    {"Waiting for battle data", "Waiting for battle data", "Menunggu data battle", "", ""},
+    {"Waiting for player list", "Waiting for player list", "Menunggu daftar player", "", ""},
+    {"No players found", "No players found", "Player tidak ditemukan", "", ""},
+    {"Waiting for spectator hook", "Waiting for spectator hook", "Menunggu hook spectator", "", ""},
+    {"Waiting for auto-play controller bindings", "Waiting for auto-play controller bindings", "Menunggu binding controller Auto-Play", "", ""},
+    {"Waiting for battle power bindings", "Waiting for battle power bindings", "Menunggu binding battle power", "", ""},
+    {"Waiting for Noto Sans CJK font", "Waiting for Noto Sans CJK font", "Menunggu font Noto Sans CJK", "", ""},
+    {"Waiting for shop automation bindings", "Waiting for shop automation bindings", "Menunggu binding automasi shop", "", ""},
+    {"Waiting for shop refresh panel", "Waiting for shop refresh panel", "Menunggu panel refresh shop", "", ""},
+    {"Waiting for recommendation lineup bindings", "Waiting for recommendation lineup bindings", "Menunggu binding Recommendation Lineup", "", ""},
+    {"Waiting for Scavenger shop bindings", "Waiting for Scavenger shop bindings", "Menunggu binding shop Scavenger", "", ""},
+    {"Waiting for hero table", "Waiting for hero table", "Menunggu tabel hero", "", ""},
+    {"No tracked heroes selected", "No tracked heroes selected", "Tidak ada hero terlacak dipilih", "", ""},
+    {"No heroes available", "No heroes available", "Tidak ada hero tersedia", "", ""},
+    {"Waiting for arena hero bindings", "Waiting for arena hero bindings", "Menunggu binding hero arena", "", ""},
+    {"Waiting for arena item binding", "Waiting for arena item binding", "Menunggu binding item arena", "", ""},
+    {"Waiting for item table", "Waiting for item table", "Menunggu tabel item", "", ""},
+    {"No items available", "No items available", "Tidak ada item tersedia", "", ""},
+    {"Waiting for GogoCard binding", "Waiting for GogoCard binding", "Menunggu binding GogoCard", "", ""},
+    {"Waiting for GogoCard table", "Waiting for GogoCard table", "Menunggu tabel GogoCard", "", ""},
+    {"No GogoCards available", "No GogoCards available", "Tidak ada GogoCard tersedia", "", ""},
+    {"Waiting for round skip bindings", "Waiting for round skip bindings", "Menunggu binding skip round", "", ""},
+    {"Waiting for timeScale binding", "Waiting for timeScale binding", "Menunggu binding timeScale", "", ""},
+    {"Waiting for synergy hooks", "Waiting for synergy hooks", "Menunggu hook synergy", "", ""},
+    {"Waiting for player data bindings", "Waiting for player data bindings", "Menunggu binding data player", "", ""},
+    {"Waiting for achievement bindings", "Waiting for achievement bindings", "Menunggu binding achievement", "", ""},
+    {"Waiting for battle manager list", "Waiting for battle manager list", "Menunggu daftar battle manager", "", ""},
+    {"Waiting for prediction refresh", "Waiting for prediction refresh", "Menunggu refresh prediksi", "", ""},
+    {"Waiting for diagnostic budget", "Waiting for diagnostic budget", "Menunggu budget diagnostik", "", ""},
+    {"Blue", "Blue", "Biru", "", ""},
+    {"Purple", "Purple", "Ungu", "", ""},
+    {"Gold", "Gold", "Gold", "", ""}
+};
+
+// Returns a localized menu entry for the currently selected language.
+const MenuI18nEntry* FindMenuI18nEntry(const char* key) {
+    if (!key || key[0] == '\0') {
+        return nullptr;
+    }
+
+    for (const MenuI18nEntry& entry : kMenuI18nEntries) {
+        if (strcmp(entry.key, key) == 0) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+// Returns localized visible menu text with English fallback.
+const char* MenuText(const char* key) {
+    const MenuI18nEntry* entry = FindMenuI18nEntry(key);
+    if (!entry) {
+        return key ? key : "";
+    }
+
+    int languageIndex =
+        std::clamp(UiState::LanguageIndex.load(), 0, kMenuLanguageCount - 1);
+    return languageIndex == kLanguageIndonesian ? entry->id : entry->en;
+}
+
+// Builds an ImGui label that preserves hidden ID suffixes after localization.
+std::string MenuLabel(const char* label) {
+    if (!label) {
+        return {};
+    }
+
+    const char* idSuffix = strstr(label, "##");
+    if (!idSuffix) {
+        return MenuText(label);
+    }
+
+    if (idSuffix == label) {
+        return label;
+    }
+
+    std::string visible(label, static_cast<size_t>(idSuffix - label));
+    std::string localized = MenuText(visible.c_str());
+    localized += idSuffix;
+    return localized;
+}
+
+// Returns localized tooltip text for an ImGui item source label.
+const char* MenuTooltipText(const char* label) {
+    if (!label || label[0] == '\0') {
+        return nullptr;
+    }
+
+    const char* idSuffix = strstr(label, "##");
+    std::string key;
+    if (idSuffix && idSuffix != label) {
+        key.assign(label, static_cast<size_t>(idSuffix - label));
+    } else if (idSuffix == label) {
+        return nullptr;
+    } else {
+        key = label;
+    }
+
+    const MenuI18nEntry* entry = FindMenuI18nEntry(key.c_str());
+    if (!entry) {
+        static thread_local std::string fallbackTooltip;
+        fallbackTooltip = key;
+        return fallbackTooltip.c_str();
+    }
+
+    int languageIndex =
+        std::clamp(UiState::LanguageIndex.load(), 0, kMenuLanguageCount - 1);
+    const char* tooltip =
+        languageIndex == kLanguageIndonesian ? entry->tooltipId : entry->tooltipEn;
+
+    if (tooltip && tooltip[0] != '\0') {
+        return tooltip;
+    }
+
+    return languageIndex == kLanguageIndonesian ? entry->id : entry->en;
+}
+
+// Adds a localized tooltip to the last submitted ImGui menu item.
+void DrawMenuTooltip(const char* label) {
+    const char* tooltip = MenuTooltipText(label);
+    if (tooltip && tooltip[0] != '\0') {
+        ImGui::SetItemTooltip("%s", tooltip);
+    }
+}
+
+// Draws a localized menu button and attaches the matching tooltip.
+bool DrawMenuButton(const char* label, const ImVec2& size = ImVec2(0.0f, 0.0f)) {
+    std::string localized = MenuLabel(label);
+    bool pressed = ImGui::Button(localized.c_str(), size);
+    DrawMenuTooltip(label);
+    return pressed;
+}
+
+// Draws a localized menu tab item and attaches the matching tooltip.
+bool BeginMenuTabItem(const char* label, ImGuiTabItemFlags flags = 0) {
+    std::string localized = MenuLabel(label);
+    bool opened = ImGui::BeginTabItem(localized.c_str(), nullptr, flags);
+    DrawMenuTooltip(label);
+    return opened;
+}
+
+// Draws a localized collapsible header and attaches the matching tooltip.
+bool DrawMenuCollapsingHeader(const char* label, ImGuiTreeNodeFlags flags = 0) {
+    std::string localized = MenuLabel(label);
+    bool opened = ImGui::CollapsingHeader(localized.c_str(), flags);
+    DrawMenuTooltip(label);
+    return opened;
+}
+
+// Draws localized separator text without changing runtime state.
+void DrawMenuSeparatorText(const char* label) {
+    ImGui::SeparatorText(MenuText(label));
+}
 
 // Original function pointers resolved from IL2CPP metadata or hook trampolines.
 namespace Originals {
@@ -8098,12 +8472,12 @@ ImVec4 GgcQualityColor(int quality) {
 void DrawStatusRow(const char* label, bool ready) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
-    ImGui::TextUnformatted(label);
+    ImGui::TextUnformatted(MenuText(label));
     ImGui::TableSetColumnIndex(1);
     ImGui::TextColored(
         ready ? ImVec4(0.40f, 0.90f, 0.45f, 1.0f) : ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
         "%s",
-        ready ? "Ready" : "Waiting"
+        ready ? MenuText("Ready") : MenuText("Waiting")
     );
 }
 
@@ -8111,9 +8485,9 @@ void DrawStatusRow(const char* label, bool ready) {
 void DrawValueRow(const char* label, const char* value) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
-    ImGui::TextUnformatted(label);
+    ImGui::TextUnformatted(MenuText(label));
     ImGui::TableSetColumnIndex(1);
-    ImGui::TextUnformatted(value);
+    ImGui::TextUnformatted(MenuText(value));
 }
 
 // Draws the value row overlay section without changing game state.
@@ -8130,19 +8504,19 @@ UpdateCheckSnapshot GetUpdateCheckSnapshot();
 
 // Draws a compact update status line for Settings without changing runtime features.
 void DrawUpdateCompactStatus(const UpdateCheckSnapshot& snapshot) {
-    ImGui::TextUnformatted("Library update status");
+    ImGui::TextUnformatted(MenuText("Library update status"));
     ImGui::SameLine();
     ImGui::TextColored(
         UpdateStatusColor(snapshot.status),
         "%s",
-        UpdateStatusLabel(snapshot.status)
+        MenuText(UpdateStatusLabel(snapshot.status))
     );
 }
 
 // Draws scrollable release notes for cached GitHub release metadata.
 void DrawUpdateChangelog(const std::vector<ReleaseInfo>& releases) {
     if (releases.empty()) {
-        ImGui::TextUnformatted("Waiting for release metadata");
+        ImGui::TextUnformatted(MenuText("Waiting for release metadata"));
         return;
     }
 
@@ -8165,11 +8539,11 @@ void DrawUpdateChangelog(const std::vector<ReleaseInfo>& releases) {
 
         ImGui::SeparatorText(header.c_str());
         if (!release.publishedAt.empty()) {
-            ImGui::Text("Released: %s", release.publishedAt.c_str());
+            ImGui::Text("%s: %s", MenuText("Release date"), release.publishedAt.c_str());
         }
 
         if (release.body.empty()) {
-            ImGui::TextUnformatted("No release notes provided");
+            ImGui::TextUnformatted(MenuText("No release notes provided"));
         } else {
             ImGui::TextWrapped("%s", release.body.c_str());
         }
@@ -8188,7 +8562,7 @@ void DrawUpdateSettingsSection() {
     ImGui::Spacing();
     DrawUpdateCompactStatus(snapshot);
 
-    if (!ImGui::CollapsingHeader("Updates / Changelog")) {
+    if (!DrawMenuCollapsingHeader("Updates / Changelog")) {
         return;
     }
 
@@ -8199,36 +8573,36 @@ void DrawUpdateSettingsSection() {
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingStretchProp
     )) {
-        ImGui::TableSetupColumn("Field");
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(MenuText("Field"));
+        ImGui::TableSetupColumn(MenuText("Value"), ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
         DrawValueRow("Repository", snapshot.repository);
         DrawValueRow(
             "Current version",
-            IsKnownBuildMetadata(snapshot.localVersion) ? snapshot.localVersion : "Unknown"
+            IsKnownBuildMetadata(snapshot.localVersion) ? snapshot.localVersion : MenuText("Unknown")
         );
         DrawValueRow("Current commit", ShortCommit(snapshot.localCommit));
         DrawValueRow(
             "Current ref",
-            IsKnownBuildMetadata(snapshot.localRef) ? snapshot.localRef : "unknown"
+            IsKnownBuildMetadata(snapshot.localRef) ? snapshot.localRef : MenuText("Unknown")
         );
         DrawValueRow(
             "Latest version",
-            snapshot.latestVersion.empty() ? "Waiting" : snapshot.latestVersion
+            snapshot.latestVersion.empty() ? MenuText("Waiting") : snapshot.latestVersion
         );
         DrawValueRow(
             "Release date",
-            snapshot.latestPublishedAt.empty() ? "Waiting" : snapshot.latestPublishedAt
+            snapshot.latestPublishedAt.empty() ? MenuText("Waiting") : snapshot.latestPublishedAt
         );
         DrawValueRow(
             "Last check",
-            snapshot.lastCheckText.empty() ? "Waiting" : snapshot.lastCheckText
+            snapshot.lastCheckText.empty() ? MenuText("Waiting") : snapshot.lastCheckText
         );
         DrawValueRow("Status", UpdateStatusLabel(snapshot.status));
         DrawValueRow(
             "Summary",
-            snapshot.latestSummary.empty() ? "Waiting" : snapshot.latestSummary
+            snapshot.latestSummary.empty() ? MenuText("Waiting") : snapshot.latestSummary
         );
 
         if (!snapshot.lastError.empty()) {
@@ -8239,7 +8613,7 @@ void DrawUpdateSettingsSection() {
     }
 
     ImGui::BeginDisabled(snapshot.checkInProgress);
-    if (ImGui::Button("Refresh update check")) {
+    if (DrawMenuButton("Refresh update check")) {
         MaybeStartUpdateCheck(true);
     }
     ImGui::EndDisabled();
@@ -8860,6 +9234,8 @@ void ClampConfigurableState() {
     UiState::ThemeIndex =
         std::clamp(UiState::ThemeIndex.load(), 0, kAppearanceThemeCount - 1);
     UiState::FontIndex = std::clamp(UiState::FontIndex.load(), 0, 1);
+    UiState::LanguageIndex =
+        std::clamp(UiState::LanguageIndex.load(), 0, kMenuLanguageCount - 1);
     UiState::MenuWidth = std::clamp(UiState::MenuWidth.load(), 320.0f, 1600.0f);
     UiState::MenuHeight = std::clamp(UiState::MenuHeight.load(), 260.0f, 1200.0f);
     UiState::MenuPosX = std::clamp(UiState::MenuPosX.load(), -2000.0f, 4000.0f);
@@ -8921,6 +9297,7 @@ void ClampConfigurableState() {
 void ResetVisualSettings() {
     UiState::ThemeIndex = kDefaultThemeIndex;
     UiState::FontIndex = AppearanceState::NotoCjkFont ? 1 : 0;
+    UiState::LanguageIndex = kLanguageEnglish;
     UiState::MoveFromTitleBarOnly = true;
     UiState::ResizeFromEdges = false;
     UiState::UseFixedMenuPosition = false;
@@ -9245,6 +9622,7 @@ void WriteConfigString(FILE* file, const char* key, const std::string& value) {
 void ApplyConfigValue(const std::string& key, const std::string& value) {
     if (key == "themeIndex") UiState::ThemeIndex = ParseConfigInt(value, UiState::ThemeIndex);
     else if (key == "fontIndex") UiState::FontIndex = ParseConfigInt(value, UiState::FontIndex);
+    else if (key == "languageIndex") UiState::LanguageIndex = ParseConfigInt(value, UiState::LanguageIndex);
     else if (key == "shopShowSelectedOnly") UiState::ShopShowSelectedOnly = ParseConfigBool(value, UiState::ShopShowSelectedOnly);
     else if (key == "showNextEnemyHud") UiState::ShowNextEnemyHud = ParseConfigBool(value, UiState::ShowNextEnemyHud);
     else if (key == "moveFromTitleBarOnly") UiState::MoveFromTitleBarOnly = ParseConfigBool(value, UiState::MoveFromTitleBarOnly);
@@ -9351,6 +9729,7 @@ bool SaveConfigToFile(const std::string& path) {
     fprintf(file, "# MCGG runtime configuration\n");
     WriteConfigInt(file, "themeIndex", UiState::ThemeIndex);
     WriteConfigInt(file, "fontIndex", UiState::FontIndex);
+    WriteConfigInt(file, "languageIndex", UiState::LanguageIndex);
     WriteConfigBool(file, "shopShowSelectedOnly", UiState::ShopShowSelectedOnly);
     WriteConfigBool(file, "showNextEnemyHud", UiState::ShowNextEnemyHud);
     WriteConfigBool(file, "moveFromTitleBarOnly", UiState::MoveFromTitleBarOnly);
@@ -10119,7 +10498,7 @@ void RefreshInfoPlayerRows(bool force = false) {
 
 // Draws the runtime status overlay section without changing game state.
 void DrawRuntimeStatus() {
-    if (!ImGui::CollapsingHeader("Runtime Status", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (!DrawMenuCollapsingHeader("Runtime Status", ImGuiTreeNodeFlags_DefaultOpen)) {
         return;
     }
 
@@ -10147,8 +10526,8 @@ void DrawRuntimeStatus() {
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingStretchProp
     )) {
-        ImGui::TableSetupColumn("Runtime");
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+        ImGui::TableSetupColumn(MenuText("Runtime"));
+        ImGui::TableSetupColumn(MenuText("State"), ImGuiTableColumnFlags_WidthFixed, 170.0f);
         ImGui::TableHeadersRow();
 
         DrawValueRow("Self account", selfIdText);
@@ -10198,17 +10577,20 @@ void DrawRuntimeStatus() {
 
 // Draws the waiting text overlay section without changing game state.
 void DrawWaitingText(const char* message) {
-    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "%s", message);
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "%s", MenuText(message));
 }
 
 // Draws the atomic checkbox overlay section without changing game state.
 bool DrawAtomicCheckbox(const char* label, std::atomic<bool>& value) {
     bool current = value.load();
+    std::string localized = MenuLabel(label);
 
-    if (!ImGui::Checkbox(label, &current)) {
+    if (!ImGui::Checkbox(localized.c_str(), &current)) {
+        DrawMenuTooltip(label);
         return false;
     }
 
+    DrawMenuTooltip(label);
     value = current;
     return true;
 }
@@ -10220,9 +10602,37 @@ bool DrawAtomicCombo(
     const char* const items[],
     int itemsCount
 ) {
-    int current = value.load();
+    int current = std::clamp(value.load(), 0, itemsCount > 0 ? itemsCount - 1 : 0);
+    std::string localized = MenuLabel(label);
+    bool changed = false;
 
-    if (!ImGui::Combo(label, &current, items, itemsCount)) {
+    if (itemsCount <= 0) {
+        return false;
+    }
+
+    bool opened = ImGui::BeginCombo(localized.c_str(), MenuText(items[current]));
+    DrawMenuTooltip(label);
+    if (!opened) {
+        return false;
+    }
+
+    for (int i = 0; i < itemsCount; ++i) {
+        bool selected = current == i;
+        ImGui::PushID(i);
+        if (ImGui::Selectable(MenuText(items[i]), selected)) {
+            current = i;
+            changed = true;
+        }
+        DrawMenuTooltip(items[i]);
+        if (selected) {
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::EndCombo();
+
+    if (!changed) {
         return false;
     }
 
@@ -10239,11 +10649,14 @@ bool DrawAtomicInputInt(
     ImGuiInputTextFlags flags = 0
 ) {
     int current = value.load();
+    std::string localized = MenuLabel(label);
 
-    if (!ImGui::InputInt(label, &current, step, stepFast, flags)) {
+    if (!ImGui::InputInt(localized.c_str(), &current, step, stepFast, flags)) {
+        DrawMenuTooltip(label);
         return false;
     }
 
+    DrawMenuTooltip(label);
     value = current;
     return true;
 }
@@ -10257,11 +10670,14 @@ bool DrawAtomicSliderFloat(
     const char* format
 ) {
     float current = value.load();
+    std::string localized = MenuLabel(label);
 
-    if (!ImGui::SliderFloat(label, &current, minValue, maxValue, format)) {
+    if (!ImGui::SliderFloat(localized.c_str(), &current, minValue, maxValue, format)) {
+        DrawMenuTooltip(label);
         return false;
     }
 
+    DrawMenuTooltip(label);
     value = current;
     return true;
 }
@@ -10275,11 +10691,14 @@ bool DrawAtomicInputFloat(
     const char* format
 ) {
     float current = value.load();
+    std::string localized = MenuLabel(label);
 
-    if (!ImGui::InputFloat(label, &current, step, stepFast, format)) {
+    if (!ImGui::InputFloat(localized.c_str(), &current, step, stepFast, format)) {
+        DrawMenuTooltip(label);
         return false;
     }
 
+    DrawMenuTooltip(label);
     value = current;
     return true;
 }
@@ -10460,7 +10879,7 @@ bool HasAutoPlayBindings() {
 
 // Draws the ggc info overlay section without changing game state.
 void DrawGgcInfo() {
-    ImGui::SeparatorText("GGC");
+    DrawMenuSeparatorText("GGC");
 
     if (!UiCache::GgcInfoReady) {
         ImGui::TextUnformatted("Waiting for GGC data");
@@ -10484,8 +10903,8 @@ void DrawGgcInfo() {
         return;
     }
 
-    ImGui::TableSetupColumn("Round", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-    ImGui::TableSetupColumn("Quality");
+    ImGui::TableSetupColumn(MenuText("Round"), ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn(MenuText("Quality"));
     ImGui::TableHeadersRow();
 
     ImGuiListClipper clipper;
@@ -10502,7 +10921,7 @@ void DrawGgcInfo() {
             ImGui::TextColored(
                 GgcQualityColor(row.quality),
                 "%s (%d)",
-                GgcQualityName(row.quality),
+                MenuText(GgcQualityName(row.quality)),
                 row.quality
             );
         }
@@ -10513,7 +10932,7 @@ void DrawGgcInfo() {
 
 // Draws the info players table overlay section without changing game state.
 void DrawInfoPlayersTable() {
-    ImGui::SeparatorText("Players");
+    DrawMenuSeparatorText("Players");
 
     if (!IsIl2CppRuntimeReady()) {
         DrawWaitingText("Waiting for IL2CPP runtime");
@@ -10549,8 +10968,8 @@ void DrawInfoPlayersTable() {
         return;
     }
 
-    ImGui::TableSetupColumn("Player");
-    ImGui::TableSetupColumn("Current enemy");
+    ImGui::TableSetupColumn(MenuText("Player"));
+    ImGui::TableSetupColumn(MenuText("Current enemy"));
     ImGui::TableHeadersRow();
 
     for (const PlayerInfoRow& row : UiCache::InfoPlayerRows) {
@@ -10613,7 +11032,7 @@ void DrawAutoPlayTab() {
     DrawAtomicCheckbox("Use auction scoring", FeatureState::AutoPlayUseAuction);
     DrawAtomicCheckbox("Use GogoCard scoring", FeatureState::AutoPlayUseGoGoCards);
 
-    ImGui::SeparatorText("Policy");
+    DrawMenuSeparatorText("Policy");
     ImGui::SetNextItemWidth(120.0f);
     DrawAtomicInputInt("AI difficulty", FeatureState::AutoPlayAiDifficulty);
     FeatureState::AutoPlayAiDifficulty =
@@ -10648,16 +11067,20 @@ void DrawAutoPlayTab() {
     }
     ImGui::EndDisabled();
 
-    ImGui::SeparatorText("Runtime");
+    DrawMenuSeparatorText("Runtime");
     bool telemetryReady = FeatureState::AutoPlaySnapshotReady.load();
     AutoPlaySnapshot snapshot = GetCachedAutoPlaySnapshot();
     int pressureValue = std::clamp(FeatureState::AutoPlayPressure.load(), 0, 100);
     float pressure = static_cast<float>(pressureValue) / 100.0f;
     AutoPlayGoldPlan goldPlan = GetCachedAutoPlayGoldPlan();
 
-    ImGui::Text("Strategy: %s", AutoPlayStrategyName(FeatureState::AutoPlayStrategy.load()));
     ImGui::Text(
-        "Learned rounds: %d  Strategy changes: %d",
+        "%s: %s",
+        MenuText("Strategy"),
+        MenuText(AutoPlayStrategyName(FeatureState::AutoPlayStrategy.load()))
+    );
+    ImGui::Text(
+        MenuText("Learned rounds: %d  Strategy changes: %d"),
         FeatureState::AutoPlayLearnedRounds.load(),
         FeatureState::AutoPlayStrategyChanges.load()
     );
@@ -10670,8 +11093,8 @@ void DrawAutoPlayTab() {
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingStretchProp
     )) {
-        ImGui::TableSetupColumn("Signal");
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn(MenuText("Signal"));
+        ImGui::TableSetupColumn(MenuText("Value"), ImGuiTableColumnFlags_WidthFixed, 150.0f);
         ImGui::TableHeadersRow();
         DrawValueRow("Round", telemetryReady && snapshot.round > 0 ? FormatInt(snapshot.round) : "Waiting");
         DrawValueRow("Phase", telemetryReady && snapshot.phase >= 0 ? FormatInt(snapshot.phase) : "Waiting");
@@ -10769,7 +11192,7 @@ void DrawAutoPlayTab() {
 
 // Draws the arena battle power controls overlay section without changing game state.
 void DrawArenaBattlePowerControls() {
-    ImGui::SeparatorText("Battle Power");
+    DrawMenuSeparatorText("Battle Power");
 
     if (!HasCombatPowerBindings()) {
         DrawWaitingText("Waiting for battle power bindings");
@@ -10797,7 +11220,7 @@ void DrawArenaBattlePowerControls() {
 
 // Draws the appearance tab overlay section without changing game state.
 void DrawAppearanceTab() {
-    ImGui::SeparatorText("Theme");
+    DrawMenuSeparatorText("Theme");
 
     ImGui::SetNextItemWidth(220.0f);
     if (DrawAtomicCombo(
@@ -10811,7 +11234,7 @@ void DrawAppearanceTab() {
         ApplyAppearance();
     }
 
-    ImGui::SeparatorText("Font");
+    DrawMenuSeparatorText("Font");
 
     const char* fonts[] = {
         "Default",
@@ -10832,6 +11255,19 @@ void DrawAppearanceTab() {
     if (!AppearanceState::NotoCjkFont) {
         DrawWaitingText("Waiting for Noto Sans CJK font");
     }
+
+    DrawMenuSeparatorText("Language");
+
+    ImGui::SetNextItemWidth(220.0f);
+    if (DrawAtomicCombo(
+            "Language",
+            UiState::LanguageIndex,
+            kMenuLanguages,
+            kMenuLanguageCount
+        )) {
+        UiState::LanguageIndex =
+            std::clamp(UiState::LanguageIndex.load(), 0, kMenuLanguageCount - 1);
+    }
 }
 
 // Draws the settings tab overlay section without changing game state.
@@ -10839,27 +11275,29 @@ void DrawSettingsTab() {
     EnsureConfigPathInitialized();
 
     if (ImGui::BeginTabBar("##SettingsTabBar")) {
-        if (ImGui::BeginTabItem("Config")) {
+        if (BeginMenuTabItem("Config")) {
             ImGui::SetNextItemWidth(-1.0f);
+            std::string configPathHint = MenuText("Configuration file path");
             ImGui::InputTextWithHint(
                 "##ConfigPath",
-                "Configuration file path",
+                configPathHint.c_str(),
                 &UiState::ConfigPath
             );
+            DrawMenuTooltip("Configuration file path");
 
-            if (ImGui::Button("Save configuration")) {
+            if (DrawMenuButton("Save configuration")) {
                 SaveConfigToFile(UiState::ConfigPath);
             }
 
             ImGui::SameLine();
-            if (ImGui::Button("Load configuration")) {
+            if (DrawMenuButton("Load configuration")) {
                 if (LoadConfigFromFile(UiState::ConfigPath, true)) {
                     ApplyAppearance();
                 }
             }
 
             ImGui::SameLine();
-            if (ImGui::Button("Reset visuals")) {
+            if (DrawMenuButton("Reset visuals")) {
                 ResetVisualSettings();
                 ApplyAppearance();
                 UiState::ConfigStatus = "Visual settings reset";
@@ -10871,14 +11309,18 @@ void DrawSettingsTab() {
             }
 
             ImGui::Spacing();
-            ImGui::TextUnformatted("Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls.");
+            ImGui::TextUnformatted(
+                MenuText(
+                    "Saved state includes visual settings, window and HUD settings, and Auto-Play, Combat, Shop, and Arena controls."
+                )
+            );
 
             DrawUpdateSettingsSection();
 
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Window")) {
+        if (BeginMenuTabItem("Window")) {
             bool changed = false;
 
             changed |= DrawAtomicSliderFloat("Menu width", UiState::MenuWidth, 360.0f, 1600.0f, "%.0f");
@@ -10890,7 +11332,7 @@ void DrawSettingsTab() {
             changed |= DrawAtomicInputFloat("Menu position Y", UiState::MenuPosY, 1.0f, 20.0f, "%.0f");
             ImGui::EndDisabled();
 
-            if (ImGui::Button("Capture current menu size")) {
+            if (DrawMenuButton("Capture current menu size")) {
                 ImVec2 size = UiCache::MenuWindowSize;
                 UiState::MenuWidth = size.x;
                 UiState::MenuHeight = size.y;
@@ -10898,7 +11340,7 @@ void DrawSettingsTab() {
             }
 
             ImGui::SameLine();
-            if (ImGui::Button("Capture current position")) {
+            if (DrawMenuButton("Capture current position")) {
                 ImVec2 pos = UiCache::MenuWindowPos;
                 UiState::MenuPosX = pos.x;
                 UiState::MenuPosY = pos.y;
@@ -10906,7 +11348,7 @@ void DrawSettingsTab() {
                 changed = true;
             }
 
-            ImGui::SeparatorText("Behavior");
+            DrawMenuSeparatorText("Behavior");
             changed |= DrawAtomicCheckbox("Show next enemy HUD", UiState::ShowNextEnemyHud);
             changed |= DrawAtomicCheckbox("Move from title bar only", UiState::MoveFromTitleBarOnly);
             changed |= DrawAtomicCheckbox("Resize from edges", UiState::ResizeFromEdges);
@@ -10918,19 +11360,19 @@ void DrawSettingsTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Style")) {
+        if (BeginMenuTabItem("Style")) {
             bool changed = false;
 
-            ImGui::SeparatorText("Typography");
+            DrawMenuSeparatorText("Typography");
             changed |= DrawAtomicSliderFloat("Font size scale", UiState::FontScale, 0.65f, 2.0f, "%.2fx");
 
-            ImGui::SeparatorText("Window");
+            DrawMenuSeparatorText("Window");
             changed |= DrawAtomicSliderFloat("Window opacity", UiState::WindowAlpha, 0.35f, 1.0f, "%.2f");
             changed |= DrawAtomicSliderFloat("Window border", UiState::WindowBorderSize, 0.0f, 4.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Frame border", UiState::FrameBorderSize, 0.0f, 4.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Scrollbar size", UiState::ScrollbarSize, 8.0f, 32.0f, "%.0f");
 
-            ImGui::SeparatorText("Rounding");
+            DrawMenuSeparatorText("Rounding");
             changed |= DrawAtomicSliderFloat("Window rounding", UiState::WindowRounding, 0.0f, 20.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Child rounding", UiState::ChildRounding, 0.0f, 20.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Frame rounding", UiState::FrameRounding, 0.0f, 20.0f, "%.1f");
@@ -10939,7 +11381,7 @@ void DrawSettingsTab() {
             changed |= DrawAtomicSliderFloat("Grab rounding", UiState::GrabRounding, 0.0f, 20.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Tab rounding", UiState::TabRounding, 0.0f, 20.0f, "%.1f");
 
-            ImGui::SeparatorText("Spacing");
+            DrawMenuSeparatorText("Spacing");
             changed |= DrawAtomicSliderFloat("Frame padding X", UiState::FramePaddingX, 0.0f, 24.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Frame padding Y", UiState::FramePaddingY, 0.0f, 24.0f, "%.1f");
             changed |= DrawAtomicSliderFloat("Item spacing X", UiState::ItemSpacingX, 0.0f, 32.0f, "%.1f");
@@ -10953,14 +11395,14 @@ void DrawSettingsTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("State")) {
-            if (ImGui::Button("Reset feature state")) {
+        if (BeginMenuTabItem("State")) {
+            if (DrawMenuButton("Reset feature state")) {
                 ResetFeatureSettings();
                 UiState::ConfigStatus = "Feature state reset";
             }
 
             ImGui::SameLine();
-            if (ImGui::Button("Clear shop hero targets")) {
+            if (DrawMenuButton("Clear shop hero targets")) {
                 ClearShopHeroTargets();
                 UiState::ConfigStatus = "Shop hero targets cleared";
             }
@@ -13406,32 +13848,34 @@ void DrawTestTab() {
                 0) :
             0;
 
-    if (ImGui::Button("Retry test bindings")) {
+    if (DrawMenuButton("Retry test bindings")) {
         ResolveFeatureBindings();
         RefreshManagedReferences(true);
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Use self") && selfAccountId != 0) {
+    if (DrawMenuButton("Use self") && selfAccountId != 0) {
         UiState::TestAccountId = FormatUInt64(selfAccountId);
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Use opponent") && selfOpponentId != 0) {
+    if (DrawMenuButton("Use opponent") && selfOpponentId != 0) {
         UiState::TestAccountId = FormatUInt64(selfOpponentId);
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("Clear account")) {
+    if (DrawMenuButton("Clear account")) {
         UiState::TestAccountId.clear();
     }
 
     ImGui::SetNextItemWidth(-1.0f);
+    std::string testAccountHint = MenuText("Account ID to inspect (empty = self)");
     ImGui::InputTextWithHint(
         "##TestAccountId",
-        "Account ID to inspect (empty = self)",
+        testAccountHint.c_str(),
         &UiState::TestAccountId
     );
+    DrawMenuTooltip("Account ID to inspect (empty = self)");
 
     uint64_t targetAccountId = ParseAccountIdOrDefault(
         UiState::TestAccountId,
@@ -13450,47 +13894,47 @@ void DrawTestTab() {
         TryConsumeManagedWorkUnits(2) ? GetBattleManagerByAccountId(targetAccountId) : nullptr;
 
     if (ImGui::BeginTabBar("##TestTabBar", ImGuiTabBarFlags_FittingPolicyScroll)) {
-        if (ImGui::BeginTabItem("Predict")) {
+        if (BeginMenuTabItem("Predict")) {
             DrawOpponentPredictionTable(selfAccountId);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Bindings")) {
+        if (BeginMenuTabItem("Bindings")) {
             DrawTestBindingRows();
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Round")) {
+        if (BeginMenuTabItem("Round")) {
             DrawTestRoundRows(selfAccountId, targetAccountId, opponentAccountId);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Player")) {
+        if (BeginMenuTabItem("Player")) {
             DrawTestPlayerRows(targetAccountId);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Manager")) {
+        if (BeginMenuTabItem("Manager")) {
             DrawTestManagerRows(targetManager);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Bridge")) {
+        if (BeginMenuTabItem("Bridge")) {
             DrawTestBridgeRows();
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Shop UI")) {
+        if (BeginMenuTabItem("Shop UI")) {
             DrawTestShopPanelRows();
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Behavior")) {
+        if (BeginMenuTabItem("Behavior")) {
             DrawTestBehaviorRows(targetAccountId);
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Managers")) {
+        if (BeginMenuTabItem("Managers")) {
             DrawTestAllManagersTable();
             ImGui::EndTabItem();
         }
@@ -13502,7 +13946,7 @@ void DrawTestTab() {
 // Draws the shop tab overlay section without changing game state.
 void DrawShopTab() {
     if (ImGui::BeginTabBar("##ShopTabBar")) {
-        if (ImGui::BeginTabItem("Automation")) {
+        if (BeginMenuTabItem("Automation")) {
             if (!HasShopAutomationBindings()) {
                 DrawWaitingText("Waiting for shop automation bindings");
             }
@@ -13546,7 +13990,7 @@ void DrawShopTab() {
             }
 
             ImGui::Separator();
-            ImGui::SeparatorText("Recommendation Lineup");
+            DrawMenuSeparatorText("Recommendation Lineup");
             DrawAtomicCheckbox(
                 "Auto-buy recommendation heroes",
                 FeatureState::ShopBuyRecommendLineup
@@ -13561,11 +14005,12 @@ void DrawShopTab() {
             if (HasShopRecommendLineupBindings()) {
                 int recommendHeroId = FeatureState::CachedRecommendLineupHeroId.load();
                 ImGui::Text(
-                    "Current recommendation: %s",
+                    "%s: %s",
+                    MenuText("Current recommendation"),
                     FormatHeroLabel(recommendHeroId).c_str()
                 );
             } else {
-                ImGui::TextUnformatted("Current recommendation: Waiting");
+                ImGui::TextUnformatted(MenuText("Current recommendation: Waiting"));
             }
 
             ImGui::Separator();
@@ -13592,10 +14037,10 @@ void DrawShopTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Hero Targets")) {
+        if (BeginMenuTabItem("Hero Targets")) {
             DrawAtomicCheckbox("Show tracked heroes only", UiState::ShopShowSelectedOnly);
 
-            if (ImGui::Button("Clear hero targets", ImVec2(-1.0f, 0.0f))) {
+            if (DrawMenuButton("Clear hero targets", ImVec2(-1.0f, 0.0f))) {
                 DeselectShopHeroTargets();
             }
 
@@ -13621,7 +14066,7 @@ void DrawShopTab() {
             }
 
             ImGui::Text(
-                "Showing %d / %d heroes",
+                MenuText("Showing %d / %d heroes"),
                 static_cast<int>(heroes.size()),
                 totalHeroCount
             );
@@ -13641,10 +14086,10 @@ void DrawShopTab() {
                     ImGuiTableFlags_ScrollY,
                 ImVec2(0.0f, 340.0f)
             )) {
-                ImGui::TableSetupColumn("Hero");
-                ImGui::TableSetupColumn("Cost", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-                ImGui::TableSetupColumn("Target Count", ImGuiTableColumnFlags_WidthFixed, 120.0f);
-                ImGui::TableSetupColumn("Track", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                ImGui::TableSetupColumn(MenuText("Hero"));
+                ImGui::TableSetupColumn(MenuText("Cost"), ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn(MenuText("Target Count"), ImGuiTableColumnFlags_WidthFixed, 120.0f);
+                ImGui::TableSetupColumn(MenuText("Track"), ImGuiTableColumnFlags_WidthFixed, 80.0f);
                 ImGui::TableHeadersRow();
 
                 ImGuiListClipper clipper;
@@ -13672,10 +14117,12 @@ void DrawShopTab() {
                         ImGui::TableSetColumnIndex(2);
                         ImGui::SetNextItemWidth(-1.0f);
                         ImGui::InputInt("##target", &state.targetCount);
+                        DrawMenuTooltip("Target Count");
                         state.targetCount = std::clamp(state.targetCount, 1, 99);
 
                         ImGui::TableSetColumnIndex(3);
                         ImGui::Checkbox("##selected", &state.selected);
+                        DrawMenuTooltip("Track");
                         ImGui::PopID();
 
                         if (state.selected != originalState.selected ||
@@ -13699,7 +14146,7 @@ void DrawShopTab() {
 // Draws the arena tab overlay section without changing game state.
 void DrawArenaTab() {
     if (ImGui::BeginTabBar("##ArenaTabBar")) {
-        if (ImGui::BeginTabItem("Heroes")) {
+        if (BeginMenuTabItem("Heroes")) {
             if (!HasArenaHeroBindings()) {
                 DrawWaitingText("Waiting for arena hero bindings");
             }
@@ -13713,7 +14160,7 @@ void DrawArenaTab() {
             std::vector<HeroTableEntry> heroes = GetSortedHeroes(true);
             int totalHeroCount = static_cast<int>(heroes.size());
             ImGui::Text(
-                "Showing %d / %d heroes",
+                MenuText("Showing %d / %d heroes"),
                 static_cast<int>(heroes.size()),
                 totalHeroCount
             );
@@ -13733,9 +14180,9 @@ void DrawArenaTab() {
                     ImGuiTableFlags_ScrollY,
                 ImVec2(0.0f, 340.0f)
             )) {
-                ImGui::TableSetupColumn("Hero");
-                ImGui::TableSetupColumn("Cost", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn(MenuText("Hero"));
+                ImGui::TableSetupColumn(MenuText("Cost"), ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn(MenuText("Action"), ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
                 ImGuiListClipper clipper;
@@ -13751,7 +14198,7 @@ void DrawArenaTab() {
                         ImGui::Text("%d", hero.quality);
                         ImGui::TableSetColumnIndex(2);
 
-                        if (ImGui::Button("Spawn", ImVec2(-1.0f, 0.0f))) {
+                        if (DrawMenuButton("Spawn", ImVec2(-1.0f, 0.0f))) {
                             GiveHero(hero.id, FeatureState::ArenaHeroStar.load());
                         }
 
@@ -13765,7 +14212,7 @@ void DrawArenaTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Items")) {
+        if (BeginMenuTabItem("Items")) {
             if (!HasArenaItemBindings()) {
                 DrawWaitingText("Waiting for arena item binding");
             }
@@ -13776,7 +14223,7 @@ void DrawArenaTab() {
             std::vector<EquipTableEntry> equips = GetSortedEquips();
             int totalEquipCount = static_cast<int>(equips.size());
             ImGui::Text(
-                "Showing %d / %d items",
+                MenuText("Showing %d / %d items"),
                 static_cast<int>(equips.size()),
                 totalEquipCount
             );
@@ -13796,8 +14243,8 @@ void DrawArenaTab() {
                     ImGuiTableFlags_ScrollY,
                 ImVec2(0.0f, 360.0f)
             )) {
-                ImGui::TableSetupColumn("Item");
-                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn(MenuText("Item"));
+                ImGui::TableSetupColumn(MenuText("Action"), ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
                 ImGuiListClipper clipper;
@@ -13811,7 +14258,7 @@ void DrawArenaTab() {
                         ImGui::TextUnformatted(equip.name.c_str());
                         ImGui::TableSetColumnIndex(1);
 
-                        if (ImGui::Button("Grant", ImVec2(-1.0f, 0.0f))) {
+                        if (DrawMenuButton("Grant", ImVec2(-1.0f, 0.0f))) {
                             GiveEquip(equip.id);
                         }
 
@@ -13825,22 +14272,22 @@ void DrawArenaTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("GogoCards")) {
+        if (BeginMenuTabItem("GogoCards")) {
             if (!HasArenaGogoCardBindings()) {
                 DrawWaitingText("Waiting for GogoCard binding");
             }
 
             DrawAtomicCheckbox("Force selected GogoCards", FeatureState::ArenaGogoCardEnabled);
             ImGui::Text(
-                "Card 1: %d  Card 2: %d",
+                MenuText("Card 1: %d  Card 2: %d"),
                 FeatureState::ArenaGogoCardSelected1.load(),
                 FeatureState::ArenaGogoCardSelected2.load()
             );
-            if (ImGui::Button("Clear card 1")) {
+            if (DrawMenuButton("Clear card 1")) {
                 FeatureState::ArenaGogoCardSelected1 = -1;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Clear card 2")) {
+            if (DrawMenuButton("Clear card 2")) {
                 FeatureState::ArenaGogoCardSelected2 = -1;
             }
             ImGui::Separator();
@@ -13848,7 +14295,7 @@ void DrawArenaTab() {
             std::vector<CardTableEntry> cards = GetSortedCards();
             int totalCardCount = static_cast<int>(cards.size());
             ImGui::Text(
-                "Showing %d / %d cards",
+                MenuText("Showing %d / %d cards"),
                 static_cast<int>(cards.size()),
                 totalCardCount
             );
@@ -13868,9 +14315,9 @@ void DrawArenaTab() {
                     ImGuiTableFlags_ScrollY,
                 ImVec2(0.0f, 340.0f)
             )) {
-                ImGui::TableSetupColumn("Card");
-                ImGui::TableSetupColumn("Card 1", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-                ImGui::TableSetupColumn("Card 2", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn(MenuText("Card"));
+                ImGui::TableSetupColumn(MenuText("Card 1"), ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn(MenuText("Card 2"), ImGuiTableColumnFlags_WidthFixed, 90.0f);
                 ImGui::TableHeadersRow();
 
                 ImGuiListClipper clipper;
@@ -13895,13 +14342,13 @@ void DrawArenaTab() {
                         ImGui::TextUnformatted(card.name.c_str());
                         ImGui::TableSetColumnIndex(1);
 
-                        if (ImGui::Button("Select##card1", ImVec2(-1.0f, 0.0f))) {
+                        if (DrawMenuButton("Select##card1", ImVec2(-1.0f, 0.0f))) {
                             FeatureState::ArenaGogoCardSelected1 = card.id;
                         }
 
                         ImGui::TableSetColumnIndex(2);
 
-                        if (ImGui::Button("Select##card2", ImVec2(-1.0f, 0.0f))) {
+                        if (DrawMenuButton("Select##card2", ImVec2(-1.0f, 0.0f))) {
                             FeatureState::ArenaGogoCardSelected2 = card.id;
                         }
 
@@ -13915,7 +14362,7 @@ void DrawArenaTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Round")) {
+        if (BeginMenuTabItem("Round")) {
             if (!HasArenaRoundSkipBindings()) {
                 DrawWaitingText("Waiting for round skip bindings");
             }
@@ -13927,8 +14374,9 @@ void DrawArenaTab() {
             uint32_t currentRound = FeatureState::CachedGameRound.load();
 
             ImGui::Text(
-                "Current round: %s",
-                currentRound > 0 ? FormatUInt32(currentRound).c_str() : "Waiting"
+                "%s: %s",
+                MenuText("Current round"),
+                currentRound > 0 ? FormatUInt32(currentRound).c_str() : MenuText("Waiting")
             );
 
             DrawAtomicCheckbox("Skip Round", FeatureState::ArenaSkipRound);
@@ -13937,7 +14385,7 @@ void DrawArenaTab() {
             FeatureState::ArenaSkipTargetRound =
                 std::clamp(FeatureState::ArenaSkipTargetRound.load(), 1, 99);
 
-            if (ImGui::Button("Apply Skip Round now", ImVec2(-1.0f, 0.0f))) {
+            if (DrawMenuButton("Apply Skip Round now", ImVec2(-1.0f, 0.0f))) {
                 UiState::ConfigStatus =
                     TrySkipArenaRoundToTarget(true) ?
                         "Skip Round requested" :
@@ -13957,7 +14405,7 @@ void DrawArenaTab() {
             FeatureState::ArenaTimeScale =
                 ClampArenaTimeScale(FeatureState::ArenaTimeScale.load());
 
-            if (ImGui::Button("Reset time scale", ImVec2(-1.0f, 0.0f))) {
+            if (DrawMenuButton("Reset time scale", ImVec2(-1.0f, 0.0f))) {
                 FeatureState::ArenaSpeedHack = false;
                 FeatureState::ArenaTimeScale = 1.0f;
                 ApplyArenaSpeedHack(0);
@@ -13966,12 +14414,12 @@ void DrawArenaTab() {
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Battle Power")) {
+        if (BeginMenuTabItem("Battle Power")) {
             DrawArenaBattlePowerControls();
             ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Other")) {
+        if (BeginMenuTabItem("Other")) {
             if (!Originals::MCBondUtil_CheckRelationActive_Config ||
                 !Originals::MCBondUtil_CheckRelationActive_Special) {
                 DrawWaitingText("Waiting for synergy hooks");
@@ -14006,7 +14454,7 @@ void DrawArenaTab() {
             DrawAtomicInputInt("Hero cost filter", FeatureState::ArenaPrice);
             FeatureState::ArenaPrice = std::clamp(FeatureState::ArenaPrice.load(), 0, 99);
 
-            if (ImGui::Button("Spawn all heroes with selected cost", ImVec2(-1.0f, 0.0f))) {
+            if (DrawMenuButton("Spawn all heroes with selected cost", ImVec2(-1.0f, 0.0f))) {
                 int arenaPrice = FeatureState::ArenaPrice.load();
                 int arenaHeroStar = FeatureState::ArenaHeroStar.load();
 
@@ -14017,7 +14465,7 @@ void DrawArenaTab() {
                 }
             }
 
-            if (ImGui::Button("Grant 999999 gold", ImVec2(-1.0f, 0.0f))) {
+            if (DrawMenuButton("Grant 999999 gold", ImVec2(-1.0f, 0.0f))) {
                 GiveGold();
             }
 
@@ -14049,16 +14497,16 @@ void DrawMainTabQuickControls(const MainMenuTab* tabs, int tabCount) {
     int current = std::clamp(UiState::MainTabIndex.load(), 0, tabCount - 1);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14.0f, 10.0f));
 
-    if (ImGui::Button("Prev", ImVec2(92.0f, 0.0f))) {
+    if (DrawMenuButton("Prev", ImVec2(92.0f, 0.0f))) {
         current = (current + tabCount - 1) % tabCount;
         UiState::MainTabIndex = current;
     }
 
     ImGui::SameLine();
-    ImGui::TextUnformatted(tabs[current].label);
+    ImGui::TextUnformatted(MenuText(tabs[current].label));
     ImGui::SameLine();
 
-    if (ImGui::Button("Next", ImVec2(92.0f, 0.0f))) {
+    if (DrawMenuButton("Next", ImVec2(92.0f, 0.0f))) {
         current = (current + 1) % tabCount;
         UiState::MainTabIndex = current;
     }
@@ -14070,12 +14518,14 @@ void DrawMainTabQuickControls(const MainMenuTab* tabs, int tabCount) {
 // Draws the menu tab button overlay section without changing game state.
 void DrawMenuTabButton(const char* label, int index) {
     bool selected = UiState::MainTabIndex.load() == index;
+    std::string localized = MenuLabel(label);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
 
-    if (ImGui::Selectable(label, selected, 0, ImVec2(-1.0f, 34.0f))) {
+    if (ImGui::Selectable(localized.c_str(), selected, 0, ImVec2(-1.0f, 34.0f))) {
         UiState::MainTabIndex = index;
     }
+    DrawMenuTooltip(label);
 
     ImGui::PopStyleVar(2);
 }
@@ -14168,7 +14618,7 @@ void DrawMainMenu() {
                     ImGuiTabItemFlags_SetSelected :
                     0;
 
-            if (ImGui::BeginTabItem(tabs[i].label, nullptr, itemFlags)) {
+            if (BeginMenuTabItem(tabs[i].label, itemFlags)) {
                 activeTabIndex = i;
 
                 ImGui::Spacing();

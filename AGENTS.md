@@ -142,6 +142,13 @@ hooks, test diagnostics, and ImGui tabs should remain easy to scan. Keep
 function comments focused on contract, safety boundary, or layout meaning, and
 avoid line-by-line narration of obvious control flow.
 
+Route user-facing overlay menu labels through the native i18n table in
+`jni/Main.cpp`. New interactive menu controls must provide English and
+Indonesian labels, preserve hidden ImGui ID suffixes such as `##id`, and expose
+a localized tooltip through the existing menu wrappers. Dynamic runtime values
+and dump-derived diagnostics may fall back to English when stable translation
+keys would add noise.
+
 Do not convert retryable lookups into one-shot failures. Method and field
 resolution can happen before the target metadata is ready, so missing entries
 must be allowed to resolve later. Field misses may be cached only with a short
@@ -378,9 +385,11 @@ seven-round learned pattern, and the game's pairing list.
 Appearance currently includes ImGui Dark, Catppuccin Mocha, and additional
 palettes inspired by Dear ImGui issue #707. Keep `kAppearanceThemes` and
 `Issue707ThemePalette` entries aligned, and preserve Catppuccin Mocha at theme
-index `1` for existing configs. Keep mobile accessibility changes compatible
-with the main ImGui TabBar. Helper buttons may select tabs, but the TabBar
-should remain visible and authoritative.
+index `1` for existing configs. Appearance also owns the menu language selector
+and localized menu tooltips; keep Catppuccin and language config compatibility
+stable when changing visual settings. Keep mobile accessibility changes
+compatible with the main ImGui TabBar. Helper buttons may select tabs, but the
+TabBar should remain visible and authoritative.
 Settings includes a persisted next-enemy HUD toggle that draws bottom-center
 foreground text above the lower screen edge, plus the `Updates / Changelog`
 section for release status and cached GitHub release notes. Keep HUD work

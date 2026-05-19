@@ -168,6 +168,11 @@ they are backed by `dump/dump.cs` and live runtime verification.
   inspired by [Dear ImGui issue #707](https://github.com/ocornut/imgui/issues/707),
   including Darcula, Cherry, Dracula, Visual Studio, Deep Dark, and Maroon.
 - Default font and embedded Noto Sans CJK font selector.
+- Menu language selector backed by the native i18n table, currently covering
+  English and Indonesian labels for user-facing menu controls.
+- Localized tooltips on interactive menu tabs, buttons, toggles, inputs, sliders,
+  combos, and table-row controls so the overlay explains actions in the selected
+  language without adding persistent instructional text.
 - Font readiness status when the embedded Noto Sans CJK font is unavailable.
 
 ### Settings
@@ -175,7 +180,7 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Menu size, optional fixed position, mobile-friendly tab navigation, and window interaction controls.
 - Optional next-enemy HUD text rendered near the bottom center of the screen.
 - Font scale, opacity, rounding, border, padding, spacing, scrollbar, and indentation controls.
-- Save and load for visual, window, HUD, Auto-Play, Combat, Shop, and Arena controls.
+- Save and load for visual, language, window, HUD, Auto-Play, Combat, Shop, and Arena controls.
 - Default config path under the running game package, resolved as `/data/data/<game-package>/files/mcgg_config.ini`.
 - Library update indicator and collapsible `Updates / Changelog` view backed by
   GitHub Releases. It shows the embedded local version, commit/ref, latest

@@ -172,6 +172,11 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
   yang terinspirasi dari [Dear ImGui issue #707](https://github.com/ocornut/imgui/issues/707),
   termasuk Darcula, Cherry, Dracula, Visual Studio, Deep Dark, dan Maroon.
 - Selector font Default dan font Noto Sans CJK embedded.
+- Selector bahasa menu berbasis tabel i18n native, saat ini mencakup label
+  kontrol menu berbahasa Inggris dan Indonesia.
+- Tooltip terlokalisasi pada tab, tombol, toggle, input, slider, combo, dan
+  kontrol baris tabel yang interaktif sehingga overlay menjelaskan aksi dalam
+  bahasa terpilih tanpa menambah teks instruksi permanen.
 - Status kesiapan font saat font Noto Sans CJK embedded tidak tersedia.
 
 ### Settings
@@ -180,7 +185,7 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
   perangkat mobile, dan interaksi window.
 - HUD teks next-enemy opsional yang ditampilkan di dekat tengah bawah layar.
 - Kontrol font scale, opacity, rounding, border, padding, spacing, scrollbar, dan indentation.
-- Save dan load untuk kontrol visual, window, HUD, Auto-Play, Combat, Shop, dan Arena.
+- Save dan load untuk kontrol visual, bahasa, window, HUD, Auto-Play, Combat, Shop, dan Arena.
 - Path config default berada di package game yang sedang berjalan, di-resolve sebagai `/data/data/<game-package>/files/mcgg_config.ini`.
 - Indikator update library dan view collapsible `Updates / Changelog` berbasis
   GitHub Releases. Bagian ini menampilkan versi lokal embedded, commit/ref,
