@@ -3,8 +3,9 @@
 .vscode
 .idea
 .skills
-
 .githooks
+
+goal.md
 
 libs/
 obj/
