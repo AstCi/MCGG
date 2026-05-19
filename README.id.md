@@ -240,6 +240,9 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 - Kesiapan diagnostik shop digabung dari reader diagnostik shop inti; setiap
   row shop tetap menampilkan `Waiting` saat reader khusus row tersebut belum
   tersedia.
+- Diagnostik Test dan hot path automation berbagi budget managed-work per
+  frame, sehingga reader IL2CPP/game live dapat menampilkan `Waiting` selama
+  satu frame alih-alih mengirim burst call yang terlalu besar.
 - Tabel data Shop dan Arena yang panjang hanya merender row yang terlihat agar
   scroll dan perpindahan tab tetap responsif setelah metadata tabel dimuat.
 
@@ -321,8 +324,11 @@ interval panjang untuk recovery.
 Pekerjaan fitur pada frame-time memiliki budget render kecil. Jika retry
 binding, refresh managed reference, loading tabel, refresh HUD, atau automation
 sudah memakai budget frame saat ini, tick prioritas lebih rendah ditunda ke
-frame berikutnya. Loading table cache bersifat demand-driven dan hanya berjalan
-untuk tab berbasis tabel atau Auto-Play aktif.
+frame berikutnya. Budget unit managed-work yang terpisah membatasi jumlah
+reader IL2CPP, Unity, atau game yang boleh dipanggil dalam satu render frame;
+saat cap ini tercapai, diagnostik menampilkan `Waiting` dan automation prioritas
+lebih rendah menunggu tick terjadwal berikutnya. Loading table cache bersifat
+demand-driven dan hanya berjalan untuk tab berbasis tabel atau Auto-Play aktif.
 
 Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 
@@ -336,6 +342,8 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 - Tick Combat power: 250 ms.
 - Tick Auto-Play: 250 ms.
 - Budget frame fitur: 12 ms.
+- Budget managed-work fitur: 256 unit per render frame; loading tabel
+  all-or-nothing dapat memakai hingga 2048 unit sebelum ditunda.
 - Retry start AI Auto-Play: 2000 ms.
 - Refresh AI Auto-Play: 8000 ms.
 - Cooldown built-in deploy Auto-Play: 750 ms.
@@ -638,6 +646,9 @@ area yang rawan bug berikut:
   HUD prediksi, serta scan board/opponent Auto-Play yang lebih berat boleh
   menunda tick automation berikutnya ke frame selanjutnya, tetapi tick tersebut
   tetap retryable.
+- Call IL2CPP, Unity, dan game managed juga dihitung per frame. Jangan
+  melewati budget managed-work di hot loop atau diagnostik Test hanya untuk
+  menghindari perubahan delay tick yang sudah ada.
 - Reference object managed yang persisten hanya dipublish setelah dipin dengan
   `il2cpp_gchandle_new(obj, true)`. Registry handle bersifat match-scoped:
   handle tetap hidup selama refresh object dan hanya dilepas saat match aktif
@@ -740,6 +751,9 @@ area yang rawan bug berikut:
 - Pertahankan tick terpisah 100 ms untuk shop automation dan arena effects,
   tick 250 ms untuk Combat dan Auto-Play, serta cadence 500 ms untuk Info GGC,
   riwayat opponent, dan HUD kecuali perubahan timing memang bagian dari task.
+- Pertahankan kontrol burst di dalam cadence tersebut. Gunakan budget
+  managed-work dan deferral frame untuk reader IL2CPP/game yang mahal, bukan
+  memperpanjang delay yang sudah ada.
 - Pertahankan built-in AI sebagai assist Auto-Play opt-in yang phase-gated dan
   stateful; jangan membuat aktivasi Auto-Play langsung memanggil `StartAI`.
 - Pertahankan throttle shop automation untuk buy, repeat-buy, refresh, target-worth, dan pengecekan Recommendation Lineup.

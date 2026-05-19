@@ -222,6 +222,8 @@ namespace RuntimeConfig {
     constexpr int GgcRoundScanStart = 1;
     constexpr int GgcRoundScanEnd = 99;
     constexpr int FeatureFrameBudgetMs = 12;
+    constexpr int FeatureManagedWorkBudgetUnits = 256;
+    constexpr int TableLoadManagedWorkBudgetUnits = 2048;
     constexpr int ShopActionCooldownMs = 350;
     constexpr int ShopRepeatBuyCooldownMs = 1500;
     constexpr int ShopRefreshCooldownMs = 650;
@@ -260,6 +262,11 @@ namespace RuntimeState {
     std::atomic<bool> Il2CppReady{false};
     std::atomic<bool> BindingRetryRequested{false};
     std::atomic<bool> BindingResolveInProgress{false};
+}
+
+namespace RuntimeBudget {
+    thread_local int ManagedWorkUnits = 0;
+    thread_local int ManagedWorkUnitLimit = 0;
 }
 
 void TickOpponentPredictionHistory(uint64_t selfAccountId);
@@ -1540,12 +1547,48 @@ bool CooldownElapsed(
         now - lastRun >= std::chrono::milliseconds(intervalMs);
 }
 
-// Checks whether this render frame has spent its managed-work budget.
+// Checks whether this render frame has spent its elapsed-time work budget.
 bool FrameBudgetExceeded(
     const std::chrono::steady_clock::time_point& frameStart,
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()
 ) {
     return now - frameStart >= std::chrono::milliseconds(RuntimeConfig::FeatureFrameBudgetMs);
+}
+
+// Resets the render-thread managed-work budget for one overlay frame.
+void BeginManagedWorkBudget(int unitLimit = RuntimeConfig::FeatureManagedWorkBudgetUnits) {
+    RuntimeBudget::ManagedWorkUnits = 0;
+    RuntimeBudget::ManagedWorkUnitLimit = std::max(unitLimit, 0);
+}
+
+// Accounts for bounded IL2CPP or game calls before a hot path continues.
+bool TryConsumeManagedWorkUnits(int units = 1) {
+    units = std::max(units, 0);
+    if (units == 0 || RuntimeBudget::ManagedWorkUnitLimit <= 0) {
+        return true;
+    }
+
+    if (RuntimeBudget::ManagedWorkUnits + units >
+        RuntimeBudget::ManagedWorkUnitLimit) {
+        RuntimeBudget::ManagedWorkUnits = RuntimeBudget::ManagedWorkUnitLimit;
+        return false;
+    }
+
+    RuntimeBudget::ManagedWorkUnits += units;
+    return true;
+}
+
+// Reports whether this frame already spent its managed-call budget.
+bool ManagedWorkBudgetExceeded() {
+    return RuntimeBudget::ManagedWorkUnitLimit > 0 &&
+        RuntimeBudget::ManagedWorkUnits >= RuntimeBudget::ManagedWorkUnitLimit;
+}
+
+// Checks both elapsed frame time and bounded managed-call volume.
+bool FeatureWorkBudgetExceeded(
+    const std::chrono::steady_clock::time_point& frameStart
+) {
+    return FrameBudgetExceeded(frameStart) || ManagedWorkBudgetExceeded();
 }
 
 // Confirms the IL2CPP domain and thread APIs are available before managed calls.
@@ -2938,6 +2981,10 @@ void* GetBattleManagerByAccountId(uint64_t accountId) {
         return nullptr;
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return nullptr;
+    }
+
     auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
     const MonoStructures::Dictionary<uint64_t, void*>::Entry* entries = nullptr;
     int entryLimit = 0;
@@ -3180,6 +3227,10 @@ uint64_t GetCurrentPairFromInvasion(void* invasionManager, uint64_t accountId) {
     }
 
     if (Originals::LogicInvasionMgr_GetCurPair) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return 0;
+        }
+
         uint64_t pairId = Originals::LogicInvasionMgr_GetCurPair(
             invasionManager,
             accountId
@@ -3193,6 +3244,10 @@ uint64_t GetCurrentPairFromInvasion(void* invasionManager, uint64_t accountId) {
     MonoStructures::Dictionary<uint64_t, uint64_t>* pairDict = nullptr;
 
     if (Originals::LogicInvasionMgr_GetCurPairDict) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return 0;
+        }
+
         pairDict = Originals::LogicInvasionMgr_GetCurPairDict(invasionManager);
     }
 
@@ -3228,7 +3283,9 @@ CurrentOpponentLookup GetCurrentOpponentFromManagerDetailed(void* battleManager)
     CurrentOpponentLookup result{};
 
     void* currentOpponent = battleManager && Originals::MCLogicBattleManager_GetCurrentOpponent ?
-        Originals::MCLogicBattleManager_GetCurrentOpponent(battleManager) :
+        (TryConsumeManagedWorkUnits() ?
+            Originals::MCLogicBattleManager_GetCurrentOpponent(battleManager) :
+            nullptr) :
         nullptr;
 
     uint64_t accountId = GetBattleManagerAccountId(currentOpponent);
@@ -3266,6 +3323,10 @@ CurrentOpponentLookup GetCurrentOpponentForAccount(
     }
 
     if (Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return result;
+        }
+
         uint64_t currentOpponent =
             Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
                 nullptr,
@@ -3299,6 +3360,10 @@ CurrentOpponentLookup GetCurrentOpponentForAccount(
 
 // Returns the cached or live manager pointer account field value used by runtime features.
 uint64_t GetManagerPointerAccountField(void* battleManager, FieldInfo* field) {
+    if (battleManager && field && !TryConsumeManagedWorkUnits()) {
+        return 0;
+    }
+
     void* value = battleManager && field ?
         GetField<void*>(reinterpret_cast<Il2CppObject*>(battleManager), field) :
         nullptr;
@@ -3314,28 +3379,33 @@ uint64_t GetManagerPointerAccountField(void* battleManager, FieldInfo* field) {
 // Checks the current monster round condition before work proceeds.
 bool IsCurrentMonsterRound(void* invasionManager) {
     if (Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound &&
+        TryConsumeManagedWorkUnits() &&
         Originals::MCLogicBattleData_ILOGIC_GetIsMonsterRound(nullptr)) {
         return true;
     }
 
-    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
+            TryConsumeManagedWorkUnits() ?
         Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
         0;
 
     return invasionManager &&
         round > 0 &&
         Originals::LogicInvasionMgr_IsMonsterRound &&
+        TryConsumeManagedWorkUnits() &&
         Originals::LogicInvasionMgr_IsMonsterRound(invasionManager, round);
 }
 
 // Checks the real player pairing mode condition before work proceeds.
 bool IsRealPlayerPairingMode(void* invasionManager) {
     if (Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode) {
-        return Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode(nullptr);
+        return TryConsumeManagedWorkUnits() &&
+            Originals::MCLogicBattleData_ILOGIC_IsRealPlayerMode(nullptr);
     }
 
     if (invasionManager && Originals::LogicInvasionMgr_IsRealPlayerMode) {
-        return Originals::LogicInvasionMgr_IsRealPlayerMode(invasionManager);
+        return TryConsumeManagedWorkUnits() &&
+            Originals::LogicInvasionMgr_IsRealPlayerMode(invasionManager);
     }
 
     return true;
@@ -3792,6 +3862,10 @@ bool IsBattleActive(uint64_t selfAccountId) {
         return true;
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return selfAccountId != 0;
+    }
+
     auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
     const MonoStructures::Dictionary<uint64_t, void*>::Entry* entries = nullptr;
     int entryLimit = 0;
@@ -3858,6 +3932,20 @@ void EnsureTableDataLoaded() {
         return;
     }
 
+    struct ManagedWorkLimitGuard {
+        int previousLimit;
+        // Restores the frame budget after a bounded all-or-nothing table load.
+        ~ManagedWorkLimitGuard() {
+            RuntimeBudget::ManagedWorkUnitLimit = previousLimit;
+        }
+    } tableLoadBudgetGuard{RuntimeBudget::ManagedWorkUnitLimit};
+    if (RuntimeBudget::ManagedWorkUnitLimit > 0) {
+        RuntimeBudget::ManagedWorkUnitLimit = std::max(
+            RuntimeBudget::ManagedWorkUnitLimit,
+            RuntimeConfig::TableLoadManagedWorkBudgetUnits
+        );
+    }
+
     RefreshManagedReferences(true);
 
     std::unordered_map<int, HeroTableEntry> localHeroes;
@@ -3916,6 +4004,10 @@ void EnsureTableDataLoaded() {
 
                 if (!hero) {
                     continue;
+                }
+
+                if (!TryConsumeManagedWorkUnits(9)) {
+                    return;
                 }
 
                 int heroId = GetField<int>(reinterpret_cast<Il2CppObject*>(hero), idField);
@@ -4010,6 +4102,10 @@ void EnsureTableDataLoaded() {
                         continue;
                     }
 
+                    if (!TryConsumeManagedWorkUnits(2)) {
+                        return;
+                    }
+
                     int equipId = GetField<int>(
                         reinterpret_cast<Il2CppObject*>(equip),
                         idField
@@ -4054,6 +4150,10 @@ void EnsureTableDataLoaded() {
 
                 if (!card) {
                     continue;
+                }
+
+                if (!TryConsumeManagedWorkUnits(3)) {
+                    return;
                 }
 
                 int cardId = GetField<int>(reinterpret_cast<Il2CppObject*>(card), idField);
@@ -4129,6 +4229,10 @@ int GetRecommendLineupHeroId(std::chrono::steady_clock::time_point now) {
         return FeatureState::CachedRecommendLineupHeroId;
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return FeatureState::CachedRecommendLineupHeroId;
+    }
+
     int heroId = Originals::MCLogicBattleData_ILOGIC_GetHeroByRecommendLineup(nullptr);
     FeatureState::CachedRecommendLineupHeroId =
         IsKnownHeroIdOrTablePending(heroId) ? heroId : 0;
@@ -4147,6 +4251,7 @@ bool IsRecommendLineupHero(int heroId, int recommendHeroId) {
 
     return FeatureState::BattleBridge &&
         Originals::MCBattleBridge_IsHeroInRecommendLineup &&
+        TryConsumeManagedWorkUnits() &&
         Originals::MCBattleBridge_IsHeroInRecommendLineup(
             FeatureState::BattleBridge,
             heroId
@@ -4171,6 +4276,10 @@ std::string FormatHeroLabel(int heroId) {
 bool IsShopPanelReadyForAutomation() {
     void* heroShopPanel = FeatureState::HeroShopPanel.load();
     if (!heroShopPanel) {
+        return false;
+    }
+
+    if (!TryConsumeManagedWorkUnits(4)) {
         return false;
     }
 
@@ -4371,6 +4480,10 @@ bool HasWorthwhileShopTarget(
             return false;
         }
 
+        if (!TryConsumeManagedWorkUnits(2)) {
+            return false;
+        }
+
         int ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
             nullptr,
             selfAccountId,
@@ -4519,6 +4632,10 @@ bool TrySkipArenaRoundToTarget(bool force) {
     int targetRound = std::clamp(FeatureState::ArenaSkipTargetRound.load(), 1, 99);
     FeatureState::ArenaSkipTargetRound = targetRound;
 
+    if (!TryConsumeManagedWorkUnits(force ? 4 : 6)) {
+        return false;
+    }
+
     uint32_t currentRound = Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr);
     if (currentRound == 0 || currentRound >= static_cast<uint32_t>(targetRound)) {
         return false;
@@ -4580,6 +4697,10 @@ void ApplyPlayerHpFields(void* playerData, int hpValue, bool useMaxHp) {
         return;
     }
 
+    if (!TryConsumeManagedWorkUnits(useMaxHp ? 4 : 1)) {
+        return;
+    }
+
     static FieldInfo* currentHpField = nullptr;
     static FieldInfo* maxHpField = nullptr;
     static FieldInfo* lastReduceHpField = nullptr;
@@ -4623,6 +4744,11 @@ void ApplyBattleManagerPowerFields(
     int fightValue
 ) {
     if (!battleManager) {
+        return;
+    }
+
+    int requiredUnits = (boostAttack ? 3 : 0) + (forceWin ? 2 : 0);
+    if (requiredUnits > 0 && !TryConsumeManagedWorkUnits(requiredUnits)) {
         return;
     }
 
@@ -4716,6 +4842,10 @@ void ApplyCombatState(uint64_t selfAccountId) {
             continue;
         }
 
+        if (ManagedWorkBudgetExceeded()) {
+            break;
+        }
+
         ApplyBattleManagerPowerFields(
             entry.value,
             false,
@@ -4794,6 +4924,10 @@ void ApplyArenaState(uint64_t selfAccountId) {
             Originals::MCLogicBattleData_ILOGIC_GetPlayerData(nullptr, selfAccountId);
 
         if (FeatureState::ArenaForceLevel99 && selfPlayerData) {
+            if (!TryConsumeManagedWorkUnits(6)) {
+                return;
+            }
+
             Il2CppObject* selfObject = reinterpret_cast<Il2CppObject*>(selfPlayerData);
             SetField(selfObject, levelField, 99);
             SetField(selfObject, maxLevelField, 99);
@@ -4807,6 +4941,10 @@ void ApplyArenaState(uint64_t selfAccountId) {
             selfPlayerData &&
             Originals::MCChessPlayerData_UpdateCoin &&
             Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin) {
+            if (!TryConsumeManagedWorkUnits(2)) {
+                return;
+            }
+
             int targetGold = std::clamp(FeatureState::ArenaGoldTarget.load(), 0, 999999999);
             int currentGold =
                 Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
@@ -4836,6 +4974,10 @@ void ApplyArenaState(uint64_t selfAccountId) {
 
                 if (entry.hashCode < 0 || entry.key == 0 || entry.key == selfAccountId) {
                     continue;
+                }
+
+                if (!TryConsumeManagedWorkUnits(2)) {
+                    break;
                 }
 
                 void* enemyPlayerData =
@@ -4880,6 +5022,10 @@ void ApplyArenaState(uint64_t selfAccountId) {
 
                 if (!roundData) {
                     continue;
+                }
+
+                if (!TryConsumeManagedWorkUnits(3)) {
+                    break;
                 }
 
                 auto* cardList = GetField<MonoStructures::List<int>*>(
@@ -5363,6 +5509,10 @@ std::vector<AutoPlayBoardUnit> CollectAutoPlayBoardUnits(void* battleManager) {
             continue;
         }
 
+        if (!TryConsumeManagedWorkUnits(8)) {
+            break;
+        }
+
         AutoPlayBoardUnit unit{};
         unit.instance = fighter;
         unit.guid = GetField<uint32_t>(reinterpret_cast<Il2CppObject*>(fighter), guidField);
@@ -5695,8 +5845,14 @@ bool IsLikelyFreeBoardCell(
         return false;
     }
 
-    if (Originals::AStarTileMap_ValidPos && !Originals::AStarTileMap_ValidPos(x, y)) {
-        return false;
+    if (Originals::AStarTileMap_ValidPos) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return false;
+        }
+
+        if (!Originals::AStarTileMap_ValidPos(x, y)) {
+            return false;
+        }
     }
 
     return true;
@@ -5853,6 +6009,10 @@ void ApplyAutoPlayGoGoCardChoice(
         return;
     }
 
+    if (!TryConsumeManagedWorkUnits(4)) {
+        return;
+    }
+
     void* goGoCardComp = Originals::MCComp_GetGoGoCardComp(snapshot.accountId);
     if (!goGoCardComp) {
         return;
@@ -5904,6 +6064,10 @@ void ApplyAutoPlayGoGoCardChoice(
 // Scores auction reward item so automation can choose one best action.
 int ScoreAuctionRewardItem(void* rewardItem, const AutoPlayBoardPlan& plan, const AutoPlaySnapshot& snapshot) {
     if (!rewardItem) {
+        return 0;
+    }
+
+    if (!TryConsumeManagedWorkUnits(4)) {
         return 0;
     }
 
@@ -6006,6 +6170,10 @@ bool TryAutoPlayAuction(
         return false;
     }
 
+    if (!TryConsumeManagedWorkUnits(5)) {
+        return false;
+    }
+
     void* roundMgr = Originals::MCLogicBattleData_get_logicRoundMgr(nullptr);
     void* auctionComp = roundMgr ? Originals::LogicRoundMgr_get_m_AuctionComp(roundMgr) : nullptr;
     if (!auctionComp) {
@@ -6076,7 +6244,15 @@ bool TryAutoPlayAuction(
 
     for (int i = 0; slots && i < slotCount; ++i) {
         void* slot = slots[i];
-        if (!slot || !GetField<bool>(reinterpret_cast<Il2CppObject*>(slot), activeField)) {
+        if (!slot) {
+            continue;
+        }
+
+        if (!TryConsumeManagedWorkUnits(5)) {
+            break;
+        }
+
+        if (!GetField<bool>(reinterpret_cast<Il2CppObject*>(slot), activeField)) {
             continue;
         }
 
@@ -6120,6 +6296,10 @@ bool TryAutoPlayAuction(
         return false;
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return false;
+    }
+
     bool bidAccepted = Originals::MCLogicAuctionComp_Bid(
         auctionComp,
         bestSlot,
@@ -6142,6 +6322,11 @@ AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
     snapshot.accountId = selfAccountId;
 
     if (!IsIl2CppRuntimeReady() || selfAccountId == 0) {
+        PublishAutoPlaySnapshotTelemetry(snapshot, false);
+        return snapshot;
+    }
+
+    if (!TryConsumeManagedWorkUnits(20)) {
         PublishAutoPlaySnapshotTelemetry(snapshot, false);
         return snapshot;
     }
@@ -6256,6 +6441,10 @@ AutoPlaySnapshot ReadAutoPlaySnapshot(uint64_t selfAccountId) {
 
             if (accountId == 0 || accountId == selfAccountId || !manager) {
                 continue;
+            }
+
+            if (!TryConsumeManagedWorkUnits(4)) {
+                break;
             }
 
             snapshot.opponentCount++;
@@ -6712,6 +6901,10 @@ void RunBuiltInAutoPlayAI(
     if (Originals::MCLogicBattleManager_StartAI &&
         ((needsStart && startCooldownElapsed) ||
          (!needsStart && refreshCooldownElapsed))) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return;
+        }
+
         int difficulty = std::clamp(FeatureState::AutoPlayAiDifficulty.load(), 1, 10);
         FeatureState::AutoPlayAiDifficulty = difficulty;
         Originals::MCLogicBattleManager_StartAI(selfManager, difficulty);
@@ -6727,6 +6920,10 @@ void RunBuiltInAutoPlayAI(
             RuntimeConfig::AutoPlayDeployCooldownMs,
             now
         )) {
+        if (!TryConsumeManagedWorkUnits()) {
+            return;
+        }
+
         Originals::MCLogicBattleManager_TryAutoDeploy(selfManager);
         FeatureState::LastAutoPlayDeployAttempt = now;
     }
@@ -6759,6 +6956,10 @@ void TryAutoPlayLevelUp(
     FeatureState::AutoPlayTargetLevel = targetLevel;
 
     if (snapshot.level >= targetLevel) {
+        return;
+    }
+
+    if (!TryConsumeManagedWorkUnits(3)) {
         return;
     }
 
@@ -6825,7 +7026,7 @@ void RunAutoPlay(
 
     auto budgetExceeded = [&frameStart]() {
         return frameStart.time_since_epoch().count() != 0 &&
-            FrameBudgetExceeded(frameStart);
+            FeatureWorkBudgetExceeded(frameStart);
     };
 
     if (budgetExceeded()) {
@@ -6980,6 +7181,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
 
     auto getCoin = [&]() {
         if (cachedCoin < 0) {
+            if (!TryConsumeManagedWorkUnits()) {
+                return -1;
+            }
+
             cachedCoin =
                 Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
         }
@@ -6988,6 +7193,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
     };
 
     for (int slot = 0; slot < 5; ++slot) {
+        if (!TryConsumeManagedWorkUnits(4)) {
+            break;
+        }
+
         bool needFx = false;
         bool isFreeBuy = false;
 
@@ -7041,6 +7250,10 @@ void RunShopAutomation(uint64_t selfAccountId) {
               FeatureState::ShopBuyRecommendLineup));
 
         if (needsOwnCount && Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
+            if (!TryConsumeManagedWorkUnits()) {
+                break;
+            }
+
             ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
                 nullptr,
                 selfAccountId,
@@ -7135,11 +7348,13 @@ void RunShopAutomation(uint64_t selfAccountId) {
     }
 
     int refreshCost = FeatureState::ArenaFreeEconomy ? 0 :
-        Originals::MCLogicBattleData_ILOGIC_GetRefreshCost ?
+        Originals::MCLogicBattleData_ILOGIC_GetRefreshCost &&
+            TryConsumeManagedWorkUnits() ?
         Originals::MCLogicBattleData_ILOGIC_GetRefreshCost(nullptr, selfAccountId) :
         0;
     bool isFreeRefresh = FeatureState::ArenaFreeEconomy ||
         (Originals::MCLogicBattleData_ILOGIC_IsRefreshFree &&
+         TryConsumeManagedWorkUnits() &&
          Originals::MCLogicBattleData_ILOGIC_IsRefreshFree(nullptr, selfAccountId));
     int coin = getCoin();
     bool canRefresh =
@@ -7160,6 +7375,8 @@ void TickFeatures() {
         return;
     }
 
+    BeginManagedWorkBudget();
+
     auto frameStart = std::chrono::steady_clock::now();
     auto now = frameStart;
     int activeMainTab =
@@ -7171,24 +7388,24 @@ void TickFeatures() {
         return;
     }
 
-    if (FrameBudgetExceeded(frameStart)) {
+    if (FeatureWorkBudgetExceeded(frameStart)) {
         return;
     }
 
     RefreshManagedReferences();
-    if (FrameBudgetExceeded(frameStart)) {
+    if (FeatureWorkBudgetExceeded(frameStart)) {
         return;
     }
 
     uint64_t selfAccountId = GetSelfAccountId();
     RefreshTableDataForMatch(selfAccountId);
-    if (FrameBudgetExceeded(frameStart)) {
+    if (FeatureWorkBudgetExceeded(frameStart)) {
         return;
     }
 
     if (ShouldLoadTableDataForFrame(activeMainTab)) {
         EnsureTableDataLoaded();
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
@@ -7213,8 +7430,10 @@ void TickFeatures() {
         (activeMainTab == MainTabArena ||
          FeatureState::ArenaSkipRound.load() ||
          FeatureState::AutoPlayEnabled.load())) {
-        FeatureState::CachedGameRound =
-            Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr);
+        if (TryConsumeManagedWorkUnits()) {
+            FeatureState::CachedGameRound =
+                Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr);
+        }
     } else if (selfAccountId == 0) {
         FeatureState::CachedGameRound = 0;
     }
@@ -7226,35 +7445,35 @@ void TickFeatures() {
             FeatureState::LastOpponentPredictionTick = now;
         }
 
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
 
     if (UiState::ShowNextEnemyHud.load()) {
         RefreshNextEnemyHudText(selfAccountId);
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
 
     if (IntervalElapsed(FeatureState::LastAutoPlayTick, RuntimeConfig::AutoPlayTickMs, now)) {
         RunAutoPlay(selfAccountId, now, frameStart);
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
 
     if (IntervalElapsed(FeatureState::LastArenaTick, RuntimeConfig::ArenaTickMs, now)) {
         ApplyArenaState(selfAccountId);
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
 
     if (IntervalElapsed(FeatureState::LastShopTick, RuntimeConfig::ShopTickMs, now)) {
         RunShopAutomation(selfAccountId);
-        if (FrameBudgetExceeded(frameStart)) {
+        if (FeatureWorkBudgetExceeded(frameStart)) {
             return;
         }
     }
@@ -9027,12 +9246,20 @@ std::string FormatFieldBool(void* instance, FieldInfo* field) {
         return "Waiting";
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return FormatBool(GetField<bool>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
 // Formats field int for readable overlay output.
 std::string FormatFieldInt(void* instance, FieldInfo* field) {
     if (!instance || !field) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits()) {
         return "Waiting";
     }
 
@@ -9045,12 +9272,20 @@ std::string FormatFieldUInt32(void* instance, FieldInfo* field) {
         return "Waiting";
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return FormatUInt32(GetField<uint32_t>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
 // Formats field u int64 for readable overlay output.
 std::string FormatFieldUInt64(void* instance, FieldInfo* field) {
     if (!instance || !field) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits()) {
         return "Waiting";
     }
 
@@ -9063,12 +9298,20 @@ std::string FormatFieldFloat(void* instance, FieldInfo* field) {
         return "Waiting";
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return FormatFloat(GetField<float>(reinterpret_cast<Il2CppObject*>(instance), field));
 }
 
 // Formats field pointer for readable overlay output.
 std::string FormatFieldPointer(void* instance, FieldInfo* field) {
     if (!instance || !field) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits()) {
         return "Waiting";
     }
 
@@ -9168,6 +9411,10 @@ void RefreshGgcInfo(bool force = false) {
     for (int round = RuntimeConfig::GgcRoundScanStart;
          round <= RuntimeConfig::GgcRoundScanEnd;
          ++round) {
+        if (!TryConsumeManagedWorkUnits()) {
+            break;
+        }
+
         int quality = Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound(
             nullptr,
             selfAccountId,
@@ -9202,6 +9449,10 @@ void RefreshInfoPlayerRows(bool force = false) {
     if (!Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr ||
         !Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID ||
         !Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName) {
+        return;
+    }
+
+    if (!TryConsumeManagedWorkUnits()) {
         return;
     }
 
@@ -9241,6 +9492,10 @@ void RefreshInfoPlayerRows(bool force = false) {
 
         if (entry.hashCode < 0 || entry.key == 0) {
             continue;
+        }
+
+        if (!TryConsumeManagedWorkUnits(3)) {
+            break;
         }
 
         uint64_t accountId = entry.key;
@@ -10137,6 +10392,10 @@ std::string GetBattlePlayerName(uint64_t accountId) {
         return {};
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        return {};
+    }
+
     return ManagedStringToStd(
         Originals::MCLogicBattleData_ILOGIC_GetSelfChessPlayerName(nullptr, accountId)
     );
@@ -10153,6 +10412,10 @@ std::string GetRoundResultDataField(void* battleManager, const char* fieldName) 
     if (!roundResultDataField) {
         roundResultDataField =
             GetFieldInfoFromName("", "MCLogicBattleManager", "m_RoundResultData");
+    }
+
+    if (roundResultDataField && !TryConsumeManagedWorkUnits()) {
+        return "Waiting";
     }
 
     void* roundResultData = roundResultDataField ?
@@ -10257,7 +10520,8 @@ void DrawTestRoundRows(
     ImGui::TableSetupColumn("Current", ImGuiTableColumnFlags_WidthFixed, 180.0f);
     ImGui::TableHeadersRow();
 
-    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
+            TryConsumeManagedWorkUnits() ?
         Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
         0;
     std::string targetName = GetBattlePlayerName(targetAccountId);
@@ -10274,49 +10538,57 @@ void DrawTestRoundRows(
     );
     DrawValueRow(
         "Game phase",
-        Originals::MCLogicBattleData_ILOGIC_GetGamePhase ?
+        Originals::MCLogicBattleData_ILOGIC_GetGamePhase &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_GetGamePhase(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Remain time",
-        Originals::MCLogicBattleData_ILOGIC_GetRoundRemainTime ?
+        Originals::MCLogicBattleData_ILOGIC_GetRoundRemainTime &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_GetRoundRemainTime(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Max remain time",
-        Originals::MCLogicBattleData_ILOGIC_GetRoundMaxRemainTime ?
+        Originals::MCLogicBattleData_ILOGIC_GetRoundMaxRemainTime &&
+                TryConsumeManagedWorkUnits() ?
             FormatUInt64(Originals::MCLogicBattleData_ILOGIC_GetRoundMaxRemainTime(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Is fight section",
-        Originals::MCLogicBattleData_ILOGIC_IsFightSection ?
+        Originals::MCLogicBattleData_ILOGIC_IsFightSection &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleData_ILOGIC_IsFightSection(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Is result section",
-        Originals::MCLogicBattleData_ILOGIC_IsFightResultSection ?
+        Originals::MCLogicBattleData_ILOGIC_IsFightResultSection &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleData_ILOGIC_IsFightResultSection(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Is self fight over",
-        Originals::MCLogicBattleData_ILOGIC_IsSelfFightOver ?
+        Originals::MCLogicBattleData_ILOGIC_IsSelfFightOver &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleData_ILOGIC_IsSelfFightOver(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Inspect HP",
-        Originals::MCLogicBattleData_ILOGIC_GetPlayerHP && targetAccountId ?
+        Originals::MCLogicBattleData_ILOGIC_GetPlayerHP && targetAccountId &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_GetPlayerHP(nullptr, targetAccountId)) :
             "Waiting"
     );
     DrawValueRow(
         "Opponent HP",
-        Originals::MCLogicBattleData_ILOGIC_GetPlayerHP && opponentAccountId ?
+        Originals::MCLogicBattleData_ILOGIC_GetPlayerHP && opponentAccountId &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_GetPlayerHP(nullptr, opponentAccountId)) :
             "Waiting"
     );
@@ -10324,7 +10596,8 @@ void DrawTestRoundRows(
         "History fail flag",
         Originals::MCLogicBattleData_ILOGIC_GetBattleResultHistory &&
                 targetAccountId &&
-                round > 0 ?
+                round > 0 &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleData_ILOGIC_GetBattleResultHistory(
                 nullptr,
                 targetAccountId,
@@ -10341,6 +10614,10 @@ std::string FormatAccountInt(
     uint64_t accountId,
     int (*reader)(void* instance, uint64_t accountId)
 ) {
+    if (accountId && reader && !TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return accountId && reader ? FormatInt(reader(nullptr, accountId)) : "Waiting";
 }
 
@@ -10349,6 +10626,10 @@ std::string FormatAccountUInt32(
     uint64_t accountId,
     uint32_t (*reader)(void* instance, uint64_t accountId)
 ) {
+    if (accountId && reader && !TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return accountId && reader ? FormatUInt32(reader(nullptr, accountId)) : "Waiting";
 }
 
@@ -10357,17 +10638,29 @@ std::string FormatAccountBool(
     uint64_t accountId,
     bool (*reader)(void* instance, uint64_t accountId)
 ) {
+    if (accountId && reader && !TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return accountId && reader ? FormatBool(reader(nullptr, accountId)) : "Waiting";
 }
 
 // Formats global int for readable overlay output.
 std::string FormatGlobalInt(int (*reader)(void* instance)) {
+    if (reader && !TryConsumeManagedWorkUnits()) {
+        return "Waiting";
+    }
+
     return reader ? FormatInt(reader(nullptr)) : "Waiting";
 }
 
 // Formats shop star level for readable overlay output.
 std::string FormatShopStarLevel(uint64_t accountId) {
     if (!accountId || !Originals::MCLogicBattleData_ILOGIC_GetShopStarLv) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits()) {
         return "Waiting";
     }
 
@@ -10398,7 +10691,11 @@ void DrawTestPlayerRows(uint64_t targetAccountId) {
     bool hasCoin = targetAccountId && Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin;
 
     if (hasCoin) {
-        coin = Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, targetAccountId);
+        if (TryConsumeManagedWorkUnits()) {
+            coin = Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, targetAccountId);
+        } else {
+            hasCoin = false;
+        }
     }
 
     DrawValueRow("Account", targetAccountId ? FormatUInt64(targetAccountId) : "Waiting");
@@ -10444,11 +10741,13 @@ void DrawTestPlayerRows(uint64_t targetAccountId) {
     DrawValueRow(
         "Can upgrade now",
         targetAccountId && hasCoin && Originals::MCLogicBattleData_ILOGIC_CanUpgrade ?
-            FormatBool(Originals::MCLogicBattleData_ILOGIC_CanUpgrade(
-                nullptr,
-                targetAccountId,
-                coin
-            )) :
+            (TryConsumeManagedWorkUnits() ?
+                FormatBool(Originals::MCLogicBattleData_ILOGIC_CanUpgrade(
+                    nullptr,
+                    targetAccountId,
+                    coin
+                )) :
+                "Waiting") :
             "Waiting"
     );
     DrawValueRow(
@@ -10552,14 +10851,16 @@ void DrawTestPlayerRows(uint64_t targetAccountId) {
     );
     DrawValueRow(
         "Self camp",
-        Originals::MCLogicBattleData_ILOGIC_GetSelfCamp ?
+        Originals::MCLogicBattleData_ILOGIC_GetSelfCamp &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_GetSelfCamp(nullptr)) :
             "Waiting"
     );
     DrawValueRow(
         "Self population",
         Originals::MCLogicBattleData_ILOGIC_SelfCurPopulation &&
-                Originals::MCLogicBattleData_ILOGIC_SelfTotalPopulation ?
+                Originals::MCLogicBattleData_ILOGIC_SelfTotalPopulation &&
+                TryConsumeManagedWorkUnits(2) ?
             FormatInt(Originals::MCLogicBattleData_ILOGIC_SelfCurPopulation(nullptr)) +
                 " / " +
                 FormatInt(Originals::MCLogicBattleData_ILOGIC_SelfTotalPopulation(nullptr)) :
@@ -10571,7 +10872,8 @@ void DrawTestPlayerRows(uint64_t targetAccountId) {
     );
     DrawValueRow(
         "Star-up recommendation",
-        Originals::MCLogicBattleData_ILOGIC_GetHeroByStarUp ?
+        Originals::MCLogicBattleData_ILOGIC_GetHeroByStarUp &&
+                TryConsumeManagedWorkUnits() ?
             FormatHeroLabel(Originals::MCLogicBattleData_ILOGIC_GetHeroByStarUp(nullptr)) :
             "Waiting"
     );
@@ -10629,7 +10931,9 @@ void DrawTestManagerRows(void* battleManager) {
     int campBCount = 0;
     bool hasAliveCounts = false;
 
-    if (battleManager && Originals::MCLogicBattleManager_GetAliveFighter) {
+    if (battleManager &&
+        Originals::MCLogicBattleManager_GetAliveFighter &&
+        TryConsumeManagedWorkUnits(2)) {
         Originals::MCLogicBattleManager_GetAliveFighter(
             battleManager,
             &campACount,
@@ -10639,7 +10943,9 @@ void DrawTestManagerRows(void* battleManager) {
     }
 
     void* currentOpponent = battleManager && Originals::MCLogicBattleManager_GetCurrentOpponent ?
-        Originals::MCLogicBattleManager_GetCurrentOpponent(battleManager) :
+        (TryConsumeManagedWorkUnits() ?
+            Originals::MCLogicBattleManager_GetCurrentOpponent(battleManager) :
+            nullptr) :
         nullptr;
 
     if (!ImGui::BeginTable(
@@ -10659,13 +10965,15 @@ void DrawTestManagerRows(void* battleManager) {
     DrawValueRow("Manager pointer", FormatPointer(battleManager));
     DrawValueRow(
         "Manager account",
-        battleManager && Originals::MCLogicBattleManager_get_m_uAccountId ?
+        battleManager && Originals::MCLogicBattleManager_get_m_uAccountId &&
+                TryConsumeManagedWorkUnits() ?
             FormatUInt64(Originals::MCLogicBattleManager_get_m_uAccountId(battleManager)) :
             "Waiting"
     );
     DrawValueRow(
         "Is host",
-        battleManager && Originals::MCLogicBattleManager_get_IsHost ?
+        battleManager && Originals::MCLogicBattleManager_get_IsHost &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleManager_get_IsHost(battleManager)) :
             "Waiting"
     );
@@ -10673,7 +10981,8 @@ void DrawTestManagerRows(void* battleManager) {
     DrawValueRow("fightOver field", FormatFieldBool(battleManager, fightOverField));
     DrawValueRow(
         "defendFailed getter",
-        battleManager && Originals::MCLogicBattleManager_get_m_bDefendFaild ?
+        battleManager && Originals::MCLogicBattleManager_get_m_bDefendFaild &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleManager_get_m_bDefendFaild(battleManager)) :
             "Waiting"
     );
@@ -10694,13 +11003,15 @@ void DrawTestManagerRows(void* battleManager) {
     );
     DrawValueRow(
         "has alive camp A",
-        battleManager && Originals::MCLogicBattleManager_HasAliveFighter ?
+        battleManager && Originals::MCLogicBattleManager_HasAliveFighter &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleManager_HasAliveFighter(battleManager, 1)) :
             "Waiting"
     );
     DrawValueRow(
         "has alive camp B",
-        battleManager && Originals::MCLogicBattleManager_HasAliveFighter ?
+        battleManager && Originals::MCLogicBattleManager_HasAliveFighter &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCLogicBattleManager_HasAliveFighter(battleManager, 2)) :
             "Waiting"
     );
@@ -10711,7 +11022,9 @@ void DrawTestManagerRows(void* battleManager) {
 // Draws the test behavior rows overlay section without changing game state.
 void DrawTestBehaviorRows(uint64_t targetAccountId) {
     void* behaviorApi = targetAccountId && Originals::MCBehaviorThreeApi_Get ?
-        Originals::MCBehaviorThreeApi_Get(targetAccountId) :
+        (TryConsumeManagedWorkUnits() ?
+            Originals::MCBehaviorThreeApi_Get(targetAccountId) :
+            nullptr) :
         nullptr;
 
     if (!ImGui::BeginTable(
@@ -10731,13 +11044,15 @@ void DrawTestBehaviorRows(uint64_t targetAccountId) {
     DrawValueRow("Behavior API pointer", FormatPointer(behaviorApi));
     DrawValueRow(
         "Current battle result",
-        behaviorApi && Originals::MCBehaviorThreeApi_GetCurrentBattleRoundResult ?
+        behaviorApi && Originals::MCBehaviorThreeApi_GetCurrentBattleRoundResult &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCBehaviorThreeApi_GetCurrentBattleRoundResult(behaviorApi)) :
             "Waiting"
     );
     DrawValueRow(
         "Current phase type",
-        behaviorApi && Originals::MCBehaviorThreeApi_GetCurrentPhaseType ?
+        behaviorApi && Originals::MCBehaviorThreeApi_GetCurrentPhaseType &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt(Originals::MCBehaviorThreeApi_GetCurrentPhaseType(behaviorApi)) :
             "Waiting"
     );
@@ -10748,6 +11063,10 @@ void DrawTestBehaviorRows(uint64_t targetAccountId) {
 // Formats list field count for readable overlay output.
 std::string FormatListFieldCount(void* instance, FieldInfo* field) {
     if (!instance || !field) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits(2)) {
         return "Waiting";
     }
 
@@ -10766,6 +11085,10 @@ std::string FormatListFieldCount(void* instance, FieldInfo* field) {
 // Formats int dictionary field count for readable overlay output.
 std::string FormatIntDictionaryFieldCount(void* instance, FieldInfo* field) {
     if (!instance || !field) {
+        return "Waiting";
+    }
+
+    if (!TryConsumeManagedWorkUnits(2)) {
         return "Waiting";
     }
 
@@ -10891,43 +11214,50 @@ void DrawTestBridgeRows() {
     DrawValueRow("Hurt items dictionary", FormatFieldPointer(battleBridge, hurtItemsField));
     DrawValueRow(
         "Super crystal shop open",
-        battleBridge && Originals::MCBattleBridge_IsSuperCrystalShopOpen ?
+        battleBridge && Originals::MCBattleBridge_IsSuperCrystalShopOpen &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCBattleBridge_IsSuperCrystalShopOpen(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "GogoCard panel open",
-        battleBridge && Originals::MCBattleBridge_IsGoGoCardPanelOpen ?
+        battleBridge && Originals::MCBattleBridge_IsGoGoCardPanelOpen &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCBattleBridge_IsGoGoCardPanelOpen(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "Keyboard enabled",
-        battleBridge && Originals::MCBattleBridge_CheckEnableKeyBoard ?
+        battleBridge && Originals::MCBattleBridge_CheckEnableKeyBoard &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::MCBattleBridge_CheckEnableKeyBoard(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "Free memory",
-        battleBridge && Originals::MCBattleBridge_GetFreeMemory ?
+        battleBridge && Originals::MCBattleBridge_GetFreeMemory &&
+                TryConsumeManagedWorkUnits() ?
             FormatInt64(Originals::MCBattleBridge_GetFreeMemory(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "Ping samples",
-        battleBridge && Originals::MCBattleBridge_GetPingTimes ?
+        battleBridge && Originals::MCBattleBridge_GetPingTimes &&
+                TryConsumeManagedWorkUnits() ?
             FormatUInt32(Originals::MCBattleBridge_GetPingTimes(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "Ping stdev",
-        battleBridge && Originals::MCBattleBridge_GetStdevPing ?
+        battleBridge && Originals::MCBattleBridge_GetStdevPing &&
+                TryConsumeManagedWorkUnits() ?
             FormatFloat(Originals::MCBattleBridge_GetStdevPing(battleBridge)) :
             "Waiting"
     );
     DrawValueRow(
         "FPS stdev",
-        battleBridge && Originals::MCBattleBridge_GetStdevFps ?
+        battleBridge && Originals::MCBattleBridge_GetStdevFps &&
+                TryConsumeManagedWorkUnits() ?
             FormatFloat(Originals::MCBattleBridge_GetStdevFps(battleBridge)) :
             "Waiting"
     );
@@ -11059,25 +11389,29 @@ void DrawTestShopPanelRows() {
     DrawValueRow("Visible hero items", FormatListFieldCount(heroShopItemList, heroItemListField));
     DrawValueRow(
         "Last operation time",
-        heroShopPanel && Originals::UIPanelBattleHeroShop_get_lastOperationTime ?
+        heroShopPanel && Originals::UIPanelBattleHeroShop_get_lastOperationTime &&
+                TryConsumeManagedWorkUnits() ?
             FormatUInt32(Originals::UIPanelBattleHeroShop_get_lastOperationTime(heroShopPanel)) :
             "Waiting"
     );
     DrawValueRow(
         "Delay open",
-        heroShopPanel && Originals::UIPanelBattleHeroShop_IsDelayOpen ?
+        heroShopPanel && Originals::UIPanelBattleHeroShop_IsDelayOpen &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::UIPanelBattleHeroShop_IsDelayOpen(heroShopPanel)) :
             "Waiting"
     );
     DrawValueRow(
         "Info after spectate",
-        heroShopPanel && Originals::UIPanelBattleHeroShop_GetInfoAfterSpectate ?
+        heroShopPanel && Originals::UIPanelBattleHeroShop_GetInfoAfterSpectate &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::UIPanelBattleHeroShop_GetInfoAfterSpectate(heroShopPanel)) :
             "Waiting"
     );
     DrawValueRow(
         "Can operate",
-        heroShopPanel && Originals::UIPanelBattleHeroShop_CanOperate ?
+        heroShopPanel && Originals::UIPanelBattleHeroShop_CanOperate &&
+                TryConsumeManagedWorkUnits() ?
             FormatBool(Originals::UIPanelBattleHeroShop_CanOperate(heroShopPanel, true)) :
             "Waiting"
     );
@@ -11166,6 +11500,10 @@ std::vector<PredictionPlayer> CollectPredictionPlayers(uint64_t selfAccountId) {
 
         if (entry.hashCode < 0 || entry.key == 0 || entry.key == selfAccountId) {
             continue;
+        }
+
+        if (!TryConsumeManagedWorkUnits(3)) {
+            break;
         }
 
         int hp = Originals::MCLogicBattleData_ILOGIC_GetPlayerHP ?
@@ -11606,12 +11944,17 @@ void RefreshPredictionOpponentCache(
     ResetOpponentPredictionHistoryIfNeeded(selfAccountId);
     PredictionCache::CurrentRoundOpponents.clear();
 
-    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
+            TryConsumeManagedWorkUnits() ?
         Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
         0;
 
     auto addObservation = [invasionManager](uint64_t accountId, void* manager, bool alive) {
         if (accountId == 0) {
+            return;
+        }
+
+        if (!TryConsumeManagedWorkUnits(3)) {
             return;
         }
 
@@ -11887,7 +12230,8 @@ std::vector<OpponentPredictionRow> BuildOpponentPredictions(uint64_t selfAccount
         ) :
         0;
 
-    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound ?
+    uint32_t round = Originals::MCLogicBattleData_ILOGIC_GetGameRound &&
+            TryConsumeManagedWorkUnits() ?
         Originals::MCLogicBattleData_ILOGIC_GetGameRound(nullptr) :
         0;
     OpponentCyclePrediction cyclePatternPrediction =
@@ -12341,6 +12685,11 @@ void DrawTestAllManagersTable() {
         return;
     }
 
+    if (!TryConsumeManagedWorkUnits()) {
+        DrawWaitingText("Waiting for diagnostic budget");
+        return;
+    }
+
     auto* battleManagers = Originals::MCLogicBattleData_ILOGIC_GetAllBattleMgr(nullptr);
     const MonoStructures::Dictionary<uint64_t, void*>::Entry* entries = nullptr;
     int entryLimit = 0;
@@ -12382,6 +12731,10 @@ void DrawTestAllManagersTable() {
 
         if (entry.hashCode < 0 || entry.key == 0) {
             continue;
+        }
+
+        if (!TryConsumeManagedWorkUnits(6)) {
+            break;
         }
 
         uint64_t accountId = entry.key;
@@ -12446,10 +12799,12 @@ void DrawTestTab() {
     uint64_t defaultAccountId = selfAccountId;
     uint64_t selfOpponentId =
         selfAccountId && Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID ?
-            Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
-                nullptr,
-                selfAccountId
-            ) :
+            (TryConsumeManagedWorkUnits() ?
+                Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                    nullptr,
+                    selfAccountId
+                ) :
+                0) :
             0;
 
     if (ImGui::Button("Retry test bindings")) {
@@ -12485,12 +12840,15 @@ void DrawTestTab() {
     );
     uint64_t opponentAccountId =
         targetAccountId && Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID ?
-            Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
-                nullptr,
-                targetAccountId
-            ) :
+            (TryConsumeManagedWorkUnits() ?
+                Originals::MCLogicBattleData_ILOGIC_GetCurrentOpponentAccountID(
+                    nullptr,
+                    targetAccountId
+                ) :
+                0) :
             0;
-    void* targetManager = GetBattleManagerByAccountId(targetAccountId);
+    void* targetManager =
+        TryConsumeManagedWorkUnits(2) ? GetBattleManagerByAccountId(targetAccountId) : nullptr;
 
     if (ImGui::BeginTabBar("##TestTabBar", ImGuiTabBarFlags_FittingPolicyScroll)) {
         if (ImGui::BeginTabItem("Predict")) {

@@ -277,6 +277,9 @@ Follow the existing C++ style in `jni/Main.cpp`:
 - Keep runtime cadence split by responsibility: 100 ms for Shop and Arena,
   250 ms for Combat and Auto-Play, and 500 ms for GGC Info, opponent prediction
   history, and the next-enemy HUD refresh.
+- Keep burst control separate from those cadences. Hot loops and Test
+  diagnostics should consume the managed-work budget and defer remaining
+  IL2CPP/Unity/game reads to later frames instead of increasing tick delays.
 - Preserve Auto-Play's sub-cooldowns inside that 250 ms tick: stateful
   opt-in `StartAI`, long-gated AI refresh, built-in deploy, separate smart
   formation, level-up, and auction actions should not share one retry clock.
@@ -306,6 +309,9 @@ Use this checklist when looking for hidden bugs or logic flaws:
   ready or the render thread has not attached.
 - Confirm render-frame budget checks still let delayed work retry on later
   frames and do not turn retryable runtime state into a one-shot failure.
+- Confirm managed-work budget checks cover any new loop that can issue many
+  IL2CPP, Unity, or game function/field reads in one frame, including Test
+  diagnostics and table-backed automation.
 - Confirm prediction changes preserve the source priority: exact live pair,
   reverse live pair, invader-order read, recent-cycle queue, seven-round
   cycle-pattern signal from completed history, round-robin fallback,

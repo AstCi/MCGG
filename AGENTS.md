@@ -152,7 +152,9 @@ shop and arena ticks, 250 ms Combat and Auto-Play ticks, and 500 ms GGC Info,
 opponent history, and HUD cadences unless the task explicitly changes timing.
 Frame-time feature work is guarded by a small render budget; when a frame is
 already busy, lower-priority ticks should defer to the next frame instead of
-stacking managed calls into one render pass.
+stacking managed calls into one render pass. Hot loops and Test diagnostics
+also consume a per-frame managed-work unit budget so IL2CPP, Unity, and game
+function/field reads defer without changing the existing tick delays.
 
 Typed regular instance field helpers should prefer resolved
 `il2cpp_field_get_offset` access and bounded direct copies for hot reads and
@@ -212,8 +214,9 @@ to safe non-fight/non-result phases instead of replaying `StartAI` on every tick
 allow only a long-gated `StartAI` refresh to recover from dropped internal AI
 state, keep SpeedHack as an explicit Arena-only control, and do not hold
 `FeatureMutex` while calling managed IL2CPP APIs. Managed Auto-Play action groups
-after planning should keep checking the frame budget so card, auction, AI,
-formation, and level-up work do not stack into one overloaded render pass.
+after planning should keep checking the frame and managed-work budgets so card,
+auction, AI, formation, and level-up work do not stack into one overloaded
+render pass.
 
 Large table-backed UI surfaces such as Shop hero targets and Arena hero, item,
 and GogoCard lists should render through clipping or another visible-row pattern

@@ -235,6 +235,9 @@ they are backed by `dump/dump.cs` and live runtime verification.
 - Shop diagnostic readiness is grouped across core shop diagnostic readers; each
   individual shop row still reports `Waiting` when its specific reader is not
   available.
+- Test diagnostics and automation hot paths share a per-frame managed-work
+  budget, so live IL2CPP/game readers can report `Waiting` for a frame instead
+  of issuing an oversized burst of calls.
 - Long Shop and Arena data tables render only visible rows to keep scrolling and
   tab switches responsive after table metadata is loaded.
 
@@ -316,8 +319,11 @@ recovery.
 Frame-time feature work has a small render budget. If binding retries, managed
 reference refresh, table loading, HUD refresh, or automation work has already
 spent the budget for the current frame, lower-priority ticks defer to the next
-frame. Table cache loading is demand-driven and runs only for table-backed tabs
-or active Auto-Play.
+frame. A separate managed-work unit budget caps how many IL2CPP, Unity, or game
+readers a single render frame can issue; when that cap is reached, diagnostics
+show `Waiting` and lower-priority automation waits for the next scheduled tick.
+Table cache loading is demand-driven and runs only for table-backed tabs or
+active Auto-Play.
 
 The current runtime cadence is intentionally split by responsibility:
 
@@ -331,6 +337,8 @@ The current runtime cadence is intentionally split by responsibility:
 - Combat power tick: 250 ms.
 - Auto-Play tick: 250 ms.
 - Feature frame budget: 12 ms.
+- Feature managed-work budget: 256 units per render frame; all-or-nothing table
+  loading may use up to 2048 units before deferring.
 - Auto-Play AI start retry: 2000 ms.
 - Auto-Play AI refresh: 8000 ms.
 - Auto-Play built-in deploy cooldown: 750 ms.
@@ -630,6 +638,9 @@ the following bug-prone areas:
 - Render-frame work is budgeted. Binding retries, table loads, prediction HUD
   refreshes, and heavier Auto-Play board/opponent scans may defer later
   automation ticks to the next frame, but those ticks remain retryable.
+- Managed IL2CPP, Unity, and game calls are also counted per frame. Do not
+  bypass the managed-work budget in hot loops or Test diagnostics just to avoid
+  changing the existing tick delays.
 - Persistent managed-object references are published only after they are pinned
   with `il2cpp_gchandle_new(obj, true)`. The handle registry is match-scoped:
   handles stay alive through object refreshes and are released only when the
@@ -727,6 +738,9 @@ the following bug-prone areas:
   250 ms ticks for Combat and Auto-Play, and the 500 ms GGC Info,
   opponent-history, and HUD refresh cadences unless timing changes are part of
   the task.
+- Keep burst control inside those cadences. Use the managed-work budget and
+  frame deferral for expensive IL2CPP/game readers instead of stretching the
+  existing delays.
 - Preserve built-in AI as an opt-in Auto-Play assist that is phase-gated and
   stateful; do not make enabling Auto-Play itself call `StartAI` immediately.
 - Preserve shop automation throttles for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
