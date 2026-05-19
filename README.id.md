@@ -65,7 +65,7 @@ Target default yang didukung:
 
 ## Konteks Game
 
-Riset eksternal yang dicek pada 2026-05-18 menjaga konteks proyek tetap selaras
+Riset eksternal yang dicek pada 2026-05-19 menjaga konteks proyek tetap selaras
 dengan game live tanpa menganggap saran meta saat ini sebagai kebenaran native
 yang stabil.
 
@@ -73,10 +73,10 @@ Referensi publik utama:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   mengidentifikasi game ini sebagai judul strategi multiplayer auto-chess dari
-  Vizta Games, menampilkan 10M+ download dan update store 9 Mei 2026 pada web
-  region yang dicek, menyorot event S6 Dawnlight Celebration, serta mengarah ke
-  website resmi dan kanal YouTube. Jumlah download dan tanggal update store
-  dapat berbeda berdasarkan region atau cache, jadi gunakan listing untuk
+  Vizta Games, menampilkan 10M+ download, update store 9 Mei 2026, dan event
+  S6 Dawnlight Celebration pada web region yang dicek, serta mengarah ke website
+  resmi dan kanal YouTube. Jumlah download, rating, event, dan tanggal update
+  store dapat berbeda berdasarkan region atau cache, jadi gunakan listing untuk
   identitas produk dan link, bukan asumsi native binding.
 - [Website resmi](https://magicchessgogo.com/) menjelaskan loop inti sebagai
   recruit dan upgrade hero terinspirasi MLBB, membentuk lineup untuk battle
@@ -88,7 +88,8 @@ Referensi publik utama:
 - [Berita Season 5 MOONTON](https://en.moonton.com/news/305.html) mencatat Go
   Go Plaza, GOGO MOBA, konten Golden Month, synergy baru, momentum esports GO1,
   dan milestone 30M download setelah global launch. Copy "What's new" Google
-  Play saat ini juga menyebut Commander Ruby dan mode Gold Rush.
+  Play yang dicek pada 19 Mei 2026 juga menyebut Commander Ruby, mode Gold
+  Rush, City Hero draw, dan event Neolight Wheel.
 - [Kanal YouTube resmi](https://www.youtube.com/@MagicChessGoGo) serta materi
   gameplay/guide berguna untuk mengamati alur UI, perilaku shop, pilihan
   Commander, placement board, pacing economy, pilihan Go Go Card, dan istilah
@@ -117,7 +118,7 @@ behavior kecuali sudah didukung oleh `dump/dump.cs` dan verifikasi runtime live.
 ### Info
 
 - Tabel player dan next-enemy yang diurutkan dengan player lokal di posisi pertama.
-- Readout kualitas GGC untuk round 7 dan round 13.
+- Readout kualitas GGC otomatis untuk setiap round GGC yang terdeteksi.
 - Indikator status overlay untuk binding yang terlambat atau belum tersedia.
 
 ### Combat
@@ -314,6 +315,7 @@ Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 
 - Retry binding: 2000 ms.
 - Refresh managed reference: 100 ms.
+- Refresh Info GGC: 500 ms.
 - Check state match: 500 ms.
 - Retry reload tabel: 2000 ms.
 - Tick fitur Arena: 100 ms.
@@ -685,6 +687,10 @@ area yang rawan bug berikut:
 - Untuk perubahan Arena SpeedHack, verifikasi
   `UnityEngine.Time.set_timeScale(Single)` terhadap `dump/dump.cs` dan reset
   scale ke normal saat fitur dinonaktifkan.
+- Untuk perubahan Info GGC, verifikasi
+  `MCLogicBattleData.ILOGIC_GetCrystalQualityByRound(UInt64, Int32)` terhadap
+  `dump/dump.cs`, jaga scan round tetap bounded, dan pertahankan readout pada
+  cadence refresh yang di-throttle.
 - Prediksi opponent sebaiknya memprioritaskan runtime state berbasis dump
   seperti `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
   `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, dan
@@ -699,8 +705,8 @@ area yang rawan bug berikut:
 - Pertahankan persistence Settings tetap memakai file config milik proyek, bukan mengaktifkan persistence `.ini` ImGui.
 - Pertahankan retryable binding behavior. Jangan menyimpan method atau field unresolved secara permanen sebagai missing.
 - Pertahankan tick terpisah 100 ms untuk shop automation dan arena effects,
-  tick 250 ms untuk Combat dan Auto-Play, serta cadence 500 ms untuk riwayat
-  opponent/HUD kecuali perubahan timing memang bagian dari task.
+  tick 250 ms untuk Combat dan Auto-Play, serta cadence 500 ms untuk Info GGC,
+  riwayat opponent, dan HUD kecuali perubahan timing memang bagian dari task.
 - Pertahankan built-in AI sebagai assist Auto-Play opt-in yang phase-gated dan
   stateful; jangan membuat aktivasi Auto-Play langsung memanggil `StartAI`.
 - Pertahankan throttle shop automation untuk buy, repeat-buy, refresh, target-worth, dan pengecekan Recommendation Lineup.

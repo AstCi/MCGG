@@ -218,6 +218,9 @@ namespace RuntimeConfig {
     constexpr int CombatTickMs = 250;
     constexpr int AutoPlayTickMs = 250;
     constexpr int OpponentPredictionTickMs = 500;
+    constexpr int GgcInfoRefreshMs = 500;
+    constexpr int GgcRoundScanStart = 1;
+    constexpr int GgcRoundScanEnd = 99;
     constexpr int FeatureFrameBudgetMs = 12;
     constexpr int ShopActionCooldownMs = 350;
     constexpr int ShopRepeatBuyCooldownMs = 1500;
@@ -8831,13 +8834,17 @@ struct PlayerInfoRow {
     std::string enemyName;
 };
 
+struct GgcQualityRow {
+    int round = 0;
+    int quality = -1;
+};
+
 namespace UiCache {
     std::vector<PlayerInfoRow> InfoPlayerRows;
     bool InfoPlayersReady = false;
     std::chrono::steady_clock::time_point LastInfoPlayerRefresh{};
     bool GgcInfoReady = false;
-    int GgcRound7Quality = -1;
-    int GgcRound13Quality = -1;
+    std::vector<GgcQualityRow> GgcQualityRows;
     std::chrono::steady_clock::time_point LastGgcInfoRefresh{};
     std::string NextEnemyHudText;
     std::chrono::steady_clock::time_point LastNextEnemyHudRefresh{};
@@ -8859,18 +8866,22 @@ std::string NormalizeDisplayName(const std::string& value) {
     return output;
 }
 
+// Checks whether a GGC quality value is one shown by the overlay.
+bool IsKnownGgcQuality(int quality) {
+    return quality >= 1 && quality <= 3;
+}
+
 // Refreshes ggc info on its throttled runtime cadence.
 void RefreshGgcInfo(bool force = false) {
     if (!IsIl2CppRuntimeReady() ||
         !Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound) {
         UiCache::GgcInfoReady = false;
-        UiCache::GgcRound7Quality = -1;
-        UiCache::GgcRound13Quality = -1;
+        UiCache::GgcQualityRows.clear();
         return;
     }
 
     if (!force &&
-        !IntervalElapsed(UiCache::LastGgcInfoRefresh, 500)) {
+        !IntervalElapsed(UiCache::LastGgcInfoRefresh, RuntimeConfig::GgcInfoRefreshMs)) {
         return;
     }
 
@@ -8881,23 +8892,28 @@ void RefreshGgcInfo(bool force = false) {
 
     if (selfAccountId == 0) {
         UiCache::GgcInfoReady = false;
-        UiCache::GgcRound7Quality = -1;
-        UiCache::GgcRound13Quality = -1;
+        UiCache::GgcQualityRows.clear();
         return;
     }
 
-    UiCache::GgcRound7Quality =
-        Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound(
+    std::vector<GgcQualityRow> rows;
+    rows.reserve(8);
+
+    for (int round = RuntimeConfig::GgcRoundScanStart;
+         round <= RuntimeConfig::GgcRoundScanEnd;
+         ++round) {
+        int quality = Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound(
             nullptr,
             selfAccountId,
-            7
+            round
         );
-    UiCache::GgcRound13Quality =
-        Originals::MCLogicBattleData_ILOGIC_GetCrystalQualityByRound(
-            nullptr,
-            selfAccountId,
-            13
-        );
+
+        if (IsKnownGgcQuality(quality)) {
+            rows.push_back({round, quality});
+        }
+    }
+
+    UiCache::GgcQualityRows = std::move(rows);
     UiCache::GgcInfoReady = true;
 }
 
@@ -9319,23 +9335,48 @@ void DrawGgcInfo() {
         return;
     }
 
-    ImGui::TextUnformatted("Round 7");
-    ImGui::SameLine(120.0f);
-    ImGui::TextColored(
-        GgcQualityColor(UiCache::GgcRound7Quality),
-        "%s (%d)",
-        GgcQualityName(UiCache::GgcRound7Quality),
-        UiCache::GgcRound7Quality
-    );
+    if (UiCache::GgcQualityRows.empty()) {
+        ImGui::TextUnformatted("No GGC qualities detected");
+        return;
+    }
 
-    ImGui::TextUnformatted("Round 13");
-    ImGui::SameLine(120.0f);
-    ImGui::TextColored(
-        GgcQualityColor(UiCache::GgcRound13Quality),
-        "%s (%d)",
-        GgcQualityName(UiCache::GgcRound13Quality),
-        UiCache::GgcRound13Quality
-    );
+    if (!ImGui::BeginTable(
+        "##GgcQualityTable",
+        2,
+        ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_ScrollY,
+        ImVec2(0.0f, 160.0f)
+    )) {
+        return;
+    }
+
+    ImGui::TableSetupColumn("Round", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+    ImGui::TableSetupColumn("Quality");
+    ImGui::TableHeadersRow();
+
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(UiCache::GgcQualityRows.size()));
+    while (clipper.Step()) {
+        for (int rowIndex = clipper.DisplayStart; rowIndex < clipper.DisplayEnd; ++rowIndex) {
+            const GgcQualityRow& row = UiCache::GgcQualityRows[rowIndex];
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", row.round);
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(
+                GgcQualityColor(row.quality),
+                "%s (%d)",
+                GgcQualityName(row.quality),
+                row.quality
+            );
+        }
+    }
+
+    ImGui::EndTable();
 }
 
 // Draws the info players table overlay section without changing game state.

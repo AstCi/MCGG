@@ -74,12 +74,13 @@ bash jni/build-curl-android.sh
   MCGG as an 8-player auto-battler with hero recruitment/upgrades, Commander
   skills, Go Go Cards, economy/interest decisions, synergies, equipment,
   auctions, board placement, and round-specific supplies. Public context was
-  last checked on 2026-05-18; Google Play showed 10M+ downloads, a May 9, 2026
-  store update, S6 Dawnlight Celebration event context, Commander Ruby, and Gold
-  Rush mode in the checked web region, while MOONTON Season 5 news documented
-  Go Go Plaza, GOGO MOBA, Golden Month content, new synergies, GO1 esports
-  momentum, and a 30M-download milestone after global launch. Treat those public
-  details as product context rather than native binding assumptions.
+  last checked on 2026-05-19; Google Play showed 10M+ downloads, a May 9, 2026
+  store update, S6 Dawnlight Celebration event context, Commander Ruby, Gold
+  Rush mode, City Hero draw, and the Neolight Wheel event in the checked web
+  region, while MOONTON Season 5 news documented Go Go Plaza, GOGO MOBA, Golden
+  Month content, new synergies, GO1 esports momentum, and a 30M-download
+  milestone after global launch. Treat those public details as product context
+  rather than native binding assumptions.
 - Prediction research should treat public scouting and positioning advice as
   weak heuristics. Runtime current-opponent data, invader order, recent-cycle
   learning, cycle-gap distance, and local history should drive predictions
@@ -154,6 +155,10 @@ bash jni/build-curl-android.sh
 - Arena SpeedHack depends on `UnityEngine.Time.set_timeScale(Single)`. Reset
   the time scale when disabling the feature, leaving active battle state, or
   resetting feature state.
+- GGC Info depends on
+  `MCLogicBattleData.ILOGIC_GetCrystalQualityByRound(UInt64, Int32)`. Verify it
+  against `dump/dump.cs`, keep the round scan bounded, and keep the readout on
+  its throttled refresh cadence.
 - Settings includes a persisted next-enemy HUD toggle. Keep the HUD as
   lightweight bottom-center foreground text and throttle current-opponent or
   prediction refreshes instead of doing prediction work every render frame.
@@ -175,17 +180,19 @@ bash jni/build-curl-android.sh
   explicitly requires it.
 
 Current user-facing overlay areas are Info, Combat, Auto-Play, Shop, Arena,
-Appearance, Settings, and Test. Auto-Play includes adaptive strategy pressure,
-opponent-aware board analysis, advanced role-aware formation moves, selected
-shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
-decisions, and optional coordination of Combat and Arena assists. Shop currently
-includes free-hero buying, manual target buying, Recommendation Lineup buying,
-auto-refresh pause conditions, keep-gold reserve, and target counts. Combat
-includes Invisible Scout. Arena includes hero/item/card granting, Battle Power controls for
-force-win, HP-loss prevention, attack-ratio boosting, fight-value boosting, and
-enemy-board crippling, active synergy forcing, level/population forcing, enemy
-HP pressure, passive gold, free economy, unlimited hero pool, shop-lock bypass
-helpers, Skip Round, and SpeedHack.
+Appearance, Settings, and Test. Info includes the player/enemy table and
+automatic GGC quality readout for every detected GGC round. Auto-Play includes
+adaptive strategy pressure, opponent-aware board analysis, advanced role-aware
+formation moves, selected shop target promotion, GogoCard scoring, auction
+scoring, gold-interest economy decisions, and optional coordination of Combat
+and Arena assists. Shop currently includes free-hero buying, manual target
+buying, Recommendation Lineup buying, auto-refresh pause conditions, keep-gold
+reserve, and target counts. Combat includes Invisible Scout. Arena includes
+hero/item/card granting, Battle Power controls for force-win, HP-loss
+prevention, attack-ratio boosting, fight-value boosting, and enemy-board
+crippling, active synergy forcing, level/population forcing, enemy HP pressure,
+passive gold, free economy, unlimited hero pool, shop-lock bypass helpers, Skip
+Round, and SpeedHack.
 Appearance includes ImGui
 Dark, Catppuccin Mocha, and additional palettes inspired by Dear ImGui issue #707.
 Settings includes the optional next-enemy HUD and GitHub release update status
@@ -244,8 +251,8 @@ Follow the existing C++ style in `jni/Main.cpp`:
   invalid offset should degrade to the IL2CPP raw access path, not to a
   one-shot failure.
 - Keep runtime cadence split by responsibility: 100 ms for Shop and Arena,
-  250 ms for Combat and Auto-Play, and 500 ms for opponent prediction history
-  and the next-enemy HUD refresh.
+  250 ms for Combat and Auto-Play, and 500 ms for GGC Info, opponent prediction
+  history, and the next-enemy HUD refresh.
 - Preserve Auto-Play's sub-cooldowns inside that 250 ms tick: stateful
   opt-in `StartAI`, long-gated AI refresh, built-in deploy, separate smart
   formation, level-up, and auction actions should not share one retry clock.
@@ -294,6 +301,9 @@ Use this checklist when looking for hidden bugs or logic flaws:
   Combat assist toggles.
 - Keep opponent prediction exactness narrow: only the local player's exact
   current opponent should be forced to `100%`.
+- Keep GGC Info bounded: scan only the configured round range, ignore unknown
+  quality values, and refresh on its 500 ms cadence rather than every render
+  frame.
 - Reset Unity time scale to `1.0x` on every SpeedHack disable, inactive-battle,
   and feature-reset path.
 - For repository-wide documentation refreshes, update top-level Markdown only

@@ -35,14 +35,14 @@ is written to `libs/` and `obj/`; do not treat these as source modules.
 
 When a task asks for broader Magic Chess Go Go analysis, include internet or
 video-context research, then translate it into durable engineering notes instead
-of volatile meta instructions. Current public context checked on 2026-05-18:
+of volatile meta instructions. Current public context checked on 2026-05-19:
 
 - Google Play identifies Magic Chess: Go Go as a Vizta Games auto-chess,
-  multiplayer strategy game, showed 10M+ downloads and a May 9, 2026 update in
-  the checked web region, listed S6 Dawnlight Celebration events, and points to
-  `magicchessgogo.com` and the official YouTube channel. Store counts and
-  update dates can vary by region/cache, so use them as product context rather
-  than native binding facts.
+  multiplayer strategy game, showed 10M+ downloads, a May 9, 2026 update, and
+  S6 Dawnlight Celebration events in the checked web region, and points to
+  `magicchessgogo.com` and the official YouTube channel. Store counts, ratings,
+  events, and update dates can vary by region/cache, so use them as product
+  context rather than native binding facts.
 - The official site describes the game around 8-player battles, hero
   recruitment/upgrades, Commander skills, Go Go Cards, roles, synergies, and
   classic/ranked/custom play.
@@ -51,9 +51,10 @@ of volatile meta instructions. Current public context checked on 2026-05-18:
   vocabulary, but seasonal lineups and tier claims are not stable native facts.
 - MOONTON's public news around Season 5 documented Go Go Plaza, GOGO MOBA,
   Golden Month content, Neobeasts/Exorcist/Mystic Meow/Heartbond synergies, and
-  GO1 esports momentum. Google Play's current "What's new" context mentions
-  Commander Ruby and Gold Rush mode. Treat these as live product context and
-  vocabulary, not native binding contracts.
+  GO1 esports momentum. Google Play's May 19, 2026 checked "What's new" context
+  mentions Commander Ruby, Gold Rush mode, City Hero draw, and the Neolight
+  Wheel event. Treat these as live product context and vocabulary, not native
+  binding contracts.
 - Public positioning and scouting guides emphasize adapting to the opponents'
   boards, while older Magic Chess pairing discussion describes a turn-like
   opponent order where recent opponents are deprioritized until the cycle
@@ -141,8 +142,8 @@ must be allowed to resolve later. Field misses may be cached only with a short
 retry backoff so hot feature paths do not rescan metadata every frame. Method
 resolution is name, parameter-count, and parameter-name-shape based; verify
 overload-sensitive changes against `dump/dump.cs`. Preserve the separate 100 ms
-shop and arena ticks, 250 ms Combat and Auto-Play ticks, and 500 ms opponent
-history/HUD cadence unless the task explicitly changes timing.
+shop and arena ticks, 250 ms Combat and Auto-Play ticks, and 500 ms GGC Info,
+opponent history, and HUD cadences unless the task explicitly changes timing.
 Frame-time feature work is guarded by a small render budget; when a frame is
 already busy, lower-priority ticks should defer to the next frame instead of
 stacking managed calls into one render pass.
@@ -262,6 +263,11 @@ When changing Arena SpeedHack, verify `UnityEngine.Time.set_timeScale(Single)`
 against `dump/dump.cs` and reset the time scale when disabling the feature or
 resetting feature state.
 
+When changing GGC Info, verify
+`MCLogicBattleData.ILOGIC_GetCrystalQualityByRound(UInt64, Int32)` against
+`dump/dump.cs`, keep the round scan bounded, and keep the readout on its
+throttled refresh cadence.
+
 For documentation-only changes, at minimum inspect the rendered Markdown diff.
 For native or mixed changes, also run:
 
@@ -305,6 +311,8 @@ Current user-facing feature areas are Info, Combat, Auto-Play, Shop, Arena,
 Appearance, Settings, and Test. If a feature binding or update-check state is
 missing at runtime, the overlay should show a `Waiting for ...` or explicit
 failure state rather than failing silently.
+Info includes the player/enemy table and automatic GGC quality readout for every
+detected GGC round.
 Auto-Play includes adaptive strategy pressure, opt-in built-in AI coordination,
 opponent-aware board analysis, advanced role-aware formation moves, selected
 shop target promotion, GogoCard scoring, auction scoring, gold-interest economy
@@ -353,4 +361,4 @@ toggles, opt-in safe-phase built-in AI startup, separate Auto-Play
 deploy/formation cooldowns, render-frame budget deferral between Auto-Play
 action groups, method-miss backoff, guarded binding resolution, update-check
 thread/cache/backoff behavior, clipped long tables, exact-opponent-only `100%`
-prediction rows, and Unity timeScale reset paths.
+prediction rows, bounded GGC round scans, and Unity timeScale reset paths.

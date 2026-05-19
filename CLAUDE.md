@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Core Logic**: `jni/Main.cpp` handles the entire mod lifecycle: process verification → detached setup thread with startup waits → early `eglSwapBuffers` hook → dependency resolution (`liblogic.so`) → IL2CPP export resolution and setup-thread attachment → guarded first feature-binding pass → `UnityEngine.Input.GetTouch` hook → lazy render-thread ImGui initialization → render-thread IL2CPP attach → retryable game method and field resolution → managed reference refresh → feature ticks → overlay rendering.
 - **Feature Binding**: `ResolveFeatureBindings()` resolves game methods and hooks. Missing methods and fields are retried periodically because Unity metadata and battle objects may not be ready during first setup. Empty method scans and field misses use short retry backoffs so hot feature paths do not rescan missing metadata every frame. Binding resolution is single-flight so the setup thread and render thread do not scan IL2CPP metadata at the same time.
 - **Hooking Strategy**: Uses Dobby to hook `eglSwapBuffers` for frame-by-frame UI injection, `UnityEngine.Input.GetTouch` for touch-to-mouse forwarding, and selected game methods for Combat visibility and Arena behavior.
-- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. Opponent prediction history and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for opt-in safe-phase built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
+- **Runtime Ticks**: Arena effects and Shop automation run on separate 100 ms ticks. Combat power and Auto-Play run on separate 250 ms ticks. GGC Info, opponent prediction history, and next-enemy HUD text refresh on 500 ms cadences. Frame-time feature work has a small render budget so lower-priority ticks defer instead of stacking heavy managed work into one render pass. Auto-Play builds a shared gold-interest plan and uses bounded cooldowns for opt-in safe-phase built-in AI startup, long-gated AI refresh, built-in deployment, separate smart formation moves, level-up actions, and auction bidding. Shop automation uses bounded cooldowns for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks, and waits for the shop panel to be operable before UI actions.
 - **Runtime Caches**: Managed references are cached through atomic pointers. Hero/equipment/GogoCard table data is collected locally and published under `RuntimeMutex::FeatureMutex` when entering a new match. GitHub release metadata is cached in memory under `RuntimeMutex::UpdateMutex` for the session.
 - **Field Access**: Typed regular instance field reads and non-pointer writes
   use resolved `il2cpp_field_get_offset` values for direct bounded copies on
@@ -63,18 +63,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Game Context From External Research
 
-- Current external research was checked on 2026-05-18 using the Google Play
+- Current external research was checked on 2026-05-19 using the Google Play
   listing, official website, official YouTube channel, and gameplay/guide
   material.
 - Google Play currently identifies the title as a Vizta Games strategy
-  auto-chess game, showed 10M+ downloads and a May 9, 2026 store update in the
-  checked web region, listed S6 Dawnlight Celebration events, and links to the
-  official site and YouTube channel. Treat those figures as product context
-  because store metadata can vary by region/cache.
+  auto-chess game, showed 10M+ downloads, a May 9, 2026 store update, and S6
+  Dawnlight Celebration events in the checked web region, and links to the
+  official site and YouTube channel. Treat those figures and event labels as
+  product context because store metadata can vary by region/cache.
 - MOONTON's public Season 5 news documents Go Go Plaza, GOGO MOBA, Golden Month
   content, Neobeasts/Exorcist/Mystic Meow/Heartbond synergies, GO1 esports
   momentum, and a 30M-download milestone after global launch. Google Play's
-  current "What's new" context mentions Commander Ruby and Gold Rush mode.
+  May 19, 2026 checked "What's new" context mentions Commander Ruby, Gold Rush
+  mode, City Hero draw, and the Neolight Wheel event.
 - Public sources frame MCGG as an 8-player auto-battler built around recruiting,
   merging, deploying, and repositioning MLBB-inspired heroes while managing
   gold, level, population, HP, equipment, synergies, Commander skills, Go Go
@@ -92,7 +93,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   managed reads, and `Waiting for ...` states.
 
 ### Current Feature Areas
-- **Info**: player/enemy table and GGC round 7/13 quality display.
+- **Info**: player/enemy table and automatic GGC quality readout for every detected GGC round.
 - **Combat**: Invisible Scout.
 - **Auto-Play**: binary-side adaptive strategy controller. It reads round,
   phase, HP, gold, level, population, lineup worth, fight value,
@@ -157,6 +158,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   not inside the ImGui draw path. Weight live current-opponent data first, then
   invader order, recent-cycle learning, cycle-gap distance, round-robin
   fallback, and history.
+- GGC Info should keep `ILOGIC_GetCrystalQualityByRound(UInt64, Int32)`
+  dump-verified, scan only the bounded configured round range, and refresh on
+  its 500 ms cadence rather than every render frame.
 - SpeedHack changes global Unity time scale and must reset to `1.0x` when disabled, when battle state is unavailable, or when feature state resets.
 - The update checker is informational only. Keep it detached/asynchronous,
   cached under `RuntimeMutex::UpdateMutex`, throttled to the 6-hour refresh and

@@ -65,18 +65,18 @@ The default supported target is:
 
 ## Game Context
 
-External research checked on 2026-05-18 keeps the project context aligned with
+External research checked on 2026-05-19 keeps the project context aligned with
 the live game without treating current meta advice as stable native truth.
 
 Primary public references:
 
 - [Google Play: Magic Chess: Go Go](https://play.google.com/store/apps/details?id=com.mobilechess.gp)
   identifies the game as an auto-chess, multiplayer strategy title by Vizta
-  Games, showed 10M+ downloads and a May 9, 2026 store update in the checked
-  web region, highlighted S6 Dawnlight Celebration events, and points to the
-  official website and YouTube channel. Store counts and update dates can vary
-  by region or cache, so use the listing for product identity and links rather
-  than native binding assumptions.
+  Games, showed 10M+ downloads, a May 9, 2026 store update, and S6 Dawnlight
+  Celebration events in the checked web region, and points to the official
+  website and YouTube channel. Store counts, ratings, events, and update dates
+  can vary by region or cache, so use the listing for product identity and
+  links rather than native binding assumptions.
 - [Official website](https://magicchessgogo.com/) describes the core loop as
   recruiting and upgrading MLBB-inspired heroes, forming lineups for 8-player
   battles, using Commander skills, selecting Go Go Cards at key stages, and
@@ -86,8 +86,9 @@ Primary public references:
   synergies, combat buffs, and seasonal mechanics.
 - [MOONTON Season 5 news](https://en.moonton.com/news/305.html) documents Go Go
   Plaza, GOGO MOBA, Golden Month content, new synergies, GO1 esports momentum,
-  and a 30M-download milestone after global launch. Google Play's current
-  "What's new" copy also names Commander Ruby and Gold Rush mode.
+  and a 30M-download milestone after global launch. Google Play's May 19, 2026
+  checked "What's new" copy also names Commander Ruby, Gold Rush mode, City
+  Hero draw, and the Neolight Wheel event.
 - [Official YouTube channel](https://www.youtube.com/@MagicChessGoGo) and
   gameplay/guide material are useful for observing UI flow, shop behavior,
   Commander choices, board placement, economy pacing, Go Go Card picks, and
@@ -116,7 +117,7 @@ they are backed by `dump/dump.cs` and live runtime verification.
 ### Info
 
 - Player and next-enemy table sorted with the local player first.
-- GGC quality readout for round 7 and round 13.
+- Automatic GGC quality readout for every detected GGC round.
 - Overlay status indicators for delayed or unavailable bindings.
 
 ### Combat
@@ -309,6 +310,7 @@ The current runtime cadence is intentionally split by responsibility:
 
 - Binding retry: 2000 ms.
 - Managed reference refresh: 100 ms.
+- GGC Info refresh: 500 ms.
 - Match state check: 500 ms.
 - Table reload retry: 2000 ms.
 - Arena feature tick: 100 ms.
@@ -670,6 +672,10 @@ the following bug-prone areas:
   against `dump/dump.cs`; keep missing pieces visible as `Waiting for ...`.
 - For Arena SpeedHack changes, verify `UnityEngine.Time.set_timeScale(Single)`
   against `dump/dump.cs` and reset the scale to normal when the feature is disabled.
+- For GGC Info changes, verify
+  `MCLogicBattleData.ILOGIC_GetCrystalQualityByRound(UInt64, Int32)` against
+  `dump/dump.cs`, keep the round scan bounded, and keep the readout on its
+  throttled refresh cadence.
 - Opponent prediction should prefer dump-backed runtime state such as
   `LogicInvasionMgr`, `LogicRealPlayerInvader.lbmList`,
   `PairGenRoundTable`/`PairGenTwoPlayerMode`, `lastRoundEnemy`, and
@@ -683,8 +689,9 @@ the following bug-prone areas:
 - Keep Settings persistence scoped to project-owned config files rather than enabling ImGui `.ini` persistence.
 - Preserve retryable binding behavior. Do not permanently cache unresolved methods or fields as missing.
 - Preserve separate 100 ms ticks for shop automation and arena effects, the
-  250 ms ticks for Combat and Auto-Play, and the 500 ms opponent-history/HUD
-  refresh cadence unless timing changes are part of the task.
+  250 ms ticks for Combat and Auto-Play, and the 500 ms GGC Info,
+  opponent-history, and HUD refresh cadences unless timing changes are part of
+  the task.
 - Preserve built-in AI as an opt-in Auto-Play assist that is phase-gated and
   stateful; do not make enabling Auto-Play itself call `StartAI` immediately.
 - Preserve shop automation throttles for buy, repeat-buy, refresh, target-worth, and Recommendation Lineup checks.
