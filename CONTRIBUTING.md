@@ -219,7 +219,10 @@ bash jni/build-curl-android.sh
   bounded retry backoff, and limited to public release metadata. Do not send
   gameplay state, account data, device identifiers, credentials, or private
   runtime data, and do not add automatic download, deployment, forced update,
-  bypass, or evasion behavior.
+  bypass, or evasion behavior. The current native request disables libcurl peer
+  and host certificate verification and does not configure Android's system CA
+  path, so keep that compatibility tradeoff limited to public release metadata
+  unless certificate validation is restored.
 - Do not commit generated `libs/` or `obj/` output, including curl/libpsl/OpenSSL
   build output under `obj/curl-*`, `obj/libpsl-*`, `obj/openssl-*`, and related
   install dirs.

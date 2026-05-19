@@ -9206,9 +9206,8 @@ bool FetchGitHubReleaseJson(std::string& response, long& httpCode, std::string& 
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteToString);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);

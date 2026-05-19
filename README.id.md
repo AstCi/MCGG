@@ -626,9 +626,12 @@ Saat runtime, overlay melakukan query
 libcurl, memfilter draft dan prerelease, memperlakukan rilis compatible pertama
 sebagai versi terbaru, lalu membandingkannya dengan versi lokal embedded atau
 target commit rilis yang cocok. Request hanya memakai header standar GitHub API
-dan user agent proyek. Request ini tidak mengirim gameplay state, data account,
-identifier device, credential, atau data runtime privat, dan tidak pernah
-men-download atau menerapkan asset rilis secara otomatis.
+dan user agent proyek. Request native saat ini menonaktifkan verifikasi
+certificate peer dan host libcurl serta tidak mengonfigurasi path CA system
+Android; jaga pilihan kompatibilitas ini tetap terbatas pada check metadata
+informatif. Request ini tidak mengirim gameplay state, data account, identifier
+device, credential, atau data runtime privat, dan tidak pernah men-download atau
+menerapkan asset rilis secara otomatis.
 
 ## Alur Runtime
 
@@ -743,7 +746,10 @@ area yang rawan bug berikut:
 - Update checker hanya informatif. Pertahankan prosesnya asynchronous, simpan
   metadata rilis di cache dengan `RuntimeMutex::UpdateMutex`, throttle retry,
   dan jangan menambahkan download otomatis, deployment, forced update, bypass,
-  atau upload data gameplay.
+  atau upload data gameplay. Request saat ini menonaktifkan verifikasi
+  certificate peer dan host libcurl, jadi jangan gunakan ulang path ini untuk
+  payload sensitif atau fitur network yang lebih luas tanpa memulihkan validasi
+  certificate.
 - Komentar fungsi kini mencakup semua definisi native function milik proyek di
   `jni/Main.cpp` dan `jni/structures/Structures.hpp`; helper baru harus menjaga
   coverage tersebut, bukan hanya mengandalkan komentar section.
@@ -950,7 +956,9 @@ check`, `Up to date`, `Update available`, `GitHub request failed`, `Malformed
 release metadata`, atau `Unknown local version`.
 
 Jika request gagal, pastikan environment target dapat mengakses `api.github.com`
-melalui HTTPS dan direktori certificate system Android tersedia untuk OpenSSL.
+melalui HTTPS. Request native saat ini menonaktifkan verifikasi certificate peer
+dan host libcurl serta tidak menyetel path CA Android, sehingga ketersediaan
+certificate store bukan penyebab kegagalan yang diharapkan untuk checker ini.
 Kegagalan dicoba ulang dengan backoff, dan tombol refresh dapat memulai check
 manual. `Unknown local version` berarti library dibangun tanpa metadata
 `MCGG_BUILD_VERSION` yang usable; rebuild melalui `ndk-build` atau CI agar
@@ -996,6 +1004,10 @@ Periksa log GitHub Actions untuk:
   libpsl `0.21.5` yang dipin, dan tanpa flag yang menonaktifkan fitur curl;
   fitur opsional tetap bergantung pada library target yang tersedia saat
   langkah configure.
+- Checker GitHub Releases saat ini menonaktifkan verifikasi certificate peer
+  dan host libcurl serta tidak mengonfigurasi path CA Android. Batasi request
+  tersebut pada metadata rilis publik dan jangan gunakan ulang untuk data
+  sensitif.
 - Ketersediaan update bergantung pada akses network publik ke GitHub Releases
   dan metadata build embedded. Checker ini hanya informatif dan tidak pernah
   menginstal atau men-deploy library yang lebih baru.
@@ -1007,6 +1019,9 @@ Periksa log GitHub Actions untuk:
 Jangan melaporkan security issue melalui public issue jika laporan berisi detail sensitif, exploit path, atau informasi yang dapat disalahgunakan. Gunakan komunikasi privat dengan maintainer jika memungkinkan.
 
 Saat berkontribusi pada perubahan terkait keamanan, hindari menyertakan secret, device-specific identifier, dump privat, asset proprietary, atau instruksi operasional yang memungkinkan penggunaan tanpa otorisasi.
+
+Jangan gunakan ulang opsi libcurl update-check saat ini untuk traffic network
+sensitif selama verifikasi certificate dinonaktifkan.
 
 ## Kontribusi
 

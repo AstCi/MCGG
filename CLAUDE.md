@@ -56,8 +56,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   through libcurl on a detached worker, filters draft/prerelease entries,
   compares the latest compatible release against the local version or target
   commit, and shows status, release date, summary, last check time, refresh
-  control, and scrollable release notes. It sends no gameplay/account/device
-  data and must not download, deploy, inject, bypass, or force updates.
+  control, and scrollable release notes. The current request disables libcurl
+  peer and host certificate verification and does not configure Android's
+  system CA path, so keep it scoped to public release metadata unless
+  certificate validation is restored. It sends no gameplay/account/device data
+  and must not download, deploy, inject, bypass, or force updates.
 - **curl Build**: `jni/curl`, `jni/libpsl`, and `jni/openssl` are pinned
   submodules built by `jni/build-curl-android.sh` into `obj/curl-install/`,
   `obj/libpsl-install/`, and `obj/openssl-install/`. The libpsl submodule is
@@ -199,7 +202,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The update checker is informational only. Keep it detached/asynchronous,
   cached under `RuntimeMutex::UpdateMutex`, throttled to the 6-hour refresh and
   bounded retry backoff, and free of gameplay/account/device/private data
-  collection or automatic download/deployment behavior.
+  collection or automatic download/deployment behavior. The current libcurl
+  options disable peer and host certificate verification, so do not reuse that
+  path for sensitive traffic or broader network features without restoring
+  certificate validation.
 - Repository-wide documentation work should update the top-level Markdown files only: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md`, and `README.id.md`. Leave `goal.md` and submodule Markdown untouched.
 
 ### Shared State Discipline
@@ -273,4 +279,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Update checker**: Keep GitHub release checks on a detached worker or an
   equally non-blocking path. Preserve in-memory caching, retry/backoff, explicit
   failure states, scrollable changelog rendering, privacy guarantees, and
-  informational-only behavior.
+  informational-only behavior. Keep the current disabled peer/host certificate
+  verification limited to public release metadata unless certificate validation
+  is restored.

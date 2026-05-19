@@ -196,10 +196,13 @@ The update checker is informational only. It embeds local build metadata through
 `MCGG_BUILD_REPOSITORY`, `MCGG_BUILD_VERSION`, `MCGG_BUILD_COMMIT`, and
 `MCGG_BUILD_REF`, queries public GitHub Releases with libcurl on a detached
 worker, filters draft/prerelease entries, caches release notes in memory, and
-uses a 6-hour refresh cadence with 5-to-60-minute retry backoff. It must not
-send gameplay state, account data, device identifiers, credentials, or private
-runtime data, and must not add automatic download, deployment, injection,
-forced update, bypass, or evasion behavior.
+uses a 6-hour refresh cadence with 5-to-60-minute retry backoff. The current
+native request disables libcurl peer and host certificate verification and does
+not configure Android's system CA path; keep that compatibility choice limited
+to public release metadata unless certificate validation is restored. It must
+not send gameplay state, account data, device identifiers, credentials, or
+private runtime data, and must not add automatic download, deployment,
+injection, forced update, bypass, or evasion behavior.
 
 Shop automation is intentionally single-threaded and throttled on the frame
 tick. Preserve the existing buy, repeat-buy, refresh, target-worth, and

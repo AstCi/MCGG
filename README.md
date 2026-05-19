@@ -618,9 +618,12 @@ At runtime, the overlay queries
 libcurl, filters out draft and prerelease entries, treats the first compatible
 release as the latest version, and compares it with the embedded local version
 or matching release target commit. The request uses only standard GitHub API
-headers and a project user agent. It does not send gameplay state, account data,
-device identifiers, credentials, or private runtime data, and it never downloads
-or applies release assets automatically.
+headers and a project user agent. The current native request disables libcurl
+peer and host certificate verification and does not configure Android's system
+CA path; keep that compatibility choice scoped to this informational metadata
+check. It does not send gameplay state, account data, device identifiers,
+credentials, or private runtime data, and it never downloads or applies release
+assets automatically.
 
 ## Runtime Flow
 
@@ -734,7 +737,9 @@ the following bug-prone areas:
 - The update checker is informational only. Keep it asynchronous, keep release
   metadata cached behind `RuntimeMutex::UpdateMutex`, keep retries throttled,
   and do not add automatic download, deployment, forced update, bypass, or
-  gameplay-data upload behavior.
+  gameplay-data upload behavior. The current request disables libcurl peer and
+  host certificate verification, so do not reuse it for sensitive payloads or
+  broader network features without restoring certificate validation.
 - Function comments now cover all project-owned native function definitions in
   `jni/Main.cpp` and `jni/structures/Structures.hpp`; new helpers should keep
   that coverage intact rather than relying on section-level comments alone.
@@ -936,11 +941,13 @@ date`, `Update available`, `GitHub request failed`, `Malformed release
 metadata`, or `Unknown local version`.
 
 If the request fails, verify that the target environment can reach
-`api.github.com` over HTTPS and that Android's system certificate directory is
-available to OpenSSL. Failures are retried with backoff, and the refresh button
-can start a manual check. Unknown local version means the library was built
-without usable `MCGG_BUILD_VERSION` metadata; rebuild through `ndk-build` or CI
-so the `MCGG_BUILD_*` constants are defined.
+`api.github.com` over HTTPS. The current native request disables libcurl peer
+and host certificate verification and does not set an Android CA path, so
+certificate-store availability is not the expected failure cause for this
+checker. Failures are retried with backoff, and the refresh button can start a
+manual check. Unknown local version means the library was built without usable
+`MCGG_BUILD_VERSION` metadata; rebuild through `ndk-build` or CI so the
+`MCGG_BUILD_*` constants are defined.
 
 ### CI build failed
 
@@ -980,6 +987,10 @@ Check the GitHub Actions log for:
 - Curl is configured with the pinned OpenSSL `4.0.0` TLS backend, pinned libpsl
   `0.21.5` support, and without curl feature-disabling flags; optional features
   still depend on target libraries available to the configure step.
+- The GitHub Releases checker currently disables libcurl peer and host
+  certificate verification and does not configure an Android CA path. Keep that
+  request limited to public release metadata and do not reuse it for sensitive
+  data.
 - Update availability depends on public GitHub Releases network access and
   embedded build metadata. The checker is informational and never installs or
   deploys a newer library.
@@ -991,6 +1002,9 @@ Check the GitHub Actions log for:
 Do not report security issues through public issues if the report contains sensitive details, exploit paths, or information that could be misused. Use private communication with the maintainer where possible.
 
 When contributing security-related changes, avoid including secrets, device-specific identifiers, private dumps, proprietary assets, or operational instructions that would enable unauthorized use.
+
+Do not reuse the current update-check libcurl options for sensitive network
+traffic while certificate verification is disabled.
 
 ## Contributing
 
