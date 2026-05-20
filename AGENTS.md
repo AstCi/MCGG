@@ -168,6 +168,10 @@ already busy, lower-priority ticks should defer to the next frame instead of
 stacking managed calls into one render pass. Hot loops and diagnostics consume
 a per-frame managed-work unit budget so IL2CPP, Unity, and game function/field
 reads defer without changing the existing tick delays.
+When removing or moving feature sections, search for scheduled tick calls and
+hook callbacks that still reference the moved helpers. The shop tick calls
+`RunShopAutomation(selfAccountId)`, so keep that helper declared or defined
+before `TickFeatures()`.
 
 Typed regular instance field helpers should prefer resolved
 `il2cpp_field_get_offset` access and bounded direct copies for hot reads and
@@ -286,6 +290,11 @@ For native or mixed changes, also run:
 git diff --check
 ```
 
+If the current task explicitly forbids local build checks, do not run
+`./jni/build-curl-android.sh`, `ndk-build`, or equivalent compile/build checks.
+Use source-level checks and GitHub Actions evidence instead, then report that
+the build was intentionally skipped.
+
 For repository-wide documentation refreshes, update only top-level Markdown
 files unless explicitly asked to edit submodules. Leave `goal.md`, generated
 outputs, and vendored Markdown under `jni/Il2CppVersions/`, `jni/imgui/`,
@@ -336,6 +345,7 @@ publication with hero rows filtered for valid IDs, commanders, and placeholder
 names, shop panel operability before buy or refresh, grouped shop diagnostic
 readiness, retryable method and field misses, guarded binding resolution,
 update-check thread/cache/backoff behavior, clipped long tables,
+scheduled helper definitions such as `RunShopAutomation`,
 exact-opponent-only `100%` prediction rows, completed-history seven-round
 prediction patterns, eight-round forecast learning, bounded GGC round scans,
 Unity timeScale reset paths, and Info bot labels sourced from

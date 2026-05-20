@@ -21,6 +21,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   commit old dump backup files unless explicitly requested.
 - Run `git diff --check` for native or mixed code changes.
 - For documentation-only edits, inspect the Markdown diff before finishing.
+- If a task explicitly forbids local build checks, do not run
+  `bash jni/build-curl-android.sh`, `ndk-build -C jni`, or equivalent compile
+  checks. Use source-level checks and GitHub Actions logs, then state that the
+  build was intentionally skipped.
 - The GitHub Actions release workflow is `.github/workflows/build.yml`; it
   prepares release metadata before compilation, passes `MCGG_BUILD_*` constants
   into `ndk-build`, installs curl/libpsl/OpenSSL build tools, builds the static
@@ -116,6 +120,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   metadata.
 - Keep Shop automation single-threaded, bounded to visible shop slots, and
   gated on shop panel operability before buy or refresh actions.
+- Preserve scheduled helper definitions during source refactors. The 100 ms
+  Shop tick calls `RunShopAutomation(selfAccountId)`, so that helper must stay
+  declared or defined before `TickFeatures()`.
 - Keep table cache loading demand-driven and long tables clipped.
 - Keep opponent prediction exactness narrow: only the local player's exact
   current opponent is forced to `100%`; per-player history, invader ordering,

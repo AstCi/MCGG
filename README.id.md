@@ -301,6 +301,25 @@ demand-driven dan hanya berjalan untuk tab berbasis tabel atau automasi shop akt
 
 Cadence runtime saat ini sengaja dipisah berdasarkan tanggung jawab:
 
+- Retry binding: 2000 ms.
+- Refresh managed reference: 100 ms.
+- Refresh Info GGC: 500 ms.
+- Check state match: 500 ms.
+- Retry load tabel: 2000 ms.
+- Tick fitur Arena: 100 ms.
+- Tick automasi Shop: 100 ms.
+- Tick fitur Combat: 250 ms.
+- Budget frame fitur: 12 ms.
+- Budget managed-work fitur: 256 unit per render frame; load tabel
+  all-or-nothing dapat memakai sampai 2048 unit sebelum ditunda.
+- Tick history prediksi opponent: 500 ms.
+- Refresh teks HUD next-enemy: 500 ms saat HUD aktif.
+- Refresh row prediksi opponent cached: 500 ms saat tab Info atau HUD
+  next-enemy membutuhkan data prediksi.
+- Check update GitHub release: sekali per sesi overlay, lalu maksimal setiap
+  6 jam kecuali user menekan refresh. Kegagalan network atau metadata retry
+  dengan backoff bounded dari 5 menit sampai 60 menit.
+
 Miss metadata field juga dicoba ulang dengan backoff singkat. Ini menjaga
 metadata Unity yang terlambat tetap retryable tanpa membiarkan lookup field yang
 hilang melakukan scan ulang pada setiap tick fitur.
@@ -595,6 +614,9 @@ area yang rawan bug berikut:
   yang dibutuhkan belum tersedia.
 - Automasi shop bergantung pada operability UI live, termasuk delay, spectate,
   dan check `CanOperate(Boolean)` saat binding tersedia.
+- Tick fitur Shop 100 ms memanggil `RunShopAutomation(selfAccountId)`, jadi
+  penghapusan fitur atau reshuffle source besar harus mempertahankan definisi
+  helper tersebut sebelum `TickFeatures()`.
 - Label bot pada Info berasal dari `SystemData.RoomData.bRobot` melalui
   `ILOGIC_GetStPlayerData(UInt64)` dan harus turun ke nama player biasa saat
   binding atau metadata field belum tersedia.
@@ -614,10 +636,16 @@ area yang rawan bug berikut:
   `dump/dump.cs`; RVA dump adalah diagnostik, bukan kontrak binding.
 - Pertahankan perilaku lookup method dan field yang retryable. Metadata yang
   belum tersedia harus memakai backoff singkat dan bisa resolve belakangan.
+- Saat menghapus atau memindahkan block fitur, cari scheduled tick call dan
+  callback hook yang masih mengacu ke helper yang dipindahkan. Helper native
+  C++ seperti `RunShopAutomation` harus tetap dideklarasikan atau didefinisikan
+  sebelum penggunaan pertamanya di `TickFeatures()`.
 - Jaga UI tabel panjang tetap memakai clipping dan load table cache hanya untuk
   tab berbasis tabel atau automasi aktif yang memakai metadata tabel.
 - Jalankan `git diff --check` untuk perubahan native atau campuran. Repository
-  ini tidak memiliki framework unit test khusus.
+  ini tidak memiliki framework unit test khusus. Jika task spesifik melarang
+  build check lokal, gunakan source check non-build ditambah log GitHub Actions
+  dan catat build yang dilewati pada handoff.
 
 ## Troubleshooting
 
@@ -759,6 +787,8 @@ Periksa log GitHub Actions untuk:
 - Tool build curl/libpsl/OpenSSL atau static library generated di bawah `obj/`
   belum tersedia.
 - Compile error di `jni/Main.cpp` atau native source pihak ketiga.
+- Deklarasi atau definisi helper native hilang setelah refactor, terutama
+  helper tick terjadwal seperti `RunShopAutomation`.
 - Include path yang salah di `jni/Android.mk`.
 
 ## Batasan yang Diketahui

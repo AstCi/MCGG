@@ -5416,6 +5416,296 @@ bool RunScavengerShopCleanup(
     return true;
 }
 
+// Runs shop automation for one bounded feature tick.
+void RunShopAutomation(uint64_t selfAccountId) {
+    if (!IsIl2CppRuntimeReady()) {
+        return;
+    }
+
+    bool regularShopAutomation =
+        FeatureState::ShopBuyFreeHero ||
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopBuyRecommendLineup ||
+        FeatureState::ShopRefresh ||
+        FeatureState::ShopStopRefreshAtFreeHero ||
+        FeatureState::ShopStopRefreshAtSelectedHero ||
+        FeatureState::ShopStopRefreshAtRecommendLineup;
+    bool anyShopAutomation =
+        regularShopAutomation ||
+        FeatureState::ShopForceScavengerExpensiveHero;
+
+    if (!anyShopAutomation || selfAccountId == 0) {
+        return;
+    }
+
+    if (!Originals::MCLogicBattleData_ILOGIC_GetShopItemData ||
+        !Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin) {
+        return;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+
+    if (FeatureState::ShopScavengerAutoRefreshPending.load()) {
+        if (RunScavengerShopCleanup(selfAccountId, now, true)) {
+            FeatureState::ShopScavengerAutoRefreshPending = false;
+        }
+        return;
+    }
+
+    if (!regularShopAutomation) {
+        return;
+    }
+
+    if (!CooldownElapsed(
+            FeatureState::LastShopAction,
+            RuntimeConfig::ShopActionCooldownMs,
+            now
+        )) {
+        return;
+    }
+
+    bool hasBuyAction =
+        FeatureState::ShopBuyFreeHero ||
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopBuyRecommendLineup;
+    bool hasRefreshAction = FeatureState::ShopRefresh.load();
+    if ((hasBuyAction || hasRefreshAction) && !IsShopPanelReadyForAutomation()) {
+        return;
+    }
+
+    bool needRefreshShop = true;
+    int cachedCoin = -1;
+    bool useSelectedTargets =
+        FeatureState::ShopBuySelectedHero ||
+        FeatureState::ShopStopRefreshAtSelectedHero;
+    bool useRecommendLineup =
+        FeatureState::ShopBuyRecommendLineup ||
+        FeatureState::ShopStopRefreshAtRecommendLineup;
+    int recommendHeroId = useRecommendLineup ? GetRecommendLineupHeroId(now) : 0;
+    std::vector<std::pair<int, int>> recommendTargets =
+        useRecommendLineup ?
+            GetRecommendLineupTargetsSnapshot() :
+            std::vector<std::pair<int, int>>{};
+    std::unordered_map<int, HeroAutomationState> shopTargets =
+        useSelectedTargets ?
+            GetShopHeroTargetsSnapshot() :
+            std::unordered_map<int, HeroAutomationState>{};
+
+    auto getCoin = [&]() {
+        if (cachedCoin < 0) {
+            if (!TryConsumeManagedWorkUnits()) {
+                return -1;
+            }
+
+            cachedCoin =
+                Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
+        }
+
+        return cachedCoin;
+    };
+
+    for (int slot = 0; slot < 5; ++slot) {
+        if (!TryConsumeManagedWorkUnits(4)) {
+            break;
+        }
+
+        bool needFx = false;
+        bool isFreeBuy = false;
+
+        if (Originals::MCLogicBattleData_ILOGIC_IsCurrFreeBuy &&
+            (FeatureState::ShopBuyFreeHero || FeatureState::ShopStopRefreshAtFreeHero)) {
+            isFreeBuy = Originals::MCLogicBattleData_ILOGIC_IsCurrFreeBuy(
+                nullptr,
+                selfAccountId,
+                slot,
+                &needFx
+            );
+        }
+
+        MCLogicHeroShopItemData shopData =
+            Originals::MCLogicBattleData_ILOGIC_GetShopItemData(
+                nullptr,
+                selfAccountId,
+                slot
+            );
+
+        if (!IsValidShopItemData(shopData, slot)) {
+            continue;
+        }
+
+        int heroId = shopData.m_iHeroId;
+        auto selectedIt = shopTargets.find(heroId);
+        bool isSelected =
+            useSelectedTargets &&
+            selectedIt != shopTargets.end() &&
+            selectedIt->second.selected;
+        auto recommendIt = std::find_if(
+            recommendTargets.begin(),
+            recommendTargets.end(),
+            [heroId](const std::pair<int, int>& item) {
+                return item.first == heroId;
+            }
+        );
+        bool isRecommend =
+            recommendIt != recommendTargets.end() ||
+            (useRecommendLineup && IsRecommendLineupHero(heroId, recommendHeroId));
+        int selectedTargetCount =
+            isSelected ?
+                ClampShopTargetCount(selectedIt->second.targetCount) :
+                0;
+        int recommendTargetCount = isRecommend ?
+            (recommendIt != recommendTargets.end() ?
+                recommendIt->second :
+                GetRecommendLineupTargetCountForHero(heroId)) :
+            0;
+        int ownCount = -1;
+        int poolCount = 1;
+        bool needsOwnCount =
+            (isSelected &&
+             (FeatureState::ShopStopRefreshAtSelectedHero ||
+              FeatureState::ShopBuySelectedHero)) ||
+            (isRecommend &&
+             (FeatureState::ShopStopRefreshAtRecommendLineup ||
+              FeatureState::ShopBuyRecommendLineup));
+
+        if (needsOwnCount && Originals::MCLogicBattleData_ILogic_HeroOwnCount) {
+            if (!TryConsumeManagedWorkUnits()) {
+                break;
+            }
+
+            ownCount = Originals::MCLogicBattleData_ILogic_HeroOwnCount(
+                nullptr,
+                selfAccountId,
+                heroId
+            );
+        }
+
+        if (needsOwnCount && Originals::MCLogicBattleData_ILogic_HeroCountInPool) {
+            if (!TryConsumeManagedWorkUnits()) {
+                break;
+            }
+
+            poolCount = Originals::MCLogicBattleData_ILogic_HeroCountInPool(nullptr, heroId);
+        }
+
+        bool selectedNeedsCopies =
+            isSelected &&
+            ownCount >= 0 &&
+            ownCount < selectedTargetCount &&
+            poolCount > 0;
+        bool recommendNeedsCopies =
+            isRecommend &&
+            ownCount >= 0 &&
+            ownCount < recommendTargetCount &&
+            poolCount > 0;
+
+        if (FeatureState::ShopStopRefreshAtSelectedHero &&
+            selectedNeedsCopies) {
+            needRefreshShop = false;
+        }
+
+        if (FeatureState::ShopStopRefreshAtRecommendLineup &&
+            recommendNeedsCopies) {
+            needRefreshShop = false;
+        }
+
+        if (FeatureState::ShopStopRefreshAtFreeHero && isFreeBuy) {
+            needRefreshShop = false;
+        }
+
+        if (FeatureState::ShopBuyFreeHero && isFreeBuy) {
+            if (!CanAttemptShopBuy(selfAccountId, slot, shopData, ownCount, true, now)) {
+                continue;
+            }
+
+            if (SelectShopSlot(slot)) {
+                MarkShopBuyAttempt(selfAccountId, slot, shopData, ownCount, true, now);
+                return;
+            }
+        }
+
+        bool canBuySelected = FeatureState::ShopBuySelectedHero && isSelected;
+        bool canBuyRecommend = FeatureState::ShopBuyRecommendLineup && isRecommend;
+
+        if (!canBuySelected && !canBuyRecommend) {
+            continue;
+        }
+
+        int targetCount = std::max(
+            canBuySelected ? selectedTargetCount : 0,
+            canBuyRecommend ? recommendTargetCount : 0
+        );
+
+        if (targetCount <= 0 || ownCount < 0) {
+            continue;
+        }
+
+        if (ownCount >= 0 && ownCount >= targetCount) {
+            continue;
+        }
+
+        if (poolCount <= 0) {
+            continue;
+        }
+
+        int coin = getCoin();
+
+        if (coin < shopData.m_iPrice) {
+            continue;
+        }
+
+        if (FeatureState::ShopKeepGold &&
+            coin - shopData.m_iPrice < FeatureState::ShopKeepGoldAt) {
+            continue;
+        }
+
+        if (!CanAttemptShopBuy(selfAccountId, slot, shopData, ownCount, false, now)) {
+            continue;
+        }
+
+        if (SelectShopSlot(slot)) {
+            MarkShopBuyAttempt(selfAccountId, slot, shopData, ownCount, false, now);
+            return;
+        }
+    }
+
+    if (!FeatureState::ShopRefresh ||
+        !needRefreshShop ||
+        !Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop) {
+        return;
+    }
+
+    void* heroShopPanel = FeatureState::HeroShopPanel.load();
+    if (!heroShopPanel || !IsShopPanelReadyForAutomation()) {
+        return;
+    }
+
+    if (!HasWorthwhileShopTarget(selfAccountId, now) ||
+        !CanAttemptShopRefresh(now)) {
+        return;
+    }
+
+    int refreshCost = Originals::MCLogicBattleData_ILOGIC_GetRefreshCost &&
+            TryConsumeManagedWorkUnits() ?
+        Originals::MCLogicBattleData_ILOGIC_GetRefreshCost(nullptr, selfAccountId) :
+        0;
+    bool isFreeRefresh =
+        Originals::MCLogicBattleData_ILOGIC_IsRefreshFree &&
+         TryConsumeManagedWorkUnits() &&
+         Originals::MCLogicBattleData_ILOGIC_IsRefreshFree(nullptr, selfAccountId);
+    int coin = getCoin();
+    bool canRefresh =
+        isFreeRefresh ||
+        (coin >= refreshCost &&
+         (!FeatureState::ShopKeepGold ||
+          coin - refreshCost >= FeatureState::ShopKeepGoldAt));
+
+    if (canRefresh) {
+        Originals::UIPanelBattleHeroShop_KeyBoardRefreshShop(heroShopPanel);
+        MarkShopRefreshAttempt(now);
+    }
+}
+
 // Grants hero through verified live-game bindings.
 void GiveHero(int heroId, int star) {
     if (!IsIl2CppRuntimeReady()) {

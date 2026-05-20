@@ -51,6 +51,9 @@ bash jni/build-curl-android.sh
   resolve later, not become a one-shot failure.
 - Keep frame-time managed work behind IL2CPP readiness, render-thread attach,
   and the existing managed-work budget.
+- When removing or moving a feature block, search for remaining scheduled tick
+  calls and hook callbacks. Helpers called from `TickFeatures()`, including
+  `RunShopAutomation`, must remain declared or defined before first use.
 - Info player bot labels should read `SystemData.RoomData.bRobot` through
   `ILOGIC_GetStPlayerData(UInt64)` and degrade to ordinary names when runtime
   data is unavailable.
@@ -107,6 +110,8 @@ Use this checklist when looking for hidden bugs or logic flaws:
 - Confirm Info bot labels use `SystemData.RoomData.bRobot` and do not block the
   player list when that optional reader is missing.
 - Confirm shop buy and refresh actions still require an operable shop panel.
+- Confirm source refactors preserve the scheduled shop automation helper used by
+  the 100 ms shop tick.
 - Confirm table caches are demand-loaded and published only after required
   hero, equipment, and GogoCard data is available.
 - Confirm opponent prediction keeps exact current-opponent evidence above
@@ -138,7 +143,9 @@ Native build submissions should preserve the app-wide stability flags in
 
 Documentation-only changes do not require a native build, but mention that in
 the pull request. Inspect the Markdown diff and run `git diff --check` before
-submitting documentation-only repository refreshes.
+submitting documentation-only repository refreshes. If a task explicitly forbids
+local build checks, do not run the build commands; use non-build source checks
+and GitHub Actions logs, then state the skipped build clearly.
 
 ## Release Workflow
 

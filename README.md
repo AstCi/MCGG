@@ -605,6 +605,9 @@ the following bug-prone areas:
   tables are unavailable.
 - Shop automation depends on live UI operability, including delay, spectate,
   and `CanOperate(Boolean)` checks when those bindings are available.
+- The 100 ms shop feature tick calls `RunShopAutomation(selfAccountId)`, so
+  feature removals or large source reshuffles must preserve a visible
+  definition of that helper before `TickFeatures()`.
 - Info bot labels come from `SystemData.RoomData.bRobot` through
   `ILOGIC_GetStPlayerData(UInt64)` and should degrade to ordinary player names
   while that binding or field metadata is unavailable.
@@ -624,10 +627,16 @@ the following bug-prone areas:
   `dump/dump.cs`; dump RVAs are diagnostics, not binding contracts.
 - Preserve retryable method and field lookup behavior. Missing metadata should
   back off briefly and resolve later when runtime state is ready.
+- When removing or moving feature blocks, search for scheduled tick calls and
+  hook callbacks that still reference the moved helpers. Native C++ helpers
+  such as `RunShopAutomation` must remain declared or defined before their
+  first use in `TickFeatures()`.
 - Keep long table UIs clipped and demand-load table caches only for table-backed
   tabs or active automation that consumes table metadata.
 - Run `git diff --check` for native or mixed changes. This repository has no
-  dedicated unit test framework.
+  dedicated unit test framework. If a specific task explicitly forbids local
+  build checks, use non-build source checks plus GitHub Actions logs and record
+  the skipped build in the handoff.
 
 ## Troubleshooting
 
@@ -769,6 +778,8 @@ Check the GitHub Actions log for:
 - Missing curl/libpsl/OpenSSL build tools or generated static libraries under
   `obj/`.
 - Compile errors in `jni/Main.cpp` or third-party native sources.
+- Missing native helper declarations or definitions after refactors, especially
+  scheduled tick helpers such as `RunShopAutomation`.
 - Incorrect include paths in `jni/Android.mk`.
 
 ## Known Limitations
