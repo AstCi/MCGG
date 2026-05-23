@@ -3175,8 +3175,8 @@ bool IsForbidHeroName(const std::string& name) {
         return true;
     }
     return std::any_of(
-        std::begin(kForbiddenHeroNames),
-        std::end(kForbiddenHeroNames),
+        kForbiddenHeroNames,
+        kForbiddenHeroNames + kForbiddenHeroNameCount,
         [&](const char* forbidden) { return name == forbidden; });
 }
 
