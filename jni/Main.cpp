@@ -264,6 +264,9 @@ namespace RuntimeState {
     std::atomic<bool> Il2CppReady{false};
     std::atomic<bool> BindingRetryRequested{false};
     std::atomic<bool> BindingResolveInProgress{false};
+    // Set from hook thread to request a RefreshManagedReferences on the render thread
+    // instead of running it inline inside the hook (which can stall the game loop).
+    std::atomic<bool> ManagedRefreshRequested{false};
 }
 
 namespace RuntimeBudget {
@@ -1976,17 +1979,20 @@ void PublishPinnedManagedReference(
 void ClearManagedObjectHandlesAfterMatch() {
     std::vector<uint32_t> handles;
 
-    FeatureState::BattleBridge = nullptr;
-    FeatureState::HeroShopPanel = nullptr;
-    FeatureState::HeroShopItemList = nullptr;
-    FeatureState::LoadResInstance = nullptr;
-    FeatureState::BattleBridgeHandle = 0;
-    FeatureState::HeroShopPanelHandle = 0;
-    FeatureState::HeroShopItemListHandle = 0;
-    FeatureState::LoadResInstanceHandle = 0;
-
     {
+        // Hold the mutex while clearing both the slot atomics and the handle tables so
+        // that PinManagedObjectForMatch on another thread cannot sneak a new pin in
+        // between zeroing the slots and freeing the GC handles — which would cause a
+        // dangling handle and a GC crash on the next match.
         std::lock_guard<std::mutex> lock(RuntimeMutex::ManagedHandleMutex);
+        FeatureState::BattleBridge = nullptr;
+        FeatureState::HeroShopPanel = nullptr;
+        FeatureState::HeroShopItemList = nullptr;
+        FeatureState::LoadResInstance = nullptr;
+        FeatureState::BattleBridgeHandle = 0;
+        FeatureState::HeroShopPanelHandle = 0;
+        FeatureState::HeroShopItemListHandle = 0;
+        FeatureState::LoadResInstanceHandle = 0;
         handles.swap(FeatureState::MatchManagedHandles);
         FeatureState::ManagedObjectHandles.clear();
     }
@@ -2040,8 +2046,12 @@ bool TryGetManagedListData(
         return false;
     }
 
+    // Capture capacity once to avoid a TOCTOU race: if the managed runtime resizes
+    // the backing array between the IsManagedArrayValid check above and the size
+    // comparison below, we would read a stale (too-large or zero) capacity and
+    // either accept an out-of-range list->size or reject a valid one.
     int capacity = list->items->getCapacity();
-    if (list->size > capacity || list->size > maxItems) {
+    if (capacity < 0 || list->size > capacity || list->size > maxItems) {
         return false;
     }
 
@@ -2081,6 +2091,8 @@ bool TryGetManagedArrayData(
         return false;
     }
 
+    // Capture capacity once after the bounds check to avoid a TOCTOU race where the
+    // managed runtime resizes the array between IsManagedArrayValid and this read.
     int capacity = array->getCapacity();
     if (capacity < 0 || capacity > maxItems) {
         return false;
@@ -3146,11 +3158,20 @@ void RetryFeatureBindingsIfNeeded() {
         return;
     }
 
-    if (RuntimeState::BindingRetryRequested ||
-        IntervalElapsed(FeatureState::LastBindingRetry, RuntimeConfig::BindingRetryMs)) {
-        RuntimeState::BindingRetryRequested = false;
-        ResolveFeatureBindings();
+    bool shouldRetry =
+        RuntimeState::BindingRetryRequested.load() ||
+        IntervalElapsed(FeatureState::LastBindingRetry, RuntimeConfig::BindingRetryMs);
+
+    if (!shouldRetry) {
+        return;
     }
+
+    // Clear the request flag before entering the single-flight guard so that any
+    // concurrent setter sees a clean slate once the current resolve finishes.
+    // ResolveFeatureBindings uses its own BindingResolveInProgress CAS to prevent
+    // two threads from executing the resolve body simultaneously.
+    RuntimeState::BindingRetryRequested = false;
+    ResolveFeatureBindings();
 }
 
 // Converts a managed IL2CPP string into a bounded native std::string.
@@ -3776,6 +3797,13 @@ std::vector<uint64_t> GetInvaderAccountOrder(
 void RefreshManagedReferences(bool force = false) {
     if (!IsIl2CppRuntimeReady()) {
         return;
+    }
+
+    // Consume the deferred refresh request from hook threads so the render thread
+    // picks it up on its next tick rather than the hook doing managed work inline.
+    if (RuntimeState::ManagedRefreshRequested.load()) {
+        RuntimeState::ManagedRefreshRequested = false;
+        force = true;
     }
 
     if (!force &&
@@ -6257,6 +6285,9 @@ void TickFeatures() {
         return;
     }
 
+    // If a hook thread deferred a managed-reference refresh (to avoid blocking the
+    // game loop inline), honour it here on the render thread where it is safe to do
+    // managed IL2CPP work.  RefreshManagedReferences() will consume the flag itself.
     RefreshManagedReferences();
     if (FeatureWorkBudgetExceeded(frameStart)) {
         return;
@@ -12794,7 +12825,10 @@ namespace Hooks {
         }
 
         FeatureState::ShopScavengerAutoRefreshPending = true;
-        RefreshManagedReferences(true);
+        // Do NOT call RefreshManagedReferences() here — this runs inside a game-engine
+        // hook on the game thread. Doing managed IL2CPP work inline stalls the game loop
+        // and causes gameplay freezes. Signal the render thread to refresh instead.
+        RuntimeState::ManagedRefreshRequested = true;
 
         uint64_t selfAccountId = GetSelfAccountId();
         if (selfAccountId == 0) {
@@ -13125,9 +13159,17 @@ namespace Hooks {
     EGLBoolean EglSwapBuffers(EGLDisplay dpy, EGLSurface surface) {
         static std::atomic<bool> imguiReady{false};
         static std::atomic<bool> renderThreadAttached{false};
+        // Prevent reentrant calls: if ImGui or OpenGL internally triggers another
+        // eglSwapBuffers while we are already inside this hook, the recursive entry
+        // would corrupt ImGui frame state and hang the render thread.
+        static thread_local bool insideHook = false;
 
         if (!Originals::EglSwapBuffers) {
             return EGL_FALSE;
+        }
+
+        if (insideHook) {
+            return Originals::EglSwapBuffers(dpy, surface);
         }
 
         if (dpy == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE) {
@@ -13160,6 +13202,7 @@ namespace Hooks {
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2((float)GLWidth, (float)GLHeight);
 
+        insideHook = true;
         ApplyAppearance();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui::NewFrame();
@@ -13173,6 +13216,7 @@ namespace Hooks {
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        insideHook = false;
 
         return Originals::EglSwapBuffers(dpy, surface);
     }
