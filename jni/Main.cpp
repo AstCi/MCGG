@@ -12699,7 +12699,7 @@ void DrawMainMenu() {
 
     ImGui::SetNextWindowSize(menuSize, compactDisplay ? ImGuiCond_Always : ImGuiCond_Once);
 
-    if (!ImGui::Begin("MCGG", nullptr)) {
+    if (!ImGui::Begin("MCGG 27/05/26/07:07", nullptr)) {
         ImGui::End();
         return;
     }
