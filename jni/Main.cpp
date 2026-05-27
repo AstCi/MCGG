@@ -5387,7 +5387,6 @@ bool RunScavengerShopCleanup(
             if (left.data.m_iPrice != right.data.m_iPrice) {
                 return left.data.m_iPrice < right.data.m_iPrice;
             }
-
             return left.slot < right.slot;
         }
     );
@@ -5410,13 +5409,13 @@ bool RunScavengerShopCleanup(
             if (!TryConsumeManagedWorkUnits()) {
                 return -1;
             }
-
             cachedCoin =
                 Originals::MCLogicBattleData_ILOGIC_GetPlayerCoin(nullptr, selfAccountId);
         }
-
         return cachedCoin;
     };
+
+    bool boughtAnything = false;  // <-- ADDED: Track if we bought anything
 
     for (const ScavengerShopCandidate& candidate : candidates) {
         if (candidate.data.m_iPrice >= maxPrice) {
@@ -5440,6 +5439,7 @@ bool RunScavengerShopCleanup(
         }
 
         if (SelectShopSlot(candidate.slot)) {
+            boughtAnything = true;  // <-- ADDED: Mark that we bought something
             MarkShopBuyAttempt(
                 selfAccountId,
                 candidate.slot,
@@ -5452,7 +5452,15 @@ bool RunScavengerShopCleanup(
             if (!candidate.isFreeBuy && cachedCoin >= 0) {
                 cachedCoin -= candidate.data.m_iPrice;
             }
+
+            break;  // <-- ADDED: Only buy ONE item per call
         }
+    }
+
+    // <-- CHANGED: Return false after buying to prevent immediate re-entry
+    // This gives the game time to process the purchase and update shop state
+    if (boughtAnything) {
+        return false;
     }
 
     return true;
@@ -12699,7 +12707,7 @@ void DrawMainMenu() {
 
     ImGui::SetNextWindowSize(menuSize, compactDisplay ? ImGuiCond_Always : ImGuiCond_Once);
 
-    if (!ImGui::Begin("MCGG 27/05/26/07:07", nullptr)) {
+    if (!ImGui::Begin("MCGG v2", nullptr)) {
         ImGui::End();
         return;
     }
